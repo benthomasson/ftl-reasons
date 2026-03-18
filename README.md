@@ -96,6 +96,29 @@ rms import-beliefs ~/git/physics-pi-meta/beliefs.md --nogoods ~/git/physics-pi-m
 # After import, cascading works on the imported dependency graph:
 rms retract beliefs-improve-accuracy
 # Retracted: beliefs-improve-accuracy, engineering-intuition-unreliable, beliefs-beat-expert-prompting, ...
+
+# Search for nodes
+rms search "tool-use"
+#   [+] tool-use-calibration-determines-benefit: Whether beliefs help a model...  (5 dependents)
+#   [+] tool-deference-failure-mode: Models with poor tool-use calibration...
+# 7 results
+
+# List premises (foundations of the argument)
+rms list --premises
+# List nodes that others depend on
+rms list --has-dependents
+# List only OUT nodes
+rms list --status OUT
+
+# Export as readable markdown
+rms export-markdown -o beliefs.md
+
+# Check for source file changes
+rms check-stale
+# 5 fresh, 14 STALE (of 19 checked)
+
+# Token-budgeted summary for context injection
+rms compact --budget 500
 ```
 
 ## Commands
@@ -114,8 +137,13 @@ rms retract beliefs-improve-accuracy
 | `rms nogood A B ...` | Record contradiction, retract least-entrenched |
 | `rms propagate` | Recompute all truth values |
 | `rms log` | Show propagation audit trail |
+| `rms search QUERY` | Search nodes by text or ID (case-insensitive) |
+| `rms list` | List nodes with filters (`--status IN\|OUT`, `--premises`, `--has-dependents`) |
 | `rms import-beliefs FILE` | Import a beliefs.md registry (auto-detects nogoods.md) |
 | `rms export` | Export network as JSON |
+| `rms export-markdown` | Export as beliefs.md-compatible markdown (`-o FILE` to write) |
+| `rms check-stale` | Check IN nodes for source file hash changes |
+| `rms compact` | Token-budgeted summary (`--budget N`, `--no-truncate`) |
 
 ## Tests
 
@@ -123,7 +151,7 @@ rms retract beliefs-improve-accuracy
 uv run --extra test pytest tests/ -v
 ```
 
-64 tests covering propagation, retraction cascades, restoration, multiple justifications, diamond dependencies, nogoods, explain traces, SQLite round-trips, and beliefs.md import.
+120 tests covering propagation, retraction cascades, restoration, multiple justifications, diamond dependencies, nogoods, explain traces, SQLite round-trips, beliefs.md import, export-markdown, check-stale, compact, search, and list.
 
 ## References
 

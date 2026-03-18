@@ -1,7 +1,7 @@
 ---
 name: rms
 description: Reason Maintenance System — track justified beliefs with automatic retraction cascades and restoration
-argument-hint: "[init|add|retract|assert|status|show|explain|nogood|propagate|import-beliefs|log|export] [args...]"
+argument-hint: "[init|add|retract|assert|status|show|explain|nogood|propagate|import-beliefs|search|list|export|export-markdown|check-stale|compact|log] [args...]"
 allowed-tools: Bash(rms *), Bash(cd * && uv run rms *), Bash(uvx *rms*), Read, Grep, Glob
 ---
 
@@ -105,8 +105,36 @@ Run `rms propagate`. Recomputes all truth values from justifications. Use after 
 ### `log`
 Run `rms log` or `rms log --last 20`. Shows the propagation audit trail — every add, retract, assert, and cascade event with timestamps.
 
+### `search`
+Run `rms search "query"`. Case-insensitive substring match on both node ID and text. Shows truth value and dependent count.
+
+Example: `rms search "tool-use"` finds all nodes mentioning tool-use calibration.
+
+### `list`
+Run `rms list` with optional filters:
+- `--status IN` or `--status OUT` — filter by truth value
+- `--premises` — only nodes with no justifications (the foundations)
+- `--has-dependents` — only nodes that other nodes depend on (load-bearing)
+
+Filters combine: `rms list --status IN --premises` shows IN premises only.
+
 ### `export`
 Run `rms export`. Outputs the entire network as JSON.
+
+### `export-markdown`
+Run `rms export-markdown`. Generates a `beliefs.md`-compatible markdown file from the DB. Use `-o beliefs.md` to write to file. The output is generated — operate through `rms`, not by editing the markdown.
+
+### `check-stale`
+Run `rms check-stale`. Compares stored source hashes against current file content (SHA-256). Flags any IN node whose source file has changed. Exits 1 if any stale nodes found.
+
+Source paths are resolved as `~/git/<repo-name>/<path>` from the `source` field.
+
+### `compact`
+Run `rms compact`. Token-budgeted summary for CLAUDE.md or context injection. Priority: nogoods (never dropped) → OUT nodes → IN nodes by dependent count (most-depended-on first).
+
+Options:
+- `--budget 500` (default) — token limit
+- `--no-truncate` — show full node text instead of 80-char truncation
 
 ## Common Workflows
 
@@ -144,6 +172,32 @@ rms assert observation-1
 ```bash
 rms nogood belief-a belief-b
 # One gets retracted, cascade propagates
+```
+
+### Generating readable output
+```bash
+rms export-markdown -o beliefs.md
+# beliefs.md is now a generated snapshot, not an input
+```
+
+### Checking for stale sources
+```bash
+rms check-stale
+# Flags nodes whose source files have changed since registration
+```
+
+### Context injection for agents
+```bash
+rms compact --budget 500
+# Token-budgeted summary suitable for CLAUDE.md or system prompts
+```
+
+### Finding specific beliefs
+```bash
+rms search "calibration"
+rms list --premises              # what are the foundations?
+rms list --has-dependents        # what's load-bearing?
+rms list --status OUT            # what was retracted?
 ```
 
 ## After Any Command
