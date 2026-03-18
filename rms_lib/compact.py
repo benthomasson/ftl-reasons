@@ -82,25 +82,53 @@ def compact(
         lines.append("")
 
     # Section 3: IN nodes (budget-limited)
+    # Use summaries to replace covered nodes when available
     if in_nodes:
+        # Find which nodes are covered by summaries
+        covered_by_summary: set[str] = set()
+        summary_nodes = []
+        regular_nodes = []
+        for node in in_nodes:
+            summarizes = node.metadata.get("summarizes")
+            if summarizes:
+                summary_nodes.append(node)
+                # Only cover nodes if the summary is IN
+                for covered_id in summarizes:
+                    covered_by_summary.add(covered_id)
+            else:
+                regular_nodes.append(node)
+
+        # Filter out covered nodes, keep summaries and uncovered nodes
+        visible_nodes = summary_nodes + [
+            n for n in regular_nodes if n.id not in covered_by_summary
+        ]
+        # Re-sort by dependent count
+        visible_nodes.sort(key=lambda n: len(n.dependents), reverse=True)
+
+        hidden_count = len(in_nodes) - len(visible_nodes)
+
         lines.append("## IN (active)")
         added = 0
         current_tokens = estimate_tokens("\n".join(lines))
 
-        for node in in_nodes:
+        for node in visible_nodes:
             # Build the line
+            is_summary = bool(node.metadata.get("summarizes"))
+            prefix = "[summary] " if is_summary else ""
             deps = ""
             for j in node.justifications:
-                if j.antecedents:
+                if j.antecedents and j.label != "summarizes":
                     deps = f" <- {', '.join(j.antecedents)}"
                     break
             dep_count = len(node.dependents)
             dep_info = f" ({dep_count} dependents)" if dep_count else ""
-            line = f"- {node.id}: {_text(node)}{deps}{dep_info}"
+            summarizes = node.metadata.get("summarizes", [])
+            sum_info = f" (covers {len(summarizes)} nodes)" if summarizes else ""
+            line = f"- {prefix}{node.id}: {_text(node)}{deps}{dep_info}{sum_info}"
 
             line_tokens = estimate_tokens(line)
             if current_tokens + line_tokens > budget:
-                remaining = len(in_nodes) - added
+                remaining = len(visible_nodes) - added
                 lines.append(f"  ... ({remaining} more IN nodes omitted)")
                 break
 
@@ -108,6 +136,8 @@ def compact(
             current_tokens += line_tokens
             added += 1
 
+        if hidden_count:
+            lines.append(f"  ({hidden_count} nodes hidden by summaries)")
         lines.append("")
 
     token_count = estimate_tokens("\n".join(lines))

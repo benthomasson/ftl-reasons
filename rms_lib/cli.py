@@ -135,6 +135,21 @@ def cmd_explain(args):
         print(line)
 
 
+def cmd_summarize(args):
+    over = [n.strip() for n in args.over.split(",")]
+    try:
+        result = api.summarize(
+            args.summary_id, args.text, over,
+            source=args.source or "",
+            db_path=args.db,
+        )
+    except (KeyError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Created summary {result['summary_id']} [{result['truth_value']}] over {len(result['over'])} nodes")
+
+
 def cmd_challenge(args):
     try:
         result = api.challenge(
@@ -395,6 +410,13 @@ def main():
     p = sub.add_parser("explain", help="Explain why a node is IN or OUT")
     p.add_argument("node_id", help="Node to explain")
 
+    # summarize
+    p = sub.add_parser("summarize", help="Create a summary node over a group of nodes")
+    p.add_argument("summary_id", help="Summary node ID")
+    p.add_argument("text", help="High-level summary text")
+    p.add_argument("--over", required=True, metavar="A,B,C", help="Comma-separated node IDs to summarize")
+    p.add_argument("--source", help="Provenance (repo:path)")
+
     # challenge
     p = sub.add_parser("challenge", help="Challenge a node — target goes OUT")
     p.add_argument("target_id", help="Node to challenge")
@@ -480,6 +502,7 @@ def main():
         "hash-sources": cmd_hash_sources,
         "check-stale": cmd_check_stale,
         "compact": cmd_compact,
+        "summarize": cmd_summarize,
         "challenge": cmd_challenge,
         "defend": cmd_defend,
         "trace": cmd_trace,

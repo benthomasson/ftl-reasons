@@ -190,6 +190,21 @@ def find_culprits(node_ids: list[str], db_path: str = DEFAULT_DB) -> dict:
         return {"culprits": culprits}
 
 
+def summarize(
+    summary_id: str,
+    text: str,
+    over: list[str],
+    source: str = "",
+    db_path: str = DEFAULT_DB,
+) -> dict:
+    """Create a summary node that abstracts over a group of nodes.
+
+    Returns: {"summary_id": str, "over": list[str], "truth_value": str}
+    """
+    with _with_network(db_path, write=True) as net:
+        return net.summarize(summary_id, text, over, source=source)
+
+
 def challenge(
     target_id: str,
     reason: str,

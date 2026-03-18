@@ -348,6 +348,55 @@ class Network:
             "changed": result["changed"],
         }
 
+    def summarize(
+        self,
+        summary_id: str,
+        text: str,
+        over: list[str],
+        source: str = "",
+    ) -> dict:
+        """Create a summary node that abstracts over a group of nodes.
+
+        The summary is IN when ALL summarized nodes are IN (SL justification).
+        In compact output, the summary replaces the individual nodes it covers,
+        saving token budget while preserving the high-level picture.
+
+        Returns: {"summary_id": str, "over": list[str], "truth_value": str}
+        """
+        for nid in over:
+            if nid not in self.nodes:
+                raise KeyError(f"Node '{nid}' not found")
+
+        if summary_id in self.nodes:
+            raise ValueError(f"Node '{summary_id}' already exists")
+
+        node = self.add_node(
+            id=summary_id,
+            text=text,
+            justifications=[
+                Justification(
+                    type="SL",
+                    antecedents=list(over),
+                    label="summarizes",
+                ),
+            ],
+            source=source,
+            metadata={"summarizes": list(over)},
+        )
+
+        # Mark the summarized nodes as covered
+        for nid in over:
+            covered = self.nodes[nid].metadata.get("summarized_by", [])
+            if summary_id not in covered:
+                covered.append(summary_id)
+            self.nodes[nid].metadata["summarized_by"] = covered
+
+        return {
+            "summary_id": summary_id,
+            "over": list(over),
+            "truth_value": node.truth_value,
+        }
+
     def explain(self, node_id: str) -> list[dict]:
         """Trace why a node is IN or OUT.
 
