@@ -236,6 +236,42 @@ def cmd_compact(args):
     print(summary)
 
 
+def cmd_search(args):
+    result = api.search(args.query, db_path=args.db)
+
+    if not result["results"]:
+        print(f"No nodes matching '{args.query}'.")
+        return
+
+    for node in result["results"]:
+        marker = "+" if node["truth_value"] == "IN" else "-"
+        deps = f"  ({node['dependent_count']} dependents)" if node["dependent_count"] else ""
+        print(f"  [{marker}] {node['id']}: {node['text'][:100]}{deps}")
+
+    print(f"\n{result['count']} result{'s' if result['count'] != 1 else ''}")
+
+
+def cmd_list(args):
+    result = api.list_nodes(
+        status=args.status,
+        premises_only=args.premises,
+        has_dependents=args.has_dependents,
+        db_path=args.db,
+    )
+
+    if not result["nodes"]:
+        print("No matching nodes.")
+        return
+
+    for node in result["nodes"]:
+        marker = "+" if node["truth_value"] == "IN" else "-"
+        jinfo = f"  ({node['justification_count']} justification{'s' if node['justification_count'] != 1 else ''})" if node["justification_count"] else "  (premise)"
+        deps = f"  [{node['dependent_count']} dependents]" if node["dependent_count"] else ""
+        print(f"  [{marker}] {node['id']}{jinfo}{deps}")
+
+    print(f"\n{result['count']} node{'s' if result['count'] != 1 else ''}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="rms",
@@ -307,6 +343,16 @@ def main():
     p.add_argument("--budget", type=int, default=500, help="Token budget (default: 500)")
     p.add_argument("--no-truncate", action="store_true", help="Show full node text")
 
+    # search
+    p = sub.add_parser("search", help="Search nodes by text or ID")
+    p.add_argument("query", help="Search term (case-insensitive substring match)")
+
+    # list
+    p = sub.add_parser("list", help="List nodes with filters")
+    p.add_argument("--status", choices=["IN", "OUT"], help="Filter by truth value")
+    p.add_argument("--premises", action="store_true", help="Only show premises (no justifications)")
+    p.add_argument("--has-dependents", action="store_true", help="Only show nodes that others depend on")
+
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
@@ -328,5 +374,7 @@ def main():
         "export-markdown": cmd_export_markdown,
         "check-stale": cmd_check_stale,
         "compact": cmd_compact,
+        "search": cmd_search,
+        "list": cmd_list,
     }
     commands[args.command](args)

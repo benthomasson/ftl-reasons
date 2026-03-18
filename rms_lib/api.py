@@ -302,3 +302,52 @@ def compact(budget: int = 500, truncate: bool = True, db_path: str = DEFAULT_DB)
 
     with _with_network(db_path) as net:
         return _compact(net, budget=budget, truncate=truncate)
+
+
+def search(query: str, db_path: str = DEFAULT_DB) -> dict:
+    """Search nodes by text or ID substring (case-insensitive).
+
+    Returns: {"results": list[dict], "count": int}
+    """
+    q = query.lower()
+    with _with_network(db_path) as net:
+        results = []
+        for nid, node in sorted(net.nodes.items()):
+            if q in nid.lower() or q in node.text.lower():
+                results.append({
+                    "id": nid,
+                    "text": node.text,
+                    "truth_value": node.truth_value,
+                    "justification_count": len(node.justifications),
+                    "dependent_count": len(node.dependents),
+                })
+        return {"results": results, "count": len(results)}
+
+
+def list_nodes(
+    status: str | None = None,
+    premises_only: bool = False,
+    has_dependents: bool = False,
+    db_path: str = DEFAULT_DB,
+) -> dict:
+    """List nodes with optional filters.
+
+    Returns: {"nodes": list[dict], "count": int}
+    """
+    with _with_network(db_path) as net:
+        nodes = []
+        for nid, node in sorted(net.nodes.items()):
+            if status and node.truth_value != status:
+                continue
+            if premises_only and node.justifications:
+                continue
+            if has_dependents and not node.dependents:
+                continue
+            nodes.append({
+                "id": nid,
+                "text": node.text,
+                "truth_value": node.truth_value,
+                "justification_count": len(node.justifications),
+                "dependent_count": len(node.dependents),
+            })
+        return {"nodes": nodes, "count": len(nodes)}
