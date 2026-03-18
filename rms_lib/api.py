@@ -252,3 +252,53 @@ def import_beliefs(
 
     with _with_network(db_path, write=True) as net:
         return import_into_network(net, beliefs_text, nogoods_text)
+
+
+def export_markdown(db_path: str = DEFAULT_DB) -> str:
+    """Export the network as beliefs.md-compatible markdown.
+
+    Returns: the markdown string
+    """
+    from .export_markdown import export_markdown as _export
+
+    with _with_network(db_path) as net:
+        return _export(net)
+
+
+def check_stale(
+    repos: dict[str, str] | None = None,
+    db_path: str = DEFAULT_DB,
+) -> dict:
+    """Check all IN nodes for source file staleness.
+
+    Returns: {"stale": list[dict], "checked": int, "stale_count": int}
+    """
+    from .check_stale import check_stale as _check
+
+    repo_paths = None
+    if repos:
+        from pathlib import Path as P
+        repo_paths = {k: P(v) for k, v in repos.items()}
+
+    with _with_network(db_path) as net:
+        in_with_source = sum(
+            1 for n in net.nodes.values()
+            if n.truth_value == "IN" and n.source and n.source_hash
+        )
+        results = _check(net, repo_paths)
+        return {
+            "stale": results,
+            "checked": in_with_source,
+            "stale_count": len(results),
+        }
+
+
+def compact(budget: int = 500, truncate: bool = True, db_path: str = DEFAULT_DB) -> str:
+    """Generate a token-budgeted belief state summary.
+
+    Returns: the compact summary string
+    """
+    from .compact import compact as _compact
+
+    with _with_network(db_path) as net:
+        return _compact(net, budget=budget, truncate=truncate)

@@ -200,6 +200,42 @@ def cmd_export(args):
     print(json.dumps(data, indent=2))
 
 
+def cmd_export_markdown(args):
+    md = api.export_markdown(db_path=args.db)
+    if args.output:
+        Path(args.output).write_text(md)
+        print(f"Written to {args.output}")
+    else:
+        print(md)
+
+
+def cmd_check_stale(args):
+    result = api.check_stale(db_path=args.db)
+
+    if not result["stale"]:
+        print(f"All {result['checked']} nodes with sources are fresh.")
+        return
+
+    for item in result["stale"]:
+        print(f"  STALE  {item['node_id']}")
+        print(f"         source: {item['source']}")
+        print(f"         hash: {item['old_hash']} -> {item['new_hash']}")
+        print()
+
+    fresh = result["checked"] - result["stale_count"]
+    print(f"{fresh} fresh, {result['stale_count']} STALE (of {result['checked']} checked)")
+    sys.exit(1)
+
+
+def cmd_compact(args):
+    summary = api.compact(
+        budget=args.budget,
+        truncate=not args.no_truncate,
+        db_path=args.db,
+    )
+    print(summary)
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="rms",
@@ -259,6 +295,18 @@ def main():
     # export
     sub.add_parser("export", help="Export network as JSON")
 
+    # export-markdown
+    p = sub.add_parser("export-markdown", help="Export network as beliefs.md-compatible markdown")
+    p.add_argument("-o", "--output", help="Write to file instead of stdout")
+
+    # check-stale
+    sub.add_parser("check-stale", help="Check IN nodes for source file staleness")
+
+    # compact
+    p = sub.add_parser("compact", help="Token-budgeted belief state summary")
+    p.add_argument("--budget", type=int, default=500, help="Token budget (default: 500)")
+    p.add_argument("--no-truncate", action="store_true", help="Show full node text")
+
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
@@ -277,5 +325,8 @@ def main():
         "log": cmd_log,
         "import-beliefs": cmd_import_beliefs,
         "export": cmd_export,
+        "export-markdown": cmd_export_markdown,
+        "check-stale": cmd_check_stale,
+        "compact": cmd_compact,
     }
     commands[args.command](args)

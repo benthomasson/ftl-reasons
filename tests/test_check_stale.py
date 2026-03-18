@@ -1,0 +1,121 @@
+"""Tests for check-stale."""
+
+import hashlib
+from pathlib import Path
+
+import pytest
+
+from rms_lib.network import Network
+from rms_lib.check_stale import check_stale, hash_file, resolve_source_path
+
+
+class TestHashFile:
+
+    def test_hashes_file(self, tmp_path):
+        f = tmp_path / "test.md"
+        f.write_text("hello world")
+        h = hash_file(f)
+        expected = hashlib.sha256(b"hello world").hexdigest()[:16]
+        assert h == expected
+
+    def test_hash_changes_with_content(self, tmp_path):
+        f = tmp_path / "test.md"
+        f.write_text("version 1")
+        h1 = hash_file(f)
+        f.write_text("version 2")
+        h2 = hash_file(f)
+        assert h1 != h2
+
+
+class TestResolveSourcePath:
+
+    def test_resolve_with_repos(self, tmp_path):
+        f = tmp_path / "entry.md"
+        f.write_text("content")
+        repos = {"myrepo": tmp_path}
+        result = resolve_source_path("myrepo/entry.md", repos)
+        assert result == f
+
+    def test_resolve_missing_file(self, tmp_path):
+        repos = {"myrepo": tmp_path}
+        result = resolve_source_path("myrepo/nonexistent.md", repos)
+        assert result is None
+
+    def test_resolve_empty_source(self):
+        result = resolve_source_path("")
+        assert result is None
+
+
+class TestCheckStale:
+
+    def test_fresh_node(self, tmp_path):
+        f = tmp_path / "source.md"
+        f.write_text("original content")
+        h = hashlib.sha256(b"original content").hexdigest()[:16]
+
+        net = Network()
+        net.add_node("a", "Premise A", source="myrepo/source.md", source_hash=h)
+
+        results = check_stale(net, repos={"myrepo": tmp_path})
+        assert results == []
+
+    def test_stale_node(self, tmp_path):
+        f = tmp_path / "source.md"
+        f.write_text("original content")
+        old_hash = hashlib.sha256(b"original content").hexdigest()[:16]
+
+        net = Network()
+        net.add_node("a", "Premise A", source="myrepo/source.md", source_hash=old_hash)
+
+        # Change the file
+        f.write_text("updated content")
+
+        results = check_stale(net, repos={"myrepo": tmp_path})
+        assert len(results) == 1
+        assert results[0]["node_id"] == "a"
+        assert results[0]["old_hash"] == old_hash
+        assert results[0]["new_hash"] != old_hash
+
+    def test_skips_out_nodes(self, tmp_path):
+        f = tmp_path / "source.md"
+        f.write_text("original")
+        old_hash = hashlib.sha256(b"original").hexdigest()[:16]
+
+        net = Network()
+        net.add_node("a", "Premise A", source="myrepo/source.md", source_hash=old_hash)
+        net.retract("a")
+
+        f.write_text("changed")
+
+        results = check_stale(net, repos={"myrepo": tmp_path})
+        assert results == []
+
+    def test_skips_nodes_without_hash(self, tmp_path):
+        net = Network()
+        net.add_node("a", "Premise A", source="myrepo/source.md")  # no hash
+
+        results = check_stale(net, repos={"myrepo": tmp_path})
+        assert results == []
+
+    def test_skips_missing_source_files(self, tmp_path):
+        net = Network()
+        net.add_node("a", "Premise A", source="myrepo/missing.md", source_hash="abc123")
+
+        results = check_stale(net, repos={"myrepo": tmp_path})
+        assert results == []
+
+    def test_multiple_stale(self, tmp_path):
+        f1 = tmp_path / "a.md"
+        f2 = tmp_path / "b.md"
+        f1.write_text("old a")
+        f2.write_text("old b")
+
+        net = Network()
+        net.add_node("a", "Node A", source="r/a.md", source_hash=hashlib.sha256(b"old a").hexdigest()[:16])
+        net.add_node("b", "Node B", source="r/b.md", source_hash=hashlib.sha256(b"old b").hexdigest()[:16])
+
+        f1.write_text("new a")
+        f2.write_text("new b")
+
+        results = check_stale(net, repos={"r": tmp_path})
+        assert len(results) == 2
