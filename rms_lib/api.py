@@ -152,7 +152,7 @@ def show_node(node_id: str, db_path: str = DEFAULT_DB) -> dict:
             "source": node.source,
             "source_hash": node.source_hash,
             "justifications": [
-                {"type": j.type, "antecedents": j.antecedents, "label": j.label}
+                {"type": j.type, "antecedents": j.antecedents, "outlist": j.outlist, "label": j.label}
                 for j in node.justifications
             ],
             "dependents": sorted(node.dependents),
@@ -288,7 +288,7 @@ def export_network(db_path: str = DEFAULT_DB) -> dict:
                     "text": n.text,
                     "truth_value": n.truth_value,
                     "justifications": [
-                        {"type": j.type, "antecedents": j.antecedents, "label": j.label}
+                        {"type": j.type, "antecedents": j.antecedents, "outlist": j.outlist, "label": j.label}
                         for j in n.justifications
                     ],
                     "source": n.source,
@@ -335,6 +335,131 @@ def import_beliefs(
 
     with _with_network(db_path, write=True) as net:
         return import_into_network(net, beliefs_text, nogoods_text)
+
+
+def import_json(json_file: str, db_path: str = DEFAULT_DB) -> dict:
+    """Import a network from a JSON file (produced by export).
+
+    Reconstructs the full network: nodes with justifications, truth values,
+    metadata, and nogoods. This is a lossless round-trip with export.
+
+    Returns: {"nodes_imported": int, "nogoods_imported": int}
+    """
+    import json as json_mod
+
+    json_path = Path(json_file)
+    if not json_path.exists():
+        raise FileNotFoundError(f"File not found: {json_file}")
+
+    data = json_mod.loads(json_path.read_text())
+
+    with _with_network(db_path, write=True) as net:
+        # Topological sort: add nodes whose antecedents are already in the network first
+        remaining = dict(data.get("nodes", {}))
+        added = set(net.nodes.keys())
+        nodes_imported = 0
+        skipped = 0
+
+        max_passes = len(remaining) + 1
+        for _ in range(max_passes):
+            if not remaining:
+                break
+            next_remaining = {}
+            for nid, ndata in remaining.items():
+                if nid in added:
+                    skipped += 1
+                    continue
+                # Check if all antecedents and outlist deps are available
+                all_deps = set()
+                for j in ndata.get("justifications", []):
+                    all_deps.update(j.get("antecedents", []))
+                    all_deps.update(j.get("outlist", []))
+                deps_in_data = {d for d in all_deps if d in data.get("nodes", {})}
+                if all(d in added for d in deps_in_data):
+                    # Ready to add
+                    justifications = None
+                    jlist = ndata.get("justifications", [])
+                    if jlist:
+                        justifications = [
+                            Justification(
+                                type=j["type"],
+                                antecedents=j.get("antecedents", []),
+                                outlist=j.get("outlist", []),
+                                label=j.get("label", ""),
+                            )
+                            for j in jlist
+                        ]
+                    node = net.add_node(
+                        id=nid,
+                        text=ndata.get("text", ""),
+                        justifications=justifications,
+                        source=ndata.get("source", ""),
+                        source_hash=ndata.get("source_hash", ""),
+                        date=ndata.get("date", ""),
+                        metadata=ndata.get("metadata", {}),
+                    )
+                    # Restore exact truth value (may differ from computed if retracted)
+                    target_tv = ndata.get("truth_value", "IN")
+                    if node.truth_value != target_tv:
+                        if target_tv == "OUT":
+                            net.retract(nid)
+                        else:
+                            net.assert_node(nid)
+                    added.add(nid)
+                    nodes_imported += 1
+                else:
+                    next_remaining[nid] = ndata
+            if len(next_remaining) == len(remaining):
+                # No progress — add remaining anyway
+                for nid, ndata in next_remaining.items():
+                    if nid in added:
+                        continue
+                    justifications = None
+                    jlist = ndata.get("justifications", [])
+                    if jlist:
+                        justifications = [
+                            Justification(
+                                type=j["type"],
+                                antecedents=j.get("antecedents", []),
+                                outlist=j.get("outlist", []),
+                                label=j.get("label", ""),
+                            )
+                            for j in jlist
+                        ]
+                    net.add_node(
+                        id=nid,
+                        text=ndata.get("text", ""),
+                        justifications=justifications,
+                        source=ndata.get("source", ""),
+                        source_hash=ndata.get("source_hash", ""),
+                        date=ndata.get("date", ""),
+                        metadata=ndata.get("metadata", {}),
+                    )
+                    target_tv = ndata.get("truth_value", "IN")
+                    if net.nodes[nid].truth_value != target_tv:
+                        if target_tv == "OUT":
+                            net.retract(nid)
+                        else:
+                            net.assert_node(nid)
+                    added.add(nid)
+                    nodes_imported += 1
+                break
+            remaining = next_remaining
+
+        # Import nogoods
+        from . import Nogood
+        nogoods_imported = 0
+        for ng_data in data.get("nogoods", []):
+            nogood = Nogood(
+                id=ng_data["id"],
+                nodes=ng_data.get("nodes", []),
+                discovered=ng_data.get("discovered", ""),
+                resolution=ng_data.get("resolution", ""),
+            )
+            net.nogoods.append(nogood)
+            nogoods_imported += 1
+
+        return {"nodes_imported": nodes_imported, "nogoods_imported": nogoods_imported}
 
 
 def export_markdown(db_path: str = DEFAULT_DB) -> str:

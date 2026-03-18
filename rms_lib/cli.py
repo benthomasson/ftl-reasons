@@ -268,6 +268,18 @@ def cmd_import_beliefs(args):
         print(f"Imported {result['nogoods_imported']} nogoods")
 
 
+def cmd_import_json(args):
+    try:
+        result = api.import_json(args.json_file, db_path=args.db)
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Imported {result['nodes_imported']} nodes")
+    if result['nogoods_imported']:
+        print(f"Imported {result['nogoods_imported']} nogoods")
+
+
 def cmd_export(args):
     data = api.export_network(db_path=args.db)
     print(json.dumps(data, indent=2))
@@ -450,6 +462,10 @@ def main():
     p.add_argument("beliefs_file", help="Path to beliefs.md")
     p.add_argument("--nogoods", dest="nogoods_file", help="Path to nogoods.md (auto-detected if next to beliefs.md)")
 
+    # import-json
+    p = sub.add_parser("import-json", help="Import network from JSON (produced by export)")
+    p.add_argument("json_file", help="Path to JSON file")
+
     # export
     sub.add_parser("export", help="Export network as JSON")
 
@@ -497,6 +513,7 @@ def main():
         "propagate": cmd_propagate,
         "log": cmd_log,
         "import-beliefs": cmd_import_beliefs,
+        "import-json": cmd_import_json,
         "export": cmd_export,
         "export-markdown": cmd_export_markdown,
         "hash-sources": cmd_hash_sources,
