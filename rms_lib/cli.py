@@ -135,6 +135,18 @@ def cmd_explain(args):
         print(line)
 
 
+def cmd_convert_to_premise(args):
+    try:
+        result = api.convert_to_premise(args.node_id, db_path=args.db)
+    except KeyError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Converted {result['node_id']} to premise (stripped {result['old_justifications']} justification(s))")
+    if result["changed"]:
+        print(f"Changed: {', '.join(result['changed'])}")
+
+
 def cmd_summarize(args):
     over = [n.strip() for n in args.over.split(",")]
     try:
@@ -422,6 +434,10 @@ def main():
     p = sub.add_parser("explain", help="Explain why a node is IN or OUT")
     p.add_argument("node_id", help="Node to explain")
 
+    # convert-to-premise
+    p = sub.add_parser("convert-to-premise", help="Strip justifications, make a node a premise")
+    p.add_argument("node_id", help="Node to convert")
+
     # summarize
     p = sub.add_parser("summarize", help="Create a summary node over a group of nodes")
     p.add_argument("summary_id", help="Summary node ID")
@@ -519,6 +535,7 @@ def main():
         "hash-sources": cmd_hash_sources,
         "check-stale": cmd_check_stale,
         "compact": cmd_compact,
+        "convert-to-premise": cmd_convert_to_premise,
         "summarize": cmd_summarize,
         "challenge": cmd_challenge,
         "defend": cmd_defend,

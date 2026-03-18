@@ -190,6 +190,15 @@ def find_culprits(node_ids: list[str], db_path: str = DEFAULT_DB) -> dict:
         return {"culprits": culprits}
 
 
+def convert_to_premise(node_id: str, db_path: str = DEFAULT_DB) -> dict:
+    """Strip justifications from a node, making it a premise (IN by default).
+
+    Returns: {"node_id": str, "old_justifications": int, "truth_value": str, "changed": list[str]}
+    """
+    with _with_network(db_path, write=True) as net:
+        return net.convert_to_premise(node_id)
+
+
 def summarize(
     summary_id: str,
     text: str,

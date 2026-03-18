@@ -395,6 +395,49 @@ class Network:
             "changed": result["changed"],
         }
 
+    def convert_to_premise(self, node_id: str) -> dict:
+        """Strip all justifications from a node, making it a premise.
+
+        Use after import when a 'Depends on:' relationship was contextual
+        (derived in the context of investigating X) rather than logical
+        (true only if X is true). The node becomes IN by default.
+
+        Returns: {"node_id": str, "old_justifications": int, "truth_value": str, "changed": list[str]}
+        """
+        if node_id not in self.nodes:
+            raise KeyError(f"Node '{node_id}' not found")
+
+        node = self.nodes[node_id]
+        old_count = len(node.justifications)
+
+        # Remove this node from the dependents set of its antecedents/outlist
+        for j in node.justifications:
+            for ant_id in j.antecedents:
+                if ant_id in self.nodes:
+                    self.nodes[ant_id].dependents.discard(node_id)
+            for out_id in j.outlist:
+                if out_id in self.nodes:
+                    self.nodes[out_id].dependents.discard(node_id)
+
+        node.justifications = []
+
+        # A premise is IN by default
+        changed = []
+        if node.truth_value != "IN":
+            node.truth_value = "IN"
+            changed.append(node_id)
+            self._log("convert-to-premise", node_id, "IN")
+            changed.extend(self._propagate(node_id))
+        else:
+            self._log("convert-to-premise", node_id, "IN (unchanged)")
+
+        return {
+            "node_id": node_id,
+            "old_justifications": old_count,
+            "truth_value": node.truth_value,
+            "changed": changed,
+        }
+
     def summarize(
         self,
         summary_id: str,
