@@ -44,6 +44,8 @@ def init_db(db_path: str = DEFAULT_DB, force: bool = False) -> dict:
     p = Path(db_path)
     if p.exists() and not force:
         raise FileExistsError(f"Database already exists: {db_path}")
+    if p.exists() and force:
+        p.unlink()
     store = Storage(db_path)
     store.close()
     return {"db_path": str(p), "created": True}
