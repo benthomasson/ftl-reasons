@@ -50,11 +50,15 @@ class Network:
             metadata=metadata or {},
         )
 
-        # Register as dependent of antecedents
+        # Register as dependent of antecedents (inlist) and outlist nodes.
+        # Both can affect this node's truth value when they change.
         for j in node.justifications:
             for ant_id in j.antecedents:
                 if ant_id in self.nodes:
                     self.nodes[ant_id].dependents.add(id)
+            for out_id in j.outlist:
+                if out_id in self.nodes:
+                    self.nodes[out_id].dependents.add(id)
 
         self.nodes[id] = node
 
@@ -163,13 +167,16 @@ class Network:
             # Find the valid justification
             for j in node.justifications:
                 if self._justification_valid(j):
-                    steps.append({
+                    step = {
                         "node": node_id,
                         "truth_value": "IN",
                         "reason": f"{j.type} justification valid",
                         "antecedents": list(j.antecedents),
                         "label": j.label,
-                    })
+                    }
+                    if j.outlist:
+                        step["outlist"] = list(j.outlist)
+                    steps.append(step)
                     # Recurse into antecedents
                     for ant_id in j.antecedents:
                         steps.extend(self.explain(ant_id))
@@ -181,13 +188,20 @@ class Network:
                     a for a in j.antecedents
                     if a in self.nodes and self.nodes[a].truth_value == "OUT"
                 ]
-                steps.append({
+                violated_outlist = [
+                    o for o in j.outlist
+                    if o in self.nodes and self.nodes[o].truth_value == "IN"
+                ]
+                step = {
                     "node": node_id,
                     "truth_value": "OUT",
                     "reason": f"{j.type} justification invalid",
                     "failed_antecedents": failed,
                     "label": j.label,
-                })
+                }
+                if violated_outlist:
+                    step["violated_outlist"] = violated_outlist
+                steps.append(step)
 
         return steps
 
@@ -236,20 +250,21 @@ class Network:
         return "OUT"
 
     def _justification_valid(self, j: Justification) -> bool:
-        """Check if a justification is currently valid."""
-        if j.type == "SL":
-            # Support List: all antecedents must be IN
-            return all(
+        """Check if a justification is currently valid.
+
+        SL: all antecedents (inlist) must be IN AND all outlist must be OUT.
+        This enables non-monotonic reasoning: "believe X unless Y."
+        """
+        if j.type in ("SL", "CP"):
+            inlist_ok = all(
                 a in self.nodes and self.nodes[a].truth_value == "IN"
                 for a in j.antecedents
             )
-        elif j.type == "CP":
-            # Conditional Proof: assumptions must be consistent
-            # For now, same as SL — CP with negation support comes later
-            return all(
-                a in self.nodes and self.nodes[a].truth_value == "IN"
-                for a in j.antecedents
+            outlist_ok = all(
+                o not in self.nodes or self.nodes[o].truth_value == "OUT"
+                for o in j.outlist
             )
+            return inlist_ok and outlist_ok
         return False
 
     def _log(self, action: str, target: str, value: str) -> None:

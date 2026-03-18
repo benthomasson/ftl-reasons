@@ -56,6 +56,7 @@ def add_node(
     text: str,
     sl: str = "",
     cp: str = "",
+    unless: str = "",
     label: str = "",
     source: str = "",
     db_path: str = DEFAULT_DB,
@@ -67,19 +68,24 @@ def add_node(
         text: Node text
         sl: Comma-separated antecedent IDs for SL justification
         cp: Comma-separated antecedent IDs for CP justification
+        unless: Comma-separated outlist IDs (must be OUT for justification to hold)
         label: Justification label
         source: Provenance (repo:path)
         db_path: Path to RMS database
 
     Returns: {"node_id": str, "truth_value": str, "type": str}
     """
+    outlist = [o.strip() for o in unless.split(",") if o.strip()] if unless else []
     justifications = []
     if sl:
         antecedents = [a.strip() for a in sl.split(",")]
-        justifications.append(Justification(type="SL", antecedents=antecedents, label=label))
+        justifications.append(Justification(type="SL", antecedents=antecedents, outlist=outlist, label=label))
     elif cp:
         antecedents = [a.strip() for a in cp.split(",")]
-        justifications.append(Justification(type="CP", antecedents=antecedents, label=label))
+        justifications.append(Justification(type="CP", antecedents=antecedents, outlist=outlist, label=label))
+    elif outlist:
+        # Outlist-only justification (no inlist) — premise that holds unless something is believed
+        justifications.append(Justification(type="SL", antecedents=[], outlist=outlist, label=label))
 
     with _with_network(db_path, write=True) as net:
         node = net.add_node(

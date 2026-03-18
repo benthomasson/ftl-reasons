@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS justifications (
     node_id TEXT NOT NULL REFERENCES nodes(id),
     type TEXT NOT NULL,
     antecedents_json TEXT NOT NULL DEFAULT '[]',
+    outlist_json TEXT NOT NULL DEFAULT '[]',
     label TEXT DEFAULT ''
 );
 
@@ -87,9 +88,9 @@ class Storage:
                 )
                 for j in node.justifications:
                     self.conn.execute(
-                        "INSERT INTO justifications (node_id, type, antecedents_json, label) "
-                        "VALUES (?, ?, ?, ?)",
-                        (node.id, j.type, json.dumps(j.antecedents), j.label),
+                        "INSERT INTO justifications (node_id, type, antecedents_json, outlist_json, label) "
+                        "VALUES (?, ?, ?, ?, ?)",
+                        (node.id, j.type, json.dumps(j.antecedents), json.dumps(j.outlist), j.label),
                     )
 
             for nogood in network.nogoods:
@@ -118,11 +119,16 @@ class Storage:
 
         # Load justifications keyed by node_id
         just_cursor = self.conn.execute(
-            "SELECT node_id, type, antecedents_json, label FROM justifications ORDER BY rowid"
+            "SELECT node_id, type, antecedents_json, outlist_json, label FROM justifications ORDER BY rowid"
         )
         justifications_by_node: dict[str, list[Justification]] = {}
-        for node_id, jtype, ant_json, label in just_cursor:
-            j = Justification(type=jtype, antecedents=json.loads(ant_json), label=label)
+        for node_id, jtype, ant_json, out_json, label in just_cursor:
+            j = Justification(
+                type=jtype,
+                antecedents=json.loads(ant_json),
+                outlist=json.loads(out_json),
+                label=label,
+            )
             justifications_by_node.setdefault(node_id, []).append(j)
 
         # Build nodes directly (bypass add_node to preserve exact state)
@@ -140,12 +146,15 @@ class Storage:
             )
             network.nodes[nid] = node
 
-        # Rebuild dependent index
+        # Rebuild dependent index (both inlist and outlist)
         for node in network.nodes.values():
             for j in node.justifications:
                 for ant_id in j.antecedents:
                     if ant_id in network.nodes:
                         network.nodes[ant_id].dependents.add(node.id)
+                for out_id in j.outlist:
+                    if out_id in network.nodes:
+                        network.nodes[out_id].dependents.add(node.id)
 
         # Load nogoods
         ng_cursor = self.conn.execute(

@@ -28,6 +28,7 @@ def cmd_add(args):
             text=args.text,
             sl=args.sl or "",
             cp=args.cp or "",
+            unless=args.unless or "",
             label=args.label or "",
             source=args.source or "",
             db_path=args.db,
@@ -123,8 +124,12 @@ def cmd_explain(args):
         line = f"  [{marker}] {nid}: {reason}"
         if "antecedents" in step:
             line += f" — antecedents: {', '.join(step['antecedents'])}"
+        if "outlist" in step:
+            line += f" — unless: {', '.join(step['outlist'])}"
         if "failed_antecedents" in step:
             line += f" — failed: {', '.join(step['failed_antecedents'])}"
+        if "violated_outlist" in step:
+            line += f" — violated unless: {', '.join(step['violated_outlist'])}"
         if step.get("label"):
             line += f" [{step['label']}]"
         print(line)
@@ -290,6 +295,7 @@ def main():
     p.add_argument("text", help="Node text")
     p.add_argument("--sl", metavar="A,B", help="SL justification: comma-separated antecedent IDs")
     p.add_argument("--cp", metavar="A,B", help="CP justification: comma-separated antecedent IDs")
+    p.add_argument("--unless", metavar="X,Y", help="Outlist: comma-separated node IDs that must be OUT")
     p.add_argument("--label", help="Justification label")
     p.add_argument("--source", help="Provenance (repo:path)")
 

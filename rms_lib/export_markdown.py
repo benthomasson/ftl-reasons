@@ -42,12 +42,18 @@ def export_markdown(network: Network) -> str:
 
         # Collect all antecedents across justifications as depends_on
         all_deps = []
+        all_unless = []
         for j in node.justifications:
             for a in j.antecedents:
                 if a not in all_deps:
                     all_deps.append(a)
+            for o in j.outlist:
+                if o not in all_unless:
+                    all_unless.append(o)
         if all_deps:
             lines.append(f"- Depends on: {', '.join(all_deps)}")
+        if all_unless:
+            lines.append(f"- Unless: {', '.join(all_unless)}")
 
         if status == "STALE" and node.metadata.get("stale_reason"):
             lines.append(f"- Stale reason: {node.metadata['stale_reason']}")

@@ -8,11 +8,17 @@ class Justification:
     """A reason for believing a node.
 
     Two types:
-    - SL (Support List): node is IN iff ALL antecedents are IN
+    - SL (Support List): node is IN iff ALL antecedents (inlist) are IN
+      AND ALL outlist nodes are OUT
     - CP (Conditional Proof): node is IN iff assumptions are consistent
+
+    The outlist enables non-monotonic reasoning: "believe X unless Y is
+    believed." If Y comes IN, the justification becomes invalid and X
+    may go OUT (if no other justification supports it).
     """
     type: str  # "SL" or "CP"
-    antecedents: list[str] = field(default_factory=list)  # node IDs
+    antecedents: list[str] = field(default_factory=list)  # inlist: must be IN
+    outlist: list[str] = field(default_factory=list)  # must be OUT
     label: str = ""
 
 
