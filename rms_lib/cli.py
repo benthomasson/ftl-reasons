@@ -357,18 +357,9 @@ def cmd_compact(args):
 
 
 def cmd_search(args):
-    result = api.search(args.query, db_path=args.db)
-
-    if not result["results"]:
-        print(f"No nodes matching '{args.query}'.")
-        return
-
-    for node in result["results"]:
-        marker = "+" if node["truth_value"] == "IN" else "-"
-        deps = f"  ({node['dependent_count']} dependents)" if node["dependent_count"] else ""
-        print(f"  [{marker}] {node['id']}: {node['text'][:100]}{deps}")
-
-    print(f"\n{result['count']} result{'s' if result['count'] != 1 else ''}")
+    fmt = getattr(args, "format", "markdown")
+    result = api.search(args.query, db_path=args.db, format=fmt)
+    print(result)
 
 
 def cmd_list(args):
@@ -502,8 +493,10 @@ def main():
     p.add_argument("--no-truncate", action="store_true", help="Show full node text")
 
     # search
-    p = sub.add_parser("search", help="Search nodes by text or ID")
-    p.add_argument("query", help="Search term (case-insensitive substring match)")
+    p = sub.add_parser("search", help="Search nodes using full-text search with neighbor expansion")
+    p.add_argument("query", help="Search terms (FTS5 all-terms matching)")
+    p.add_argument("--format", choices=["markdown", "json", "minimal"], default="markdown",
+                   help="Output format (default: markdown)")
 
     # list
     p = sub.add_parser("list", help="List nodes with filters")

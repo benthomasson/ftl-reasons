@@ -542,24 +542,159 @@ def compact(budget: int = 500, truncate: bool = True, db_path: str = DEFAULT_DB)
         return _compact(net, budget=budget, truncate=truncate)
 
 
-def search(query: str, db_path: str = DEFAULT_DB) -> dict:
-    """Search nodes by text or ID substring (case-insensitive).
+def search(query: str, db_path: str = DEFAULT_DB, format: str = "markdown") -> str:
+    """Search nodes using full-text search with neighbor expansion.
 
-    Returns: {"results": list[dict], "count": int}
+    Uses SQLite FTS5 for ranked all-terms matching. Returns matched nodes
+    plus their immediate neighbors (dependencies and dependents) formatted
+    as readable markdown.
+
+    Falls back to substring matching if FTS5 table is not available.
+
+    Args:
+        query: search terms (FTS5 matches all terms in any order)
+        db_path: path to RMS database
+        format: output format — "markdown" (default), "json", or "minimal"
+
+    Returns: formatted string with matched nodes and neighbors
     """
-    q = query.lower()
     with _with_network(db_path) as net:
-        results = []
-        for nid, node in sorted(net.nodes.items()):
-            if q in nid.lower() or q in node.text.lower():
-                results.append({
-                    "id": nid,
-                    "text": node.text,
-                    "truth_value": node.truth_value,
-                    "justification_count": len(node.justifications),
-                    "dependent_count": len(node.dependents),
-                })
-        return {"results": results, "count": len(results)}
+        matched_ids = _fts_search(query, db_path)
+
+        # Fallback to substring if FTS returned nothing or isn't available
+        if not matched_ids:
+            matched_ids = _substring_search(query, net)
+
+        if not matched_ids:
+            return "No results found."
+
+        # Expand to include neighbors (1-hop in dependency graph)
+        neighbor_ids = set()
+        for nid in matched_ids:
+            if nid in net.nodes:
+                node = net.nodes[nid]
+                # Dependencies (antecedents from justifications)
+                for j in node.justifications:
+                    for ant_id in j.antecedents:
+                        if ant_id in net.nodes:
+                            neighbor_ids.add(ant_id)
+                # Dependents (nodes that depend on this one)
+                for dep_id in node.dependents:
+                    if dep_id in net.nodes:
+                        neighbor_ids.add(dep_id)
+
+        # Remove already-matched nodes from neighbors
+        neighbor_ids -= set(matched_ids)
+
+        if format == "json":
+            return _format_json(net, matched_ids, neighbor_ids)
+        elif format == "minimal":
+            return _format_minimal(net, matched_ids, neighbor_ids)
+        else:
+            return _format_markdown(net, matched_ids, neighbor_ids)
+
+
+def _fts_search(query: str, db_path: str) -> list[str]:
+    """Search using FTS5 full-text index."""
+    import sqlite3
+    try:
+        conn = sqlite3.connect(db_path)
+        # FTS5 match: all terms must appear (implicit AND)
+        # Quote each term to avoid FTS syntax issues
+        terms = query.strip().split()
+        fts_query = " ".join(f'"{t}"' for t in terms if t)
+        if not fts_query:
+            conn.close()
+            return []
+        cursor = conn.execute(
+            "SELECT id FROM nodes_fts WHERE nodes_fts MATCH ? ORDER BY rank LIMIT 20",
+            (fts_query,),
+        )
+        results = [row[0] for row in cursor.fetchall()]
+        conn.close()
+        return results
+    except (sqlite3.OperationalError, sqlite3.DatabaseError):
+        # FTS table doesn't exist or query failed
+        return []
+
+
+def _substring_search(query: str, net) -> list[str]:
+    """Fallback: substring matching on node id and text."""
+    q = query.lower()
+    results = []
+    for nid, node in sorted(net.nodes.items()):
+        if q in nid.lower() or q in node.text.lower():
+            results.append(nid)
+    return results
+
+
+def _format_markdown(net, matched_ids: list[str], neighbor_ids: set[str]) -> str:
+    """Format results as readable markdown with neighbors."""
+    parts = []
+    for nid in matched_ids:
+        node = net.nodes[nid]
+        parts.append(f"### {nid}")
+        parts.append(f"**Status:** {node.truth_value}")
+        parts.append(f"{node.text}")
+        if node.source:
+            parts.append(f"**Source:** {node.source}")
+        if node.justifications:
+            deps = []
+            for j in node.justifications:
+                deps.extend(j.antecedents)
+            if deps:
+                parts.append(f"**Depends on:** {', '.join(deps)}")
+        if node.dependents:
+            parts.append(f"**Depended on by:** {', '.join(sorted(node.dependents))}")
+        parts.append("")
+
+    if neighbor_ids:
+        parts.append("---")
+        parts.append("**Related nodes:**\n")
+        for nid in sorted(neighbor_ids):
+            node = net.nodes[nid]
+            parts.append(f"- **{nid}** ({node.truth_value}): {node.text}")
+        parts.append("")
+
+    return "\n".join(parts)
+
+
+def _format_json(net, matched_ids: list[str], neighbor_ids: set[str]) -> str:
+    """Format results as JSON."""
+    import json
+    results = []
+    for nid in matched_ids:
+        node = net.nodes[nid]
+        results.append({
+            "id": nid,
+            "text": node.text,
+            "truth_value": node.truth_value,
+            "source": node.source,
+            "match": True,
+        })
+    for nid in sorted(neighbor_ids):
+        node = net.nodes[nid]
+        results.append({
+            "id": nid,
+            "text": node.text,
+            "truth_value": node.truth_value,
+            "source": node.source,
+            "match": False,
+            "relation": "neighbor",
+        })
+    return json.dumps(results, indent=2)
+
+
+def _format_minimal(net, matched_ids: list[str], neighbor_ids: set[str]) -> str:
+    """Format results as plain text, claims only."""
+    parts = []
+    for nid in matched_ids:
+        parts.append(net.nodes[nid].text)
+    if neighbor_ids:
+        parts.append("")
+        for nid in sorted(neighbor_ids):
+            parts.append(net.nodes[nid].text)
+    return "\n".join(parts)
 
 
 def list_nodes(

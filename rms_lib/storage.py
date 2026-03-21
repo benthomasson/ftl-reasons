@@ -46,6 +46,8 @@ CREATE TABLE IF NOT EXISTS propagation_log (
     target TEXT NOT NULL,
     value TEXT NOT NULL
 );
+
+CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(id, text);
 """
 
 
@@ -68,6 +70,7 @@ class Storage:
         with self.conn:
             # Clear and rewrite (simple strategy for small networks)
             self.conn.execute("DELETE FROM justifications")
+            self.conn.execute("DELETE FROM nodes_fts")
             self.conn.execute("DELETE FROM nodes")
             self.conn.execute("DELETE FROM nogoods")
             self.conn.execute("DELETE FROM propagation_log")
@@ -85,6 +88,10 @@ class Storage:
                         node.date,
                         json.dumps(node.metadata),
                     ),
+                )
+                self.conn.execute(
+                    "INSERT INTO nodes_fts (id, text) VALUES (?, ?)",
+                    (node.id, node.text),
                 )
                 for j in node.justifications:
                     self.conn.execute(
