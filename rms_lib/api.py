@@ -543,24 +543,34 @@ def compact(budget: int = 500, truncate: bool = True, db_path: str = DEFAULT_DB)
 
 
 def lookup(query: str, db_path: str = DEFAULT_DB) -> str:
-    """Simple all-terms search over node text. Returns matching beliefs as
-    plain text blocks — similar to lookup_beliefs on a flat beliefs.md file.
-
-    No neighbor expansion, no dependency metadata. Just matching claim text
-    with status. Designed for models that work better with simple flat results.
+    """Simple all-terms search over the full belief block — ID, text, source,
+    dependencies, and metadata. Matches the same search corpus and output
+    format as lookup_beliefs on a flat beliefs.md file.
 
     Args:
         query: search terms (all must appear, case-insensitive)
         db_path: path to RMS database
 
-    Returns: formatted string with matching beliefs
+    Returns: formatted string with matching beliefs (full blocks)
     """
     with _with_network(db_path) as net:
         query_terms = query.lower().split()
         matches = []
         for nid, node in sorted(net.nodes.items()):
-            text_lower = (nid + " " + node.text).lower()
-            if all(term in text_lower for term in query_terms):
+            # Build the full searchable block — same fields as beliefs.md
+            block_parts = [nid, node.text]
+            if node.source:
+                block_parts.append(node.source)
+            if node.source_hash:
+                block_parts.append(node.source_hash)
+            if node.date:
+                block_parts.append(node.date)
+            for j in node.justifications:
+                block_parts.extend(j.antecedents)
+            for dep_id in node.dependents:
+                block_parts.append(dep_id)
+            block_lower = " ".join(block_parts).lower()
+            if all(term in block_lower for term in query_terms):
                 matches.append(node)
 
         if not matches:
@@ -572,6 +582,15 @@ def lookup(query: str, db_path: str = DEFAULT_DB) -> str:
             parts.append(node.text)
             if node.source:
                 parts.append(f"- Source: {node.source}")
+            if node.source_hash:
+                parts.append(f"- Source hash: {node.source_hash}")
+            if node.date:
+                parts.append(f"- Date: {node.date}")
+            deps = []
+            for j in node.justifications:
+                deps.extend(j.antecedents)
+            if deps:
+                parts.append(f"- Depends on: {', '.join(deps)}")
             parts.append("")
 
         return "\n".join(parts)
