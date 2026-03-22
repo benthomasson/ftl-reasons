@@ -542,6 +542,41 @@ def compact(budget: int = 500, truncate: bool = True, db_path: str = DEFAULT_DB)
         return _compact(net, budget=budget, truncate=truncate)
 
 
+def lookup(query: str, db_path: str = DEFAULT_DB) -> str:
+    """Simple all-terms search over node text. Returns matching beliefs as
+    plain text blocks — similar to lookup_beliefs on a flat beliefs.md file.
+
+    No neighbor expansion, no dependency metadata. Just matching claim text
+    with status. Designed for models that work better with simple flat results.
+
+    Args:
+        query: search terms (all must appear, case-insensitive)
+        db_path: path to RMS database
+
+    Returns: formatted string with matching beliefs
+    """
+    with _with_network(db_path) as net:
+        query_terms = query.lower().split()
+        matches = []
+        for nid, node in sorted(net.nodes.items()):
+            text_lower = (nid + " " + node.text).lower()
+            if all(term in text_lower for term in query_terms):
+                matches.append(node)
+
+        if not matches:
+            return f"No beliefs found matching '{query}'"
+
+        parts = [f"Found {len(matches)} matching belief(s):", ""]
+        for node in matches[:20]:
+            parts.append(f"### {node.id} [{node.truth_value}]")
+            parts.append(node.text)
+            if node.source:
+                parts.append(f"- Source: {node.source}")
+            parts.append("")
+
+        return "\n".join(parts)
+
+
 def search(query: str, db_path: str = DEFAULT_DB, format: str = "markdown") -> str:
     """Search nodes using full-text search with neighbor expansion.
 

@@ -362,6 +362,11 @@ def cmd_search(args):
     print(result)
 
 
+def cmd_lookup(args):
+    result = api.lookup(args.query, db_path=args.db)
+    print(result)
+
+
 def cmd_list(args):
     result = api.list_nodes(
         status=args.status,
@@ -498,6 +503,10 @@ def main():
     p.add_argument("--format", choices=["markdown", "json", "minimal"], default="markdown",
                    help="Output format (default: markdown)")
 
+    # lookup
+    p = sub.add_parser("lookup", help="Simple keyword search over beliefs (no neighbor expansion)")
+    p.add_argument("query", help="Search terms (all must match, case-insensitive)")
+
     # list
     p = sub.add_parser("list", help="List nodes with filters")
     p.add_argument("--status", choices=["IN", "OUT"], help="Filter by truth value")
@@ -534,6 +543,7 @@ def main():
         "defend": cmd_defend,
         "trace": cmd_trace,
         "search": cmd_search,
+        "lookup": cmd_lookup,
         "list": cmd_list,
     }
     commands[args.command](args)
