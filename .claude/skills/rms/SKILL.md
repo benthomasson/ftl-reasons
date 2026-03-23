@@ -2,7 +2,7 @@
 name: rms
 description: Reason Maintenance System — track justified beliefs with automatic retraction cascades and restoration
 argument-hint: "[init|add|retract|assert|challenge|defend|convert-to-premise|summarize|nogood|trace|status|show|explain|search|list|hash-sources|check-stale|compact|propagate|import-beliefs|import-json|export|export-markdown|log] [args...]"
-allowed-tools: Bash(rms *), Bash(cd * && uv run rms *), Bash(uvx *rms*), Read, Grep, Glob
+allowed-tools: Bash(reasons *), Bash(cd * && uv run reasons *), Bash(uvx *rms*), Read, Grep, Glob
 ---
 
 You are managing a dependency network using the `rms` CLI tool. Unlike `beliefs` (which tracks independent facts for expert registries), `rms` tracks **justified conclusions** where beliefs depend on other beliefs and changes propagate automatically.
@@ -22,8 +22,8 @@ You are managing a dependency network using the `rms` CLI tool. Unlike `beliefs`
 ## How to Run
 
 Try these in order until one works:
-1. `rms $ARGUMENTS` (if installed via `uv tool install -e ~/git/rms`)
-2. `cd ~/git/rms && uv run rms $ARGUMENTS` (from repo directory)
+1. `reasons $ARGUMENTS` (if installed via `uv tool install -e ~/git/rms`)
+2. `cd ~/git/rms && uv run reasons $ARGUMENTS` (from repo directory)
 3. `uvx --from git+https://github.com/benthomasson/rms rms $ARGUMENTS` (fallback)
 
 ## Key Concepts
@@ -41,7 +41,7 @@ Try these in order until one works:
 ## Subcommand Behavior
 
 ### `init`
-Run `rms init` to create `rms.db` in the current directory. Use `--force` to reinitialize.
+Run `reasons init` to create `rms.db` in the current directory. Use `--force` to reinitialize.
 
 ### `add`
 Add a node to the network. Three forms:
@@ -68,48 +68,48 @@ If the user describes a belief in natural language, convert it:
 - Identify source → `--source repo:path`
 
 Example: "The threshold is tool-use calibration, based on beliefs-improve-accuracy"
-becomes: `rms add threshold-is-calibration "The threshold is tool-use calibration, not intelligence" --sl beliefs-improve-accuracy`
+becomes: `reasons add threshold-is-calibration "The threshold is tool-use calibration, not intelligence" --sl beliefs-improve-accuracy`
 
 ### `retract`
-Run `rms retract node-id`. The node goes OUT and the cascade propagates to all dependents. Report what was retracted.
+Run `reasons retract node-id`. The node goes OUT and the cascade propagates to all dependents. Report what was retracted.
 
 **This is the most important operation.** When evidence invalidates a belief, retract it and let the network figure out what else falls. Do not manually retract dependents — the cascade handles it.
 
 ### `assert`
-Run `rms assert node-id`. The node comes back IN and dependents are restored. Use when a retracted belief is re-validated.
+Run `reasons assert node-id`. The node comes back IN and dependents are restored. Use when a retracted belief is re-validated.
 
 ### `status`
-Run `rms status`. Shows all nodes with `[+]` (IN) or `[-]` (OUT) markers, justification counts, and an IN/total summary.
+Run `reasons status`. Shows all nodes with `[+]` (IN) or `[-]` (OUT) markers, justification counts, and an IN/total summary.
 
 ### `show`
-Run `rms show node-id`. Shows full details: text, status, source, justifications with antecedents, and dependents.
+Run `reasons show node-id`. Shows full details: text, status, source, justifications with antecedents, and dependents.
 
 ### `explain`
-Run `rms explain node-id`. Traces why a node is IN or OUT through the justification chain back to premises. This is the debugging command — use it when you need to understand why something is believed or not believed.
+Run `reasons explain node-id`. Traces why a node is IN or OUT through the justification chain back to premises. This is the debugging command — use it when you need to understand why something is believed or not believed.
 
 ### `challenge`
-Run `rms challenge TARGET "reason"`. Creates a challenge node (IN by default) and adds it to the target's outlist. Target goes OUT immediately, cascading to dependents. Use `--id` for a custom challenge node ID.
+Run `reasons challenge TARGET "reason"`. Creates a challenge node (IN by default) and adds it to the target's outlist. Target goes OUT immediately, cascading to dependents. Use `--id` for a custom challenge node ID.
 
 Use when a reviewer or new evidence disputes a belief but you want to preserve the original argument (unlike `retract` which just marks it OUT).
 
 ### `defend`
-Run `rms defend TARGET CHALLENGE-ID "reason"`. Creates a defense node that neutralises the challenge. The challenge goes OUT, the target is restored. Multi-level chains work: challenge the defense, defend the defense, etc.
+Run `reasons defend TARGET CHALLENGE-ID "reason"`. Creates a defense node that neutralises the challenge. The challenge goes OUT, the target is restored. Multi-level chains work: challenge the defense, defend the defense, etc.
 
 ### `nogood`
-Run `rms nogood node-a node-b [node-c ...]`. Records a contradiction. Uses dependency-directed backtracking to trace backward through justification chains and retract the responsible *premise* with fewest dependents (minimal disruption), not an arbitrary node.
+Run `reasons nogood node-a node-b [node-c ...]`. Records a contradiction. Uses dependency-directed backtracking to trace backward through justification chains and retract the responsible *premise* with fewest dependents (minimal disruption), not an arbitrary node.
 
 ### `trace`
-Run `rms trace node-id`. Traces backward through justification chains to find all premises (nodes with no justifications) that a conclusion rests on. Answers "what assumptions is this built on?"
+Run `reasons trace node-id`. Traces backward through justification chains to find all premises (nodes with no justifications) that a conclusion rests on. Answers "what assumptions is this built on?"
 
 ### `convert-to-premise`
-Run `rms convert-to-premise node-id`. Strips all justifications from a node, making it a premise (IN by default). Cascades restoration to dependents.
+Run `reasons convert-to-premise node-id`. Strips all justifications from a node, making it a premise (IN by default). Cascades restoration to dependents.
 
 **Use after `import-beliefs`** when a `Depends on:` relationship in beliefs.md was contextual ("derived while investigating X") rather than logical ("true only if X is true"). The import treats all dependencies as SL justifications, which means nodes can be incorrectly OUT if their context-dependency was retracted. Converting to premise fixes this.
 
-**Important:** `rms assert` alone is NOT sufficient for this — it marks the node IN but doesn't remove the SL justification. The node will revert to OUT on the next recomputation. `convert-to-premise` removes the justification entirely.
+**Important:** `reasons assert` alone is NOT sufficient for this — it marks the node IN but doesn't remove the SL justification. The node will revert to OUT on the next recomputation. `convert-to-premise` removes the justification entirely.
 
 ### `hash-sources`
-Run `rms hash-sources`. Backfills SHA-256 source hashes for nodes that have a source path but no stored hash. Use `--force` to re-hash all nodes (after confirming source changes are expected).
+Run `reasons hash-sources`. Backfills SHA-256 source hashes for nodes that have a source path but no stored hash. Use `--force` to re-hash all nodes (after confirming source changes are expected).
 
 ### `import-beliefs`
 Import a `beliefs.md` registry into the RMS network:
@@ -126,40 +126,40 @@ This converts a beliefs CLI registry into RMS nodes:
 
 **Use this to migrate research registries from `beliefs` to `rms`.** After import, retraction cascades work on the imported dependency graph.
 
-**Caveat:** `import-beliefs` treats all `Depends on:` as SL justifications (all antecedents must be IN). If a dependency was contextual ("derived while investigating X") rather than logical ("true only if X is true"), the node may be incorrectly OUT. Use `rms convert-to-premise` to fix these after import.
+**Caveat:** `import-beliefs` treats all `Depends on:` as SL justifications (all antecedents must be IN). If a dependency was contextual ("derived while investigating X") rather than logical ("true only if X is true"), the node may be incorrectly OUT. Use `reasons convert-to-premise` to fix these after import.
 
 ### `propagate`
-Run `rms propagate`. Recomputes all truth values from justifications. Use after manual database edits or to verify consistency.
+Run `reasons propagate`. Recomputes all truth values from justifications. Use after manual database edits or to verify consistency.
 
 ### `log`
-Run `rms log` or `rms log --last 20`. Shows the propagation audit trail — every add, retract, assert, and cascade event with timestamps.
+Run `reasons log` or `reasons log --last 20`. Shows the propagation audit trail — every add, retract, assert, and cascade event with timestamps.
 
 ### `search`
-Run `rms search "query"`. Case-insensitive substring match on both node ID and text. Shows truth value and dependent count.
+Run `reasons search "query"`. Case-insensitive substring match on both node ID and text. Shows truth value and dependent count.
 
-Example: `rms search "tool-use"` finds all nodes mentioning tool-use calibration.
+Example: `reasons search "tool-use"` finds all nodes mentioning tool-use calibration.
 
 ### `list`
-Run `rms list` with optional filters:
+Run `reasons list` with optional filters:
 - `--status IN` or `--status OUT` — filter by truth value
 - `--premises` — only nodes with no justifications (the foundations)
 - `--has-dependents` — only nodes that other nodes depend on (load-bearing)
 
-Filters combine: `rms list --status IN --premises` shows IN premises only.
+Filters combine: `reasons list --status IN --premises` shows IN premises only.
 
 ### `export`
-Run `rms export`. Outputs the entire network as JSON.
+Run `reasons export`. Outputs the entire network as JSON.
 
 ### `export-markdown`
-Run `rms export-markdown`. Generates a `beliefs.md`-compatible markdown file from the DB. Use `-o beliefs.md` to write to file. The output is generated — operate through `rms`, not by editing the markdown.
+Run `reasons export-markdown`. Generates a `beliefs.md`-compatible markdown file from the DB. Use `-o beliefs.md` to write to file. The output is generated — operate through `rms`, not by editing the markdown.
 
 ### `check-stale`
-Run `rms check-stale`. Compares stored source hashes against current file content (SHA-256). Flags any IN node whose source file has changed. Exits 1 if any stale nodes found.
+Run `reasons check-stale`. Compares stored source hashes against current file content (SHA-256). Flags any IN node whose source file has changed. Exits 1 if any stale nodes found.
 
 Source paths are resolved as `~/git/<repo-name>/<path>` from the `source` field.
 
 ### `compact`
-Run `rms compact`. Token-budgeted summary for CLAUDE.md or context injection. Priority: nogoods (never dropped) → OUT nodes → IN nodes by dependent count (most-depended-on first).
+Run `reasons compact`. Token-budgeted summary for CLAUDE.md or context injection. Priority: nogoods (never dropped) → OUT nodes → IN nodes by dependent count (most-depended-on first).
 
 Options:
 - `--budget 500` (default) — token limit

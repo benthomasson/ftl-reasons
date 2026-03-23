@@ -24,7 +24,7 @@ Or run directly:
 
 ```bash
 cd ~/git/rms
-uv run rms <command>
+uv run reasons <command>
 ```
 
 ## Usage
@@ -155,30 +155,30 @@ rms list --challenged
 
 | Command | Description |
 |---------|-------------|
-| `rms init` | Create rms.db |
-| `rms add ID "text"` | Add a premise |
-| `rms add ID "text" --sl a,b` | Add with SL justification (all antecedents must be IN) |
-| `rms add ID "text" --sl a --unless y` | Add with outlist (must be OUT for justification to hold) |
-| `rms add ID "text" --cp a,b` | Add with CP justification (assumptions must be consistent) |
-| `rms retract ID` | Mark OUT + cascade to dependents |
-| `rms assert ID` | Mark IN + cascade restoration |
-| `rms status` | Show all nodes with truth values |
-| `rms show ID` | Show node details, justifications, dependents |
-| `rms explain ID` | Trace why a node is IN or OUT |
-| `rms challenge ID "reason"` | Challenge a node — target goes OUT |
-| `rms defend TARGET CHALLENGE "reason"` | Defend against a challenge — target restored |
-| `rms nogood A B ...` | Record contradiction, backtrack to responsible premise |
-| `rms trace ID` | Trace backward to find all premises a node rests on |
-| `rms hash-sources` | Backfill source hashes for unhashed nodes (`--force` to re-hash all) |
-| `rms propagate` | Recompute all truth values |
-| `rms log` | Show propagation audit trail |
-| `rms search QUERY` | Search nodes by text or ID (case-insensitive) |
-| `rms list` | List with filters (`--status`, `--premises`, `--has-dependents`, `--challenged`) |
-| `rms import-beliefs FILE` | Import a beliefs.md registry (auto-detects nogoods.md) |
-| `rms export` | Export network as JSON |
-| `rms export-markdown` | Export as beliefs.md-compatible markdown (`-o FILE` to write) |
-| `rms check-stale` | Check IN nodes for source file hash changes |
-| `rms compact` | Token-budgeted summary (`--budget N`, `--no-truncate`) |
+| `reasons init` | Create rms.db |
+| `reasons add ID "text"` | Add a premise |
+| `reasons add ID "text" --sl a,b` | Add with SL justification (all antecedents must be IN) |
+| `reasons add ID "text" --sl a --unless y` | Add with outlist (must be OUT for justification to hold) |
+| `reasons add ID "text" --cp a,b` | Add with CP justification (assumptions must be consistent) |
+| `reasons retract ID` | Mark OUT + cascade to dependents |
+| `reasons assert ID` | Mark IN + cascade restoration |
+| `reasons status` | Show all nodes with truth values |
+| `reasons show ID` | Show node details, justifications, dependents |
+| `reasons explain ID` | Trace why a node is IN or OUT |
+| `reasons challenge ID "reason"` | Challenge a node — target goes OUT |
+| `reasons defend TARGET CHALLENGE "reason"` | Defend against a challenge — target restored |
+| `reasons nogood A B ...` | Record contradiction, backtrack to responsible premise |
+| `reasons trace ID` | Trace backward to find all premises a node rests on |
+| `reasons hash-sources` | Backfill source hashes for unhashed nodes (`--force` to re-hash all) |
+| `reasons propagate` | Recompute all truth values |
+| `reasons log` | Show propagation audit trail |
+| `reasons search QUERY` | Search nodes by text or ID (case-insensitive) |
+| `reasons list` | List with filters (`--status`, `--premises`, `--has-dependents`, `--challenged`) |
+| `reasons import-beliefs FILE` | Import a beliefs.md registry (auto-detects nogoods.md) |
+| `reasons export` | Export network as JSON |
+| `reasons export-markdown` | Export as beliefs.md-compatible markdown (`-o FILE` to write) |
+| `reasons check-stale` | Check IN nodes for source file hash changes |
+| `reasons compact` | Token-budgeted summary (`--budget N`, `--no-truncate`) |
 
 ## Tests
 
