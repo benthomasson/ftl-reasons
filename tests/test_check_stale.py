@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from rms_lib.network import Network
-from rms_lib.check_stale import check_stale, hash_file, hash_sources, resolve_source_path
+from reasons_lib.network import Network
+from reasons_lib.check_stale import check_stale, hash_file, hash_sources, resolve_source_path
 
 
 class TestHashFile:

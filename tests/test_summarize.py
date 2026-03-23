@@ -6,11 +6,11 @@ A summary node replaces a group of nodes in compact output.
 
 import pytest
 
-from rms_lib import Justification
-from rms_lib.network import Network
-from rms_lib.storage import Storage
-from rms_lib.compact import compact
-from rms_lib import api
+from reasons_lib import Justification
+from reasons_lib.network import Network
+from reasons_lib.storage import Storage
+from reasons_lib.compact import compact
+from reasons_lib import api
 
 
 class TestSummarizeBasic:

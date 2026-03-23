@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from rms_lib.network import Network
-from rms_lib.import_beliefs import parse_beliefs, parse_nogoods, import_into_network
+from reasons_lib.network import Network
+from reasons_lib.import_beliefs import parse_beliefs, parse_nogoods, import_into_network
 
 
 SAMPLE_BELIEFS = """\

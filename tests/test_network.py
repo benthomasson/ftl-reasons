@@ -2,8 +2,8 @@
 
 import pytest
 
-from rms_lib import Node, Justification, Nogood
-from rms_lib.network import Network
+from reasons_lib import Node, Justification, Nogood
+from reasons_lib.network import Network
 
 
 class TestAddNode:

@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from rms_lib import Justification
-from rms_lib.network import Network
-from rms_lib import api
+from reasons_lib import Justification
+from reasons_lib.network import Network
+from reasons_lib import api
 
 
 class TestImportJson:

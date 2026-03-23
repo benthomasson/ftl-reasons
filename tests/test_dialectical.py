@@ -7,10 +7,10 @@ justification and create a dialectical chain.
 
 import pytest
 
-from rms_lib import Justification
-from rms_lib.network import Network
-from rms_lib.storage import Storage
-from rms_lib import api
+from reasons_lib import Justification
+from reasons_lib.network import Network
+from reasons_lib.storage import Storage
+from reasons_lib import api
 
 
 class TestChallenge:

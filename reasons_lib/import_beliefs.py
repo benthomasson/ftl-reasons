@@ -55,10 +55,10 @@ def parse_beliefs(text: str) -> list[dict]:
         elif line.startswith("- Depends on: "):
             deps = line[len("- Depends on: "):].strip()
             current["depends_on"] = [d.strip() for d in deps.split(",") if d.strip()]
-        elif line.startswith("- Stale reason: "):
-            current["stale_reason"] = line[len("- Stale reason: "):].strip()
-        elif line.startswith("- Superseded by: "):
-            current["superseded_by"] = line[len("- Superseded by: "):].strip()
+        elif line.lower().startswith("- stale reason: "):
+            current["stale_reason"] = line[line.index(": ") + 2:].strip()
+        elif line.lower().startswith("- superseded by: "):
+            current["superseded_by"] = line[line.index(": ") + 2:].strip()
         elif line.startswith("- "):
             pass  # other metadata lines — skip
         elif line.startswith("### "):

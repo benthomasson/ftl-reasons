@@ -14,7 +14,7 @@ from .network import Network
 from .storage import Storage
 
 
-DEFAULT_DB = "rms.db"
+DEFAULT_DB = "reasons.db"
 
 
 def _with_network(db_path: str, write: bool = False):

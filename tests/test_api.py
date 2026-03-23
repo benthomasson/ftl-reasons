@@ -2,7 +2,7 @@
 
 import pytest
 
-from rms_lib import api
+from reasons_lib import api
 
 
 @pytest.fixture

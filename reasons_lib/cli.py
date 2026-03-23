@@ -1,6 +1,6 @@
 """CLI for the Reason Maintenance System.
 
-Thin wrappers around rms_lib.api — each command calls an api function
+Thin wrappers around reasons_lib.api — each command calls an api function
 and formats the result dict for terminal output.
 """
 
@@ -391,10 +391,10 @@ def cmd_list(args):
 
 def main():
     parser = argparse.ArgumentParser(
-        prog="rms",
-        description="Reason Maintenance System — automatic belief retraction and dependency-directed backtracking",
+        prog="reasons",
+        description="Reasons — automatic belief retraction and dependency-directed backtracking",
     )
-    parser.add_argument("--db", default=api.DEFAULT_DB, help="Path to RMS database (default: rms.db)")
+    parser.add_argument("--db", default=api.DEFAULT_DB, help="Path to database (default: reasons.db)")
     sub = parser.add_subparsers(dest="command")
 
     # init

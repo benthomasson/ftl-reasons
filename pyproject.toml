@@ -3,9 +3,9 @@ requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "rms"
+name = "reasons"
 version = "0.1.0"
-description = "Reason Maintenance System — automatic belief retraction and dependency-directed backtracking"
+description = "Reasons — automatic belief retraction and dependency-directed backtracking"
 requires-python = ">=3.10"
 dependencies = []
 
@@ -13,7 +13,7 @@ dependencies = []
 test = ["pytest"]
 
 [project.scripts]
-rms = "rms_lib.cli:main"
+reasons = "reasons_lib.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
