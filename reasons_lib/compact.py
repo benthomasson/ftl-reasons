@@ -74,8 +74,9 @@ def compact(
         lines.append("## OUT (retracted)")
         for node in out_nodes:
             reason = ""
-            if node.metadata.get("stale_reason"):
-                reason = f" (stale: {node.metadata['stale_reason'][:60]})"
+            retract_reason = node.metadata.get("retract_reason") or node.metadata.get("stale_reason")
+            if retract_reason:
+                reason = f" (stale: {retract_reason[:60]})"
             elif node.metadata.get("superseded_by"):
                 reason = f" (superseded by: {node.metadata['superseded_by']})"
             lines.append(f"- {node.id}: {_text(node)}{reason}")

@@ -35,7 +35,7 @@ def export_markdown(network: Network, repos: dict[str, str] | None = None) -> st
     for node in nodes:
         # Map truth value to beliefs status
         status = node.truth_value
-        if status == "OUT" and node.metadata.get("stale_reason"):
+        if status == "OUT" and (node.metadata.get("stale_reason") or node.metadata.get("retract_reason")):
             status = "STALE"
 
         # Get beliefs_type from metadata, default to DERIVED or OBSERVATION
@@ -68,8 +68,10 @@ def export_markdown(network: Network, repos: dict[str, str] | None = None) -> st
         if all_unless:
             lines.append(f"- Unless: {', '.join(all_unless)}")
 
-        if status == "STALE" and node.metadata.get("stale_reason"):
-            lines.append(f"- Stale reason: {node.metadata['stale_reason']}")
+        # Retraction reason — from retract --reason or imported stale_reason
+        retract_reason = node.metadata.get("retract_reason") or node.metadata.get("stale_reason")
+        if status in ("STALE", "OUT") and retract_reason:
+            lines.append(f"- Stale reason: {retract_reason}")
         if node.metadata.get("superseded_by"):
             lines.append(f"- Superseded by: {node.metadata['superseded_by']}")
 
