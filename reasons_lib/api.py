@@ -113,6 +113,72 @@ def retract_node(node_id: str, reason: str = "", db_path: str = DEFAULT_DB) -> d
         return {"changed": changed}
 
 
+def what_if_retract(node_id: str, db_path: str = DEFAULT_DB) -> dict:
+    """Simulate retracting a node without mutating the database.
+
+    Loads the network read-only, performs the retraction in memory,
+    and returns the cascade effects. The database is not modified.
+
+    Returns: {"node_id": str, "cascade": list[dict], "total_affected": int}
+    """
+    with _with_network(db_path, write=False) as net:
+        if node_id not in net.nodes:
+            raise KeyError(f"Node '{node_id}' not found")
+
+        node = net.nodes[node_id]
+        if node.truth_value == "OUT":
+            return {
+                "node_id": node_id,
+                "already_out": True,
+                "cascade": [],
+                "total_affected": 0,
+            }
+
+        # Perform retraction in memory (not saved)
+        changed = net.retract(node_id)
+
+        # Build detailed cascade info
+        cascade = []
+        for nid in changed:
+            if nid == node_id:
+                continue  # Skip the node itself
+            n = net.nodes[nid]
+            cascade.append({
+                "id": nid,
+                "text": n.text,
+                "depth": _cascade_depth(net, nid, node_id),
+                "dependents": len(n.dependents),
+            })
+
+        # Sort by depth then alphabetically
+        cascade.sort(key=lambda c: (c["depth"], c["id"]))
+
+        return {
+            "node_id": node_id,
+            "already_out": False,
+            "cascade": cascade,
+            "total_affected": len(cascade),
+        }
+
+
+def _cascade_depth(net, target_id: str, retracted_id: str) -> int:
+    """Find the shortest justification path from retracted node to target."""
+    from collections import deque
+    visited = {retracted_id}
+    queue = deque([(retracted_id, 0)])
+    while queue:
+        current_id, depth = queue.popleft()
+        current = net.nodes[current_id]
+        for dep_id in current.dependents:
+            if dep_id in visited:
+                continue
+            if dep_id == target_id:
+                return depth + 1
+            visited.add(dep_id)
+            queue.append((dep_id, depth + 1))
+    return 0
+
+
 def assert_node(node_id: str, db_path: str = DEFAULT_DB) -> dict:
     """Assert a node and cascade restoration.
 

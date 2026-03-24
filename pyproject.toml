@@ -17,5 +17,8 @@ test = ["pytest"]
 [project.scripts]
 reasons = "reasons_lib.cli:main"
 
+[tool.setuptools]
+packages = ["reasons_lib"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

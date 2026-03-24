@@ -65,6 +65,34 @@ def cmd_assert(args):
         print(f"Asserted: {', '.join(result['changed'])}")
 
 
+def cmd_what_if(args):
+    try:
+        result = api.what_if_retract(args.node_id, db_path=args.db)
+    except KeyError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    if result.get("already_out"):
+        print(f"{args.node_id} is already OUT — nothing to simulate.")
+        return
+
+    if not result["cascade"]:
+        print(f"Retracting {args.node_id} would affect no other nodes.")
+        return
+
+    print(f"What if '{args.node_id}' were retracted?\n")
+    current_depth = 0
+    for item in result["cascade"]:
+        if item["depth"] != current_depth:
+            current_depth = item["depth"]
+            print(f"  --- depth {current_depth} ---")
+        deps = f"  ({item['dependents']} dependents)" if item["dependents"] else ""
+        text = item["text"][:80]
+        print(f"  [-] {item['id']}: {text}{deps}")
+
+    print(f"\nTotal: {result['total_affected']} node(s) would go OUT (database NOT modified)")
+
+
 def cmd_status(args):
     result = api.get_status(db_path=args.db)
 
@@ -450,6 +478,10 @@ def main():
     p = sub.add_parser("assert", help="Assert a node (mark IN + cascade)")
     p.add_argument("node_id", help="Node to assert")
 
+    # what-if
+    p = sub.add_parser("what-if", help="Simulate retracting a node (read-only)")
+    p.add_argument("node_id", help="Node to simulate retracting")
+
     # status
     sub.add_parser("status", help="Show all nodes with truth values")
 
@@ -568,6 +600,7 @@ def main():
         "add": cmd_add,
         "retract": cmd_retract,
         "assert": cmd_assert,
+        "what-if": cmd_what_if,
         "status": cmd_status,
         "show": cmd_show,
         "explain": cmd_explain,
