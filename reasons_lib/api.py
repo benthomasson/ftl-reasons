@@ -118,8 +118,10 @@ def what_if_retract(node_id: str, db_path: str = DEFAULT_DB) -> dict:
 
     Loads the network read-only, performs the retraction in memory,
     and returns the cascade effects. The database is not modified.
+    Tracks both nodes that go OUT (cascade) and nodes that go IN
+    (restoration from outlist — gated beliefs whose blocker is removed).
 
-    Returns: {"node_id": str, "cascade": list[dict], "total_affected": int}
+    Returns: {"node_id": str, "retracted": list[dict], "restored": list[dict], ...}
     """
     with _with_network(db_path, write=False) as net:
         if node_id not in net.nodes:
@@ -130,34 +132,103 @@ def what_if_retract(node_id: str, db_path: str = DEFAULT_DB) -> dict:
             return {
                 "node_id": node_id,
                 "already_out": True,
-                "cascade": [],
+                "retracted": [],
+                "restored": [],
                 "total_affected": 0,
             }
+
+        # Snapshot truth values before
+        before = {nid: n.truth_value for nid, n in net.nodes.items()}
 
         # Perform retraction in memory (not saved)
         changed = net.retract(node_id)
 
-        # Build detailed cascade info
-        cascade = []
+        # Separate into retracted (went OUT) and restored (went IN)
+        retracted = []
+        restored = []
         for nid in changed:
             if nid == node_id:
-                continue  # Skip the node itself
+                continue
             n = net.nodes[nid]
-            cascade.append({
+            info = {
                 "id": nid,
                 "text": n.text,
                 "depth": _cascade_depth(net, nid, node_id),
                 "dependents": len(n.dependents),
-            })
+            }
+            if before[nid] == "IN" and n.truth_value == "OUT":
+                retracted.append(info)
+            elif before[nid] == "OUT" and n.truth_value == "IN":
+                restored.append(info)
 
-        # Sort by depth then alphabetically
-        cascade.sort(key=lambda c: (c["depth"], c["id"]))
+        retracted.sort(key=lambda c: (c["depth"], c["id"]))
+        restored.sort(key=lambda c: (c["depth"], c["id"]))
 
         return {
             "node_id": node_id,
             "already_out": False,
-            "cascade": cascade,
-            "total_affected": len(cascade),
+            "retracted": retracted,
+            "restored": restored,
+            "total_affected": len(retracted) + len(restored),
+        }
+
+
+def what_if_assert(node_id: str, db_path: str = DEFAULT_DB) -> dict:
+    """Simulate asserting (restoring) a node without mutating the database.
+
+    Shows what would change if a currently-OUT node were asserted back to IN.
+    Tracks both nodes that go IN (restoration cascade) and nodes that go OUT
+    (outlist-gated beliefs that lose their justification when this node goes IN).
+
+    Returns: {"node_id": str, "retracted": list[dict], "restored": list[dict], ...}
+    """
+    with _with_network(db_path, write=False) as net:
+        if node_id not in net.nodes:
+            raise KeyError(f"Node '{node_id}' not found")
+
+        node = net.nodes[node_id]
+        if node.truth_value == "IN":
+            return {
+                "node_id": node_id,
+                "already_in": True,
+                "retracted": [],
+                "restored": [],
+                "total_affected": 0,
+            }
+
+        # Snapshot truth values before
+        before = {nid: n.truth_value for nid, n in net.nodes.items()}
+
+        # Perform assertion in memory (not saved)
+        changed = net.assert_node(node_id)
+
+        # Separate into restored (went IN) and retracted (went OUT)
+        retracted = []
+        restored = []
+        for nid in changed:
+            if nid == node_id:
+                continue
+            n = net.nodes[nid]
+            info = {
+                "id": nid,
+                "text": n.text,
+                "depth": _cascade_depth(net, nid, node_id),
+                "dependents": len(n.dependents),
+            }
+            if before[nid] == "IN" and n.truth_value == "OUT":
+                retracted.append(info)
+            elif before[nid] == "OUT" and n.truth_value == "IN":
+                restored.append(info)
+
+        retracted.sort(key=lambda c: (c["depth"], c["id"]))
+        restored.sort(key=lambda c: (c["depth"], c["id"]))
+
+        return {
+            "node_id": node_id,
+            "already_in": False,
+            "retracted": retracted,
+            "restored": restored,
+            "total_affected": len(retracted) + len(restored),
         }
 
 

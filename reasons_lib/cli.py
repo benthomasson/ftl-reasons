@@ -66,32 +66,66 @@ def cmd_assert(args):
         print(f"Asserted: {', '.join(result['changed'])}")
 
 
+def _print_what_if_results(result, action, node_id):
+    """Shared output formatting for what-if retract and assert."""
+    if not result["retracted"] and not result["restored"]:
+        verb = "Retracting" if action == "retract" else "Asserting"
+        print(f"{verb} {node_id} would affect no other nodes.")
+        return
+
+    verb = "retracted" if action == "retract" else "asserted"
+    print(f"What if '{node_id}' were {verb}?\n")
+
+    if result["retracted"]:
+        print("  Would go OUT:")
+        current_depth = 0
+        for item in result["retracted"]:
+            if item["depth"] != current_depth:
+                current_depth = item["depth"]
+                print(f"  --- depth {current_depth} ---")
+            deps = f"  ({item['dependents']} dependents)" if item["dependents"] else ""
+            text = item["text"][:80]
+            print(f"  [-] {item['id']}: {text}{deps}")
+
+    if result["restored"]:
+        if result["retracted"]:
+            print()
+        print("  Would go IN:")
+        current_depth = 0
+        for item in result["restored"]:
+            if item["depth"] != current_depth:
+                current_depth = item["depth"]
+                print(f"  --- depth {current_depth} ---")
+            deps = f"  ({item['dependents']} dependents)" if item["dependents"] else ""
+            text = item["text"][:80]
+            print(f"  [+] {item['id']}: {text}{deps}")
+
+    parts = []
+    if result["retracted"]:
+        parts.append(f"{len(result['retracted'])} would go OUT")
+    if result["restored"]:
+        parts.append(f"{len(result['restored'])} would go IN")
+    print(f"\nTotal: {', '.join(parts)} (database NOT modified)")
+
+
 def cmd_what_if(args):
+    action = args.action
     try:
-        result = api.what_if_retract(args.node_id, db_path=args.db)
+        if action == "retract":
+            result = api.what_if_retract(args.node_id, db_path=args.db)
+            if result.get("already_out"):
+                print(f"{args.node_id} is already OUT — nothing to simulate.")
+                return
+        else:
+            result = api.what_if_assert(args.node_id, db_path=args.db)
+            if result.get("already_in"):
+                print(f"{args.node_id} is already IN — nothing to simulate.")
+                return
     except KeyError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
-    if result.get("already_out"):
-        print(f"{args.node_id} is already OUT — nothing to simulate.")
-        return
-
-    if not result["cascade"]:
-        print(f"Retracting {args.node_id} would affect no other nodes.")
-        return
-
-    print(f"What if '{args.node_id}' were retracted?\n")
-    current_depth = 0
-    for item in result["cascade"]:
-        if item["depth"] != current_depth:
-            current_depth = item["depth"]
-            print(f"  --- depth {current_depth} ---")
-        deps = f"  ({item['dependents']} dependents)" if item["dependents"] else ""
-        text = item["text"][:80]
-        print(f"  [-] {item['id']}: {text}{deps}")
-
-    print(f"\nTotal: {result['total_affected']} node(s) would go OUT (database NOT modified)")
+    _print_what_if_results(result, action, args.node_id)
 
 
 def cmd_status(args):
@@ -480,8 +514,9 @@ def main():
     p.add_argument("node_id", help="Node to assert")
 
     # what-if
-    p = sub.add_parser("what-if", help="Simulate retracting a node (read-only)")
-    p.add_argument("node_id", help="Node to simulate retracting")
+    p = sub.add_parser("what-if", help="Simulate retracting or asserting a node (read-only)")
+    p.add_argument("action", choices=["retract", "assert"], help="Action to simulate")
+    p.add_argument("node_id", help="Node to simulate")
 
     # status
     sub.add_parser("status", help="Show all nodes with truth values")
