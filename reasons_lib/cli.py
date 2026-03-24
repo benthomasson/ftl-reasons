@@ -7,6 +7,7 @@ and formats the result dict for terminal output.
 import argparse
 import json
 import sys
+from pathlib import Path
 
 from . import api
 
