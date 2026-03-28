@@ -488,7 +488,11 @@ def cmd_lookup(args):
     print(result)
 
 
-def cmd_derive(args):
+def _derive_one_round(args, round_num=None):
+    """Run a single derive round. Returns number of beliefs added (0 = saturated).
+
+    Used by cmd_derive for both single-round and --exhaust mode.
+    """
     import asyncio
     import os
     import shutil
@@ -501,41 +505,43 @@ def cmd_derive(args):
         write_proposals_file,
     )
 
-    # Load network
+    prefix = f"[round {round_num}] " if round_num is not None else ""
+
+    # Load network (fresh each round)
     try:
         result = api.export_network(db_path=args.db)
     except Exception as e:
-        print(f"Error loading network: {e}", file=sys.stderr)
-        sys.exit(1)
+        print(f"{prefix}Error loading network: {e}", file=sys.stderr)
+        return -1
 
     nodes = result.get("nodes", {})
     if not nodes:
-        print("No nodes in the network.", file=sys.stderr)
-        sys.exit(1)
+        print(f"{prefix}No nodes in the network.", file=sys.stderr)
+        return -1
 
     prompt, stats = build_prompt(
         nodes, domain=args.domain, topic=args.topic,
         budget=args.budget, sample=args.sample, seed=args.seed,
     )
 
-    print(f"Network: {stats['total_in']} IN beliefs, "
+    print(f"{prefix}Network: {stats['total_in']} IN beliefs, "
           f"{stats['total_derived']} derived, max depth {stats['max_depth']}",
           file=sys.stderr)
     if stats.get("topic"):
-        print(f"Topic filter: {stats['topic']}", file=sys.stderr)
+        print(f"{prefix}Topic filter: {stats['topic']}", file=sys.stderr)
     if stats.get("sample"):
-        print(f"Sampling: {stats['budget']} beliefs (random)", file=sys.stderr)
+        print(f"{prefix}Sampling: {stats['budget']} beliefs (random)", file=sys.stderr)
     elif stats.get("budget", 300) != 300:
-        print(f"Budget: {stats['budget']} beliefs", file=sys.stderr)
+        print(f"{prefix}Budget: {stats['budget']} beliefs", file=sys.stderr)
     if stats["agents"]:
-        print(f"Agents: {', '.join(stats['agent_names'])}", file=sys.stderr)
+        print(f"{prefix}Agents: {', '.join(stats['agent_names'])}", file=sys.stderr)
 
     if args.dry_run:
         print(f"\n=== Prompt ({len(prompt)} chars) ===\n")
         print(prompt[:3000])
         if len(prompt) > 3000:
             print(f"\n... ({len(prompt) - 3000} more chars)")
-        return
+        return 0
 
     # Model invocation via CLI
     model = args.model or "claude"
@@ -545,16 +551,16 @@ def cmd_derive(args):
     }
 
     if model not in model_commands:
-        print(f"Unknown model: {model}. Available: {list(model_commands.keys())}",
+        print(f"{prefix}Unknown model: {model}. Available: {list(model_commands.keys())}",
               file=sys.stderr)
-        sys.exit(1)
+        return -1
 
     cmd = model_commands[model]
     if not shutil.which(cmd[0]):
-        print(f"Error: '{cmd[0]}' CLI not found in PATH", file=sys.stderr)
-        sys.exit(1)
+        print(f"{prefix}Error: '{cmd[0]}' CLI not found in PATH", file=sys.stderr)
+        return -1
 
-    print(f"Deriving with {model}...", file=sys.stderr)
+    print(f"{prefix}Deriving with {model}...", file=sys.stderr)
 
     env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
 
@@ -577,33 +583,31 @@ def cmd_derive(args):
     try:
         response = asyncio.run(_invoke())
     except TimeoutError:
-        print(f"Model timed out after {args.timeout}s", file=sys.stderr)
-        sys.exit(1)
+        print(f"{prefix}Model timed out after {args.timeout}s", file=sys.stderr)
+        return -1
     except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+        print(f"{prefix}Error: {e}", file=sys.stderr)
+        return -1
 
     # Parse and validate proposals
     proposals = parse_proposals(response)
 
     if not proposals:
-        print("No derivation proposals found in response.")
-        print("\nRaw response:\n")
-        print(response)
-        return
+        print(f"{prefix}No new proposals — network saturated.", file=sys.stderr)
+        return 0
 
     valid, skipped = validate_proposals(proposals, nodes)
 
     for p, reason in skipped:
         print(f"  SKIP {p['id']}: {reason}", file=sys.stderr)
 
-    print(f"\n{len(valid)} valid proposals "
+    print(f"\n{prefix}{len(valid)} valid proposals "
           f"({len(skipped)} skipped)", file=sys.stderr)
 
     if not valid:
-        return
+        return 0
 
-    if args.auto:
+    if args.auto or args.exhaust:
         results = apply_proposals(valid, db_path=args.db)
         added = 0
         for p, result in results:
@@ -613,13 +617,39 @@ def cmd_derive(args):
             else:
                 print(f"  FAIL {p['id']}: {result}", file=sys.stderr)
         if added:
-            print(f"\nAdded {added} derived beliefs.", file=sys.stderr)
+            print(f"\n{prefix}Added {added} derived beliefs.", file=sys.stderr)
+        return added
     else:
         output_path = Path(args.output)
         write_proposals_file(valid, output_path)
-        print(f"\nWrote {output_path} ({len(valid)} proposals)")
-        print("Review, then run the commands from the file to accept.")
-        print("Or re-run with --auto to add automatically.")
+        print(f"\n{prefix}Wrote {output_path} ({len(valid)} proposals)")
+        return len(valid)
+
+
+def cmd_derive(args):
+    if args.exhaust:
+        max_rounds = args.max_rounds
+        total_added = 0
+        for round_num in range(1, max_rounds + 1):
+            print(f"\n{'=' * 40}", file=sys.stderr)
+            print(f"Round {round_num}/{max_rounds}", file=sys.stderr)
+            print(f"{'=' * 40}", file=sys.stderr)
+            added = _derive_one_round(args, round_num=round_num)
+            if added < 0:
+                print(f"\nExhaust stopped: error in round {round_num}.",
+                      file=sys.stderr)
+                sys.exit(1)
+            if added == 0:
+                print(f"\nExhaust complete: saturated after {round_num} rounds. "
+                      f"Total added: {total_added}.", file=sys.stderr)
+                return
+            total_added += added
+        print(f"\nExhaust complete: hit max rounds ({max_rounds}). "
+              f"Total added: {total_added}.", file=sys.stderr)
+    else:
+        added = _derive_one_round(args)
+        if added < 0:
+            sys.exit(1)
 
 
 def cmd_list(args):
@@ -765,6 +795,10 @@ def main():
                    help="Random seed for reproducible sampling")
     p.add_argument("--timeout", type=int, default=300,
                    help="Model timeout in seconds (default: 300)")
+    p.add_argument("--exhaust", action="store_true",
+                   help="Repeat derive until no new proposals (implies --auto)")
+    p.add_argument("--max-rounds", type=int, default=10,
+                   help="Maximum rounds for --exhaust (default: 10)")
 
     # import-agent
     p = sub.add_parser("import-agent", help="Import another agent's beliefs with namespacing")
