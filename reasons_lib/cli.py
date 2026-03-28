@@ -355,6 +355,34 @@ def cmd_repos(args):
     print(f"\n{len(result['repos'])} repo(s)")
 
 
+def cmd_import_agent(args):
+    try:
+        result = api.import_agent(
+            agent_name=args.agent_name,
+            beliefs_file=args.beliefs_file,
+            nogoods_file=args.nogoods_file,
+            only_in=args.only_in,
+            db_path=args.db,
+        )
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Agent '{result['agent']}' imported:")
+    if result['created_premise']:
+        print(f"  Created premise: {result['active_node']}")
+    else:
+        print(f"  Premise exists:  {result['active_node']}")
+    print(f"  Imported:  {result['claims_imported']} beliefs (as {result['prefix']}*)")
+    if result['claims_skipped']:
+        print(f"  Skipped:   {result['claims_skipped']} (already in network)")
+    if result['claims_retracted']:
+        print(f"  Retracted: {result['claims_retracted']} (STALE/OUT in source)")
+    if result['nogoods_imported']:
+        print(f"  Nogoods:   {result['nogoods_imported']}")
+    print(f"\n  To revoke all: reasons retract {result['active_node']}")
+
+
 def cmd_import_beliefs(args):
     try:
         result = api.import_beliefs(
@@ -581,6 +609,13 @@ def main():
     # repos
     sub.add_parser("repos", help="List registered repos")
 
+    # import-agent
+    p = sub.add_parser("import-agent", help="Import another agent's beliefs with namespacing")
+    p.add_argument("agent_name", help="Agent name (used as namespace prefix)")
+    p.add_argument("beliefs_file", help="Path to the agent's beliefs.md")
+    p.add_argument("--nogoods", dest="nogoods_file", help="Path to nogoods.md (auto-detected if next to beliefs.md)")
+    p.add_argument("--only-in", action="store_true", help="Only import beliefs with status IN")
+
     # import-beliefs
     p = sub.add_parser("import-beliefs", help="Import a beliefs.md registry")
     p.add_argument("beliefs_file", help="Path to beliefs.md")
@@ -645,6 +680,7 @@ def main():
         "log": cmd_log,
         "add-repo": cmd_add_repo,
         "repos": cmd_repos,
+        "import-agent": cmd_import_agent,
         "import-beliefs": cmd_import_beliefs,
         "import-json": cmd_import_json,
         "export": cmd_export,

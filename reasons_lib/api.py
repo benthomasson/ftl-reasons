@@ -498,6 +498,51 @@ def import_beliefs(
         return import_into_network(net, beliefs_text, nogoods_text)
 
 
+def import_agent(
+    agent_name: str,
+    beliefs_file: str,
+    nogoods_file: str | None = None,
+    only_in: bool = False,
+    db_path: str = DEFAULT_DB,
+) -> dict:
+    """Import another agent's beliefs.md into the local RMS with namespacing.
+
+    Each belief is prefixed with 'agent_name:' and depends on a premise
+    node 'agent_name:active'. Retracting that premise cascades OUT all
+    beliefs from that agent.
+
+    Returns: {"agent": str, "claims_imported": int, "claims_skipped": int, ...}
+    """
+    from .import_agent import import_agent as _import_agent
+
+    beliefs_path = Path(beliefs_file)
+    if not beliefs_path.exists():
+        raise FileNotFoundError(f"File not found: {beliefs_file}")
+
+    beliefs_text = beliefs_path.read_text()
+
+    nogoods_text = None
+    if nogoods_file:
+        nogoods_path = Path(nogoods_file)
+        if not nogoods_path.exists():
+            raise FileNotFoundError(f"Nogoods file not found: {nogoods_file}")
+        nogoods_text = nogoods_path.read_text()
+    else:
+        auto_nogoods = beliefs_path.parent / "nogoods.md"
+        if auto_nogoods.exists():
+            nogoods_text = auto_nogoods.read_text()
+
+    with _with_network(db_path, write=True) as net:
+        return _import_agent(
+            net,
+            agent_name=agent_name,
+            beliefs_text=beliefs_text,
+            nogoods_text=nogoods_text,
+            only_in=only_in,
+            source_path=str(beliefs_path),
+        )
+
+
 def import_json(json_file: str, db_path: str = DEFAULT_DB) -> dict:
     """Import a network from a JSON file (produced by export).
 
