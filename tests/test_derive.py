@@ -9,6 +9,8 @@ from reasons_lib.derive import (
     validate_proposals,
     apply_proposals,
     _detect_agents,
+    _filter_by_topic,
+    _sample_beliefs,
     _get_depth,
 )
 
@@ -220,3 +222,100 @@ def test_apply_proposals_with_gate(simple_network):
     api.retract_node("fact-c", db_path=simple_network)
     node = api.show_node("gated-belief", db_path=simple_network)
     assert node["truth_value"] == "IN"
+
+
+# --- Topic filter tests ---
+
+def test_filter_by_topic():
+    nodes = {
+        "auth-uses-jwt": {"text": "Auth system uses JWT tokens"},
+        "routing-table": {"text": "The routing table is updated"},
+        "auth-session": {"text": "Session management for auth"},
+        "database-schema": {"text": "The database schema has 5 tables"},
+    }
+    filtered = _filter_by_topic(nodes, "auth")
+    assert "auth-uses-jwt" in filtered
+    assert "auth-session" in filtered
+    assert "routing-table" not in filtered
+    assert "database-schema" not in filtered
+
+
+def test_filter_by_topic_matches_id_and_text():
+    nodes = {
+        "firewall-rules": {"text": "Stateless firewall at the perimeter"},
+        "network-config": {"text": "Network uses firewall for isolation"},
+        "storage-volume": {"text": "Ceph-backed storage volume"},
+    }
+    filtered = _filter_by_topic(nodes, "firewall")
+    assert "firewall-rules" in filtered
+    assert "network-config" in filtered  # matches in text
+    assert "storage-volume" not in filtered
+
+
+def test_filter_by_topic_multiple_keywords():
+    nodes = {
+        "auth-jwt": {"text": "JWT authentication"},
+        "tls-config": {"text": "TLS certificate setup"},
+        "database-backup": {"text": "Daily database backup"},
+    }
+    # Any keyword matches (OR semantics)
+    filtered = _filter_by_topic(nodes, "auth tls")
+    assert "auth-jwt" in filtered
+    assert "tls-config" in filtered
+    assert "database-backup" not in filtered
+
+
+def test_build_prompt_with_topic(agent_network):
+    data = api.export_network(db_path=agent_network)
+    prompt, stats = build_prompt(data["nodes"], topic="auth")
+
+    assert stats.get("topic") == "auth"
+    # Only auth-related beliefs should appear
+    assert "knows-auth" in prompt
+    # Non-matching beliefs should be filtered out
+    assert "knows-gateway" not in prompt
+
+
+# --- Budget tests ---
+
+def test_build_prompt_with_budget(simple_network):
+    data = api.export_network(db_path=simple_network)
+    prompt_small, stats_small = build_prompt(data["nodes"], budget=2)
+    prompt_large, stats_large = build_prompt(data["nodes"], budget=100)
+
+    # Smaller budget should produce shorter prompt
+    assert len(prompt_small) < len(prompt_large)
+    assert stats_small["budget"] == 2
+    assert stats_large["budget"] == 100
+
+
+# --- Sampling tests ---
+
+def test_sample_beliefs_under_budget():
+    ids = ["a", "b", "c"]
+    result = _sample_beliefs(ids, budget=10)
+    assert result == ids  # all returned when under budget
+
+
+def test_sample_beliefs_over_budget():
+    ids = [f"belief-{i}" for i in range(100)]
+    result = _sample_beliefs(ids, budget=10)
+    assert len(result) == 10
+    assert all(b in ids for b in result)
+
+
+def test_sample_beliefs_reproducible():
+    import random
+    ids = [f"belief-{i}" for i in range(100)]
+    r1 = _sample_beliefs(ids, budget=10, rng=random.Random(42))
+    r2 = _sample_beliefs(ids, budget=10, rng=random.Random(42))
+    assert r1 == r2
+
+
+def test_build_prompt_with_sample(agent_network):
+    data = api.export_network(db_path=agent_network)
+    prompt, stats = build_prompt(data["nodes"], sample=True, seed=42)
+
+    assert stats["sample"] is True
+    # Should still produce a valid prompt
+    assert "Agent:" in prompt

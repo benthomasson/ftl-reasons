@@ -8,6 +8,7 @@ When agent-namespaced nodes are present (from import-agent), groups
 beliefs by agent and encourages cross-agent derivations.
 """
 
+import random
 import re
 import subprocess
 import sys
@@ -134,40 +135,97 @@ def _detect_agents(nodes):
     return dict(agents)
 
 
-def _build_beliefs_section(nodes, derived, agents=None, max_beliefs=300):
-    """Build a compact beliefs section for the derive prompt."""
+def _filter_by_topic(nodes, topic):
+    """Filter nodes by keyword matching on ID and text.
+
+    Returns only nodes whose ID or text contains any of the
+    space-separated keywords (case-insensitive).
+    """
+    keywords = topic.lower().split()
+    filtered = {}
+    for nid, node in nodes.items():
+        searchable = f"{nid} {node.get('text', '')}".lower()
+        if any(kw in searchable for kw in keywords):
+            filtered[nid] = node
+    return filtered
+
+
+def _sample_beliefs(belief_ids, budget, rng=None):
+    """Randomly sample up to budget belief IDs.
+
+    Uses reservoir sampling to get a uniform random subset.
+    """
+    if len(belief_ids) <= budget:
+        return belief_ids
+    if rng is None:
+        rng = random.Random()
+    return rng.sample(belief_ids, budget)
+
+
+def _build_beliefs_section(nodes, derived, agents=None, max_beliefs=300,
+                           sample=False, seed=None):
+    """Build a compact beliefs section for the derive prompt.
+
+    Args:
+        max_beliefs: Maximum number of beliefs to include (budget).
+        sample: If True, randomly sample beliefs instead of alphabetical truncation.
+        seed: Random seed for reproducible sampling.
+    """
     lines = []
+    rng = random.Random(seed) if sample else None
     in_nodes = {k: v for k, v in nodes.items()
                 if v.get("truth_value") == "IN" and k not in derived}
 
     if agents:
-        # Group by agent
+        # Allocate budget proportionally across agents
+        total_agent_beliefs = sum(
+            len([k for k in in_nodes if k.startswith(f"{a}:")])
+            for a in agents
+        )
+        non_agent = {k: v for k, v in in_nodes.items() if ":" not in k}
+        total_all = total_agent_beliefs + len(non_agent)
+
         count = 0
         for agent_name in sorted(agents, key=lambda a: -len(agents[a])):
             agent_beliefs = {k: v for k, v in in_nodes.items()
                             if k.startswith(f"{agent_name}:")}
             if not agent_beliefs:
                 continue
-            lines.append(f"\n### Agent: {agent_name} ({len(agent_beliefs)} beliefs)")
-            for belief_id in sorted(agent_beliefs):
-                if count >= max_beliefs:
-                    break
+
+            # Proportional budget per agent
+            if total_all > 0:
+                agent_budget = max(5, int(max_beliefs * len(agent_beliefs) / total_all))
+            else:
+                agent_budget = max_beliefs
+
+            belief_ids = sorted(agent_beliefs.keys())
+            if sample:
+                belief_ids = _sample_beliefs(belief_ids, agent_budget, rng)
+                belief_ids.sort()
+            else:
+                belief_ids = belief_ids[:agent_budget]
+
+            lines.append(f"\n### Agent: {agent_name} ({len(agent_beliefs)} beliefs, "
+                         f"showing {len(belief_ids)})")
+            for belief_id in belief_ids:
                 text = agent_beliefs[belief_id]["text"][:120]
                 lines.append(f"- `{belief_id}`: {text}")
-                count += 1
-            if count >= max_beliefs:
-                break
+                count += len(belief_ids)
 
         # Non-agent beliefs
-        non_agent = {k: v for k, v in in_nodes.items() if ":" not in k}
         if non_agent:
-            lines.append(f"\n### Local beliefs ({len(non_agent)} beliefs)")
-            for belief_id in sorted(non_agent):
-                if count >= max_beliefs:
-                    break
+            remaining = max(5, max_beliefs - count)
+            local_ids = sorted(non_agent.keys())
+            if sample:
+                local_ids = _sample_beliefs(local_ids, remaining, rng)
+                local_ids.sort()
+            else:
+                local_ids = local_ids[:remaining]
+            lines.append(f"\n### Local beliefs ({len(non_agent)} beliefs, "
+                         f"showing {len(local_ids)})")
+            for belief_id in local_ids:
                 text = non_agent[belief_id]["text"][:120]
                 lines.append(f"- `{belief_id}`: {text}")
-                count += 1
     else:
         # Group by prefix (original code-expert behavior)
         groups = defaultdict(list)
@@ -175,16 +233,31 @@ def _build_beliefs_section(nodes, derived, agents=None, max_beliefs=300):
             prefix = k.split("-")[0] if "-" in k else k
             groups[prefix].append((k, v["text"][:120]))
 
-        count = 0
-        for prefix in sorted(groups, key=lambda p: -len(groups[p])):
-            if count >= max_beliefs:
-                break
-            lines.append(f"\n### {prefix} ({len(groups[prefix])} beliefs)")
-            for belief_id, text in sorted(groups[prefix]):
+        if sample:
+            # Flatten, sample, regroup for display
+            all_items = [(k, text) for items in groups.values() for k, text in items]
+            sampled_keys = set(k for k, _ in _sample_beliefs(all_items, max_beliefs, rng))
+            count = 0
+            for prefix in sorted(groups, key=lambda p: -len(groups[p])):
+                prefix_items = [(k, t) for k, t in groups[prefix] if k in sampled_keys]
+                if not prefix_items:
+                    continue
+                lines.append(f"\n### {prefix} ({len(groups[prefix])} beliefs, "
+                             f"showing {len(prefix_items)})")
+                for belief_id, text in sorted(prefix_items):
+                    lines.append(f"- `{belief_id}`: {text}")
+                    count += 1
+        else:
+            count = 0
+            for prefix in sorted(groups, key=lambda p: -len(groups[p])):
                 if count >= max_beliefs:
                     break
-                lines.append(f"- `{belief_id}`: {text}")
-                count += 1
+                lines.append(f"\n### {prefix} ({len(groups[prefix])} beliefs)")
+                for belief_id, text in sorted(groups[prefix]):
+                    if count >= max_beliefs:
+                        break
+                    lines.append(f"- `{belief_id}`: {text}")
+                    count += 1
 
     return "\n".join(lines)
 
@@ -234,11 +307,24 @@ def parse_proposals(response):
     return proposals
 
 
-def build_prompt(nodes, domain=None):
+def build_prompt(nodes, domain=None, topic=None, budget=300, sample=False,
+                 seed=None):
     """Build the full derive prompt from a network's nodes dict.
+
+    Args:
+        nodes: Dict of node_id -> node data from export_network.
+        domain: Optional domain description for context.
+        topic: Optional keyword filter — only include beliefs matching these keywords.
+        budget: Maximum number of beliefs to include in the prompt (default: 300).
+        sample: If True, randomly sample beliefs instead of alphabetical truncation.
+        seed: Random seed for reproducible sampling.
 
     Returns: (prompt_text, stats_dict)
     """
+    # Apply topic filter before anything else
+    if topic:
+        nodes = _filter_by_topic(nodes, topic)
+
     derived = {k: v for k, v in nodes.items()
                if v.get("justifications") and len(v["justifications"]) > 0}
     in_nodes = {k: v for k, v in nodes.items() if v.get("truth_value") == "IN"}
@@ -259,6 +345,9 @@ def build_prompt(nodes, domain=None):
     else:
         domain_context = ""
 
+    if topic:
+        domain_context += f"\n\nFiltered to beliefs matching: {topic}"
+
     # Cross-agent task instructions
     cross_agent_task = CROSS_AGENT_TASK if agents else ""
 
@@ -270,7 +359,10 @@ def build_prompt(nodes, domain=None):
             parts.append(f"  - {name}: {len(agents[name])} beliefs")
         agents_stats = "\n".join(parts)
 
-    beliefs_section = _build_beliefs_section(nodes, derived, agents)
+    beliefs_section = _build_beliefs_section(
+        nodes, derived, agents, max_beliefs=budget,
+        sample=sample, seed=seed,
+    )
     derived_section = _build_derived_section(nodes, derived)
 
     prompt = DERIVE_PROMPT.format(
@@ -291,6 +383,10 @@ def build_prompt(nodes, domain=None):
         "agents": len(agents),
         "agent_names": sorted(agents.keys()) if agents else [],
     }
+    if topic:
+        stats["topic"] = topic
+    stats["budget"] = budget
+    stats["sample"] = sample
 
     return prompt, stats
 

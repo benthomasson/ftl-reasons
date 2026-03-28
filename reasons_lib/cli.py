@@ -513,11 +513,20 @@ def cmd_derive(args):
         print("No nodes in the network.", file=sys.stderr)
         sys.exit(1)
 
-    prompt, stats = build_prompt(nodes, domain=args.domain)
+    prompt, stats = build_prompt(
+        nodes, domain=args.domain, topic=args.topic,
+        budget=args.budget, sample=args.sample, seed=args.seed,
+    )
 
     print(f"Network: {stats['total_in']} IN beliefs, "
           f"{stats['total_derived']} derived, max depth {stats['max_depth']}",
           file=sys.stderr)
+    if stats.get("topic"):
+        print(f"Topic filter: {stats['topic']}", file=sys.stderr)
+    if stats.get("sample"):
+        print(f"Sampling: {stats['budget']} beliefs (random)", file=sys.stderr)
+    elif stats.get("budget", 300) != 300:
+        print(f"Budget: {stats['budget']} beliefs", file=sys.stderr)
     if stats["agents"]:
         print(f"Agents: {', '.join(stats['agent_names'])}", file=sys.stderr)
 
@@ -746,6 +755,14 @@ def main():
                    help="Show prompt without invoking the model")
     p.add_argument("--domain", default=None,
                    help="Domain description for context (auto-detected from agents)")
+    p.add_argument("--topic", default=None,
+                   help="Keyword filter — only include beliefs matching these keywords")
+    p.add_argument("--budget", type=int, default=300,
+                   help="Maximum number of beliefs in prompt (default: 300)")
+    p.add_argument("--sample", action="store_true",
+                   help="Randomly sample beliefs instead of alphabetical truncation")
+    p.add_argument("--seed", type=int, default=None,
+                   help="Random seed for reproducible sampling")
     p.add_argument("--timeout", type=int, default=300,
                    help="Model timeout in seconds (default: 300)")
 
