@@ -324,6 +324,44 @@ def test_build_prompt_with_sample(agent_network):
 
 # --- Accept (write + re-parse round-trip) tests ---
 
+def test_parse_proposals_old_format():
+    """Parse the v0.9 format with backtick IDs and bold field names."""
+    response = """# Proposed Derivations
+
+Review each proposal below. To accept, run:
+
+---
+
+### DERIVE: `combined-auth-gateway`
+
+Auth tokens flow through the gateway with validation at each layer
+
+- **Antecedents**: `agent-a:knows-auth`, `agent-b:knows-gateway`
+- **Label**: cross-agent authentication flow
+
+### GATE (outlist): `feature-ready`
+
+Feature X is production-ready
+
+- **Antecedents**: `fact-a`, `fact-b`
+- **Unless**: `fact-c`
+- **Label**: gated on bug resolution
+"""
+    proposals = parse_proposals(response)
+    assert len(proposals) == 2
+
+    p = proposals[0]
+    assert p["kind"] == "derive"
+    assert p["id"] == "combined-auth-gateway"
+    assert p["antecedents"] == ["agent-a:knows-auth", "agent-b:knows-gateway"]
+    assert p["label"] == "cross-agent authentication flow"
+
+    p2 = proposals[1]
+    assert p2["kind"] == "gate"
+    assert p2["id"] == "feature-ready"
+    assert p2["unless"] == ["fact-c"]
+
+
 def test_write_proposals_file_roundtrip(tmp_path):
     """Proposals file can be parsed back by parse_proposals."""
     proposals = [

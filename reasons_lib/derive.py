@@ -284,16 +284,23 @@ def _build_derived_section(nodes, derived):
 
 
 def parse_proposals(response):
-    """Parse DERIVE and GATE proposals from LLM response."""
+    """Parse DERIVE and GATE proposals from LLM response.
+
+    Supports two formats:
+    - New (v0.10+): ### DERIVE belief-id
+    - Old (v0.9):   ### DERIVE: `belief-id`  /  ### GATE (outlist): `belief-id`
+    """
     proposals = []
-    pattern = re.compile(
+
+    # New format: ### DERIVE id  or  ### GATE id
+    new_pattern = re.compile(
         r"### (DERIVE|GATE) (\S+)\n"
         r"(.+?)\n"
         r"- Antecedents: (.+?)\n"
         r"(?:- Unless: (.+?)\n)?"
         r"- Label: (.+?)(?:\n|$)",
     )
-    for match in pattern.finditer(response):
+    for match in new_pattern.finditer(response):
         proposal = {
             "kind": match.group(1).lower(),
             "id": match.group(2),
@@ -304,6 +311,33 @@ def parse_proposals(response):
             "label": match.group(6).strip(),
         }
         proposals.append(proposal)
+
+    if proposals:
+        return proposals
+
+    # Old format: ### DERIVE: `id`  or  ### GATE (outlist): `id`
+    old_pattern = re.compile(
+        r"### (?:DERIVE|GATE(?: \(outlist\))?):? `(\S+?)`\s*\n+"
+        r"(.+?)\n+"
+        r"- \*\*Antecedents\*\*: (.+?)\n"
+        r"(?:- \*\*Unless\*\*: (.+?)\n)?"
+        r"- \*\*Label\*\*: (.+?)(?:\n|$)",
+    )
+    for match in old_pattern.finditer(response):
+        # Detect kind from the header text before the colon
+        header_start = response[max(0, match.start() - 30):match.start() + 30]
+        kind = "gate" if "GATE" in header_start else "derive"
+        proposal = {
+            "kind": kind,
+            "id": match.group(1),
+            "text": match.group(2).strip(),
+            "antecedents": [a.strip().strip("`") for a in match.group(3).split(",")],
+            "unless": [u.strip().strip("`") for u in match.group(4).split(",")]
+                      if match.group(4) else [],
+            "label": match.group(5).strip(),
+        }
+        proposals.append(proposal)
+
     return proposals
 
 
