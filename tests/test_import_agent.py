@@ -96,17 +96,17 @@ def test_import_agent_retract_premise_cascades(db, beliefs_file):
     api.import_agent("test-agent", beliefs_file, db_path=db)
 
     result = api.what_if_retract("test-agent:active", db_path=db)
-    # All IN beliefs (alpha-fact, beta-depends-alpha) should cascade OUT
-    # gamma-stale is already OUT so not affected
-    assert result["total_affected"] == 2
+    # All IN beliefs cascade OUT: alpha-fact, beta-depends-alpha, gamma-stale
+    # (gamma-stale was propagated IN after import since its justification is satisfied)
+    assert result["total_affected"] == 3
 
 
 def test_import_agent_retract_premise_actually_cascades(db, beliefs_file):
     api.import_agent("test-agent", beliefs_file, db_path=db)
 
     result = api.retract_node("test-agent:active", db_path=db)
-    # active + alpha-fact + beta-depends-alpha
-    assert len(result["changed"]) == 3
+    # active + alpha-fact + beta-depends-alpha + gamma-stale
+    assert len(result["changed"]) == 4
 
     # Verify they're all OUT now
     alpha = api.show_node("test-agent:alpha-fact", db_path=db)
@@ -164,6 +164,33 @@ def test_import_multiple_agents(db, beliefs_file):
     b = api.show_node("agent-b:alpha-fact", db_path=db)
     assert a["truth_value"] == "OUT"
     assert b["truth_value"] == "IN"
+
+
+def test_import_agent_propagates_truth_values(db, tmp_path):
+    """OUT beliefs with all antecedents IN should flip IN after propagation."""
+    beliefs_text = """\
+## Beliefs
+
+### base-fact [IN] OBSERVATION
+A base fact
+- Source: test.md
+- Date: 2026-04-17
+
+### derived-out [OUT] DERIVED
+Derived but marked OUT in source snapshot
+- Source: test.md
+- Date: 2026-04-17
+- Depends on: base-fact
+"""
+    p = tmp_path / "propagate_beliefs.md"
+    p.write_text(beliefs_text)
+
+    result = api.import_agent("prop-agent", str(p), db_path=db)
+
+    assert result["claims_propagated"] >= 1
+
+    node = api.show_node("prop-agent:derived-out", db_path=db)
+    assert node["truth_value"] == "IN"
 
 
 def test_import_agent_nogoods(db, beliefs_file):

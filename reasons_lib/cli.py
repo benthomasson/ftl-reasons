@@ -395,6 +395,8 @@ def cmd_import_agent(args):
         print(f"  Skipped:   {result['claims_skipped']} (already in network)")
     if result['claims_retracted']:
         print(f"  Retracted: {result['claims_retracted']} (STALE/OUT in source)")
+    if result.get('claims_propagated'):
+        print(f"  Propagated: {result['claims_propagated']} (truth values recomputed)")
     if result['nogoods_imported']:
         print(f"  Nogoods:   {result['nogoods_imported']}")
     print(f"\n  To revoke all: reasons retract {result['active_node']}")
