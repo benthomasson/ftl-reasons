@@ -616,18 +616,24 @@ class Network:
     def recompute_all(self) -> list[str]:
         """Recompute truth values for all derived nodes from the justification graph.
 
-        Returns list of node IDs whose truth values changed.
+        Iterates to a fixpoint so cascading changes propagate regardless of
+        node insertion order.  Returns list of node IDs whose truth values changed.
         """
-        changed = []
-        for nid, node in self.nodes.items():
-            if node.justifications:
-                old = node.truth_value
-                new = self._compute_truth(node)
-                if old != new:
-                    node.truth_value = new
-                    changed.append(nid)
-                    self._log("recompute", nid, new)
-        return changed
+        all_changed: set[str] = set()
+        while True:
+            changed_this_pass = []
+            for nid, node in self.nodes.items():
+                if node.justifications:
+                    old = node.truth_value
+                    new = self._compute_truth(node)
+                    if old != new:
+                        node.truth_value = new
+                        changed_this_pass.append(nid)
+                        self._log("recompute", nid, new)
+            if not changed_this_pass:
+                break
+            all_changed.update(changed_this_pass)
+        return list(all_changed)
 
     def _propagate(self, changed_id: str) -> list[str]:
         """BFS propagation of truth value changes through dependents."""
