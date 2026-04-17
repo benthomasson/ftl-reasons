@@ -32,6 +32,7 @@ def cmd_add(args):
             unless=args.unless or "",
             label=args.label or "",
             source=args.source or "",
+            namespace=getattr(args, "namespace", None),
             db_path=args.db,
         )
         print(f"Added {result['node_id']} [{result['truth_value']}] ({result['type']})")
@@ -488,6 +489,34 @@ def cmd_lookup(args):
     print(result)
 
 
+def cmd_deduplicate(args):
+    result = api.deduplicate(
+        threshold=args.threshold,
+        auto=args.auto,
+        db_path=args.db,
+    )
+
+    if not result["clusters"]:
+        print("No duplicate clusters found.")
+        return
+
+    for i, cluster in enumerate(result["clusters"], 1):
+        print(f"\nCluster {i} ({cluster['size']} beliefs):")
+        for b in cluster["beliefs"]:
+            deps = f"  [{b['dependents']} dependents]" if b["dependents"] else ""
+            kept = "  ← kept" if cluster.get("kept") == b["id"] else ""
+            retracted = "  RETRACTED" if b["id"] in result["retracted"] else ""
+            print(f"  {b['id']}{deps}{kept}{retracted}")
+            print(f"    {b['text'][:100]}")
+
+    print(f"\n{len(result['clusters'])} cluster(s), "
+          f"{sum(c['size'] for c in result['clusters'])} beliefs involved")
+    if result["retracted"]:
+        print(f"Retracted {len(result['retracted'])} duplicates.")
+    elif not args.auto:
+        print("Run with --auto to retract duplicates (keeps one per cluster).")
+
+
 def _derive_one_round(args, round_num=None):
     """Run a single derive round. Returns number of beliefs added (0 = saturated).
 
@@ -699,6 +728,7 @@ def cmd_list(args):
         premises_only=args.premises,
         has_dependents=args.has_dependents,
         challenged=args.challenged,
+        namespace=getattr(args, "namespace", None),
         db_path=args.db,
     )
 
@@ -713,6 +743,17 @@ def cmd_list(args):
         print(f"  [{marker}] {node['id']}{jinfo}{deps}")
 
     print(f"\n{result['count']} node{'s' if result['count'] != 1 else ''}")
+
+
+def cmd_namespaces(args):
+    result = api.list_namespaces(db_path=args.db)
+    if not result["namespaces"]:
+        print("No namespaces found. Use --namespace/-n with 'add' or 'import-agent' to create one.")
+        return
+    for ns in result["namespaces"]:
+        status = "ACTIVE" if ns["active"] else "INACTIVE"
+        print(f"  {ns['namespace']:30s} {status:8s} {ns['in_beliefs']:3d} IN / {ns['total_beliefs']} total")
+    print(f"\n{len(result['namespaces'])} namespace(s)")
 
 
 def main():
@@ -736,6 +777,7 @@ def main():
     p.add_argument("--unless", metavar="X,Y", help="Outlist: comma-separated node IDs that must be OUT")
     p.add_argument("--label", help="Justification label")
     p.add_argument("--source", help="Provenance (repo:path)")
+    p.add_argument("-n", "--namespace", help="Namespace prefix (auto-creates ns:active premise)")
 
     # retract
     p = sub.add_parser("retract", help="Retract a node (mark OUT + cascade)")
@@ -891,12 +933,23 @@ def main():
     p = sub.add_parser("lookup", help="Simple keyword search over beliefs (no neighbor expansion)")
     p.add_argument("query", help="Search terms (all must match, case-insensitive)")
 
+    # deduplicate
+    p = sub.add_parser("deduplicate", help="Find and optionally retract duplicate IN beliefs")
+    p.add_argument("--threshold", type=float, default=0.5,
+                   help="Jaccard similarity threshold for ID tokens (default: 0.5)")
+    p.add_argument("--auto", action="store_true",
+                   help="Automatically retract duplicates (keeps one per cluster)")
+
+    # namespaces
+    sub.add_parser("namespaces", help="List all agent namespaces in the database")
+
     # list
     p = sub.add_parser("list", help="List nodes with filters")
     p.add_argument("--status", choices=["IN", "OUT"], help="Filter by truth value")
     p.add_argument("--premises", action="store_true", help="Only show premises (no justifications)")
     p.add_argument("--has-dependents", action="store_true", help="Only show nodes that others depend on")
     p.add_argument("--challenged", action="store_true", help="Only show nodes with active challenges")
+    p.add_argument("-n", "--namespace", help="Filter to nodes in this namespace")
 
     args = parser.parse_args()
     if not args.command:
@@ -935,6 +988,8 @@ def main():
         "trace": cmd_trace,
         "search": cmd_search,
         "lookup": cmd_lookup,
+        "deduplicate": cmd_deduplicate,
         "list": cmd_list,
+        "namespaces": cmd_namespaces,
     }
     commands[args.command](args)

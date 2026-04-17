@@ -17,6 +17,17 @@ from .storage import Storage
 DEFAULT_DB = "reasons.db"
 
 
+def _resolve_namespace(node_id: str, namespace: str | None) -> str:
+    """Prefix node_id with namespace if provided and not already namespaced.
+
+    Skips prefixing if the node_id already contains a ':' (already namespaced,
+    possibly from a different namespace for cross-namespace references).
+    """
+    if namespace and ":" not in node_id:
+        return f"{namespace}:{node_id}"
+    return node_id
+
+
 def _with_network(db_path: str, write: bool = False):
     """Context manager pattern for load/operate/save."""
     class _Ctx:
@@ -51,6 +62,57 @@ def init_db(db_path: str = DEFAULT_DB, force: bool = False) -> dict:
     return {"db_path": str(p), "created": True}
 
 
+def ensure_namespace(namespace: str, db_path: str = DEFAULT_DB) -> dict:
+    """Ensure a namespace premise node exists (namespace:active).
+
+    Creates the premise if it doesn't exist. This is the node that all
+    beliefs in this namespace depend on — retracting it cascades OUT
+    every belief from this namespace.
+
+    Returns: {"namespace": str, "active_node": str, "created": bool}
+    """
+    active_id = f"{namespace}:active"
+    with _with_network(db_path, write=True) as net:
+        created = False
+        if active_id not in net.nodes:
+            net.add_node(
+                id=active_id,
+                text=f"Agent '{namespace}' beliefs are trusted",
+                metadata={"agent": namespace, "role": "agent_premise"},
+            )
+            created = True
+        return {"namespace": namespace, "active_node": active_id, "created": created}
+
+
+def list_namespaces(db_path: str = DEFAULT_DB) -> dict:
+    """List all namespaces (agents) in the database.
+
+    Detects namespaces by looking for nodes with ':active' suffix
+    that have agent_premise role in metadata.
+
+    Returns: {"namespaces": list[dict]}
+    """
+    with _with_network(db_path) as net:
+        namespaces = []
+        for nid, node in sorted(net.nodes.items()):
+            if nid.endswith(":active") and node.metadata.get("role") == "agent_premise":
+                ns = nid[:-len(":active")]
+                # Count beliefs in this namespace
+                count = sum(1 for n in net.nodes if n.startswith(f"{ns}:") and n != nid)
+                in_count = sum(
+                    1 for n, nd in net.nodes.items()
+                    if n.startswith(f"{ns}:") and n != nid and nd.truth_value == "IN"
+                )
+                namespaces.append({
+                    "namespace": ns,
+                    "active_node": nid,
+                    "active": node.truth_value == "IN",
+                    "total_beliefs": count,
+                    "in_beliefs": in_count,
+                })
+        return {"namespaces": namespaces}
+
+
 def add_node(
     node_id: str,
     text: str,
@@ -59,6 +121,7 @@ def add_node(
     unless: str = "",
     label: str = "",
     source: str = "",
+    namespace: str | None = None,
     db_path: str = DEFAULT_DB,
 ) -> dict:
     """Add a node to the network.
@@ -71,6 +134,7 @@ def add_node(
         unless: Comma-separated outlist IDs (must be OUT for justification to hold)
         label: Justification label
         source: Provenance (repo:path)
+        namespace: Optional namespace prefix (auto-creates ns:active premise)
         db_path: Path to RMS database
 
     Returns: {"node_id": str, "truth_value": str, "type": str}
@@ -88,6 +152,39 @@ def add_node(
         justifications.append(Justification(type="SL", antecedents=[], outlist=outlist, label=label))
 
     with _with_network(db_path, write=True) as net:
+        # Namespace support: prefix node_id and add dependency on ns:active
+        if namespace:
+            node_id = _resolve_namespace(node_id, namespace)
+            active_id = f"{namespace}:active"
+
+            # Ensure the namespace premise exists
+            if active_id not in net.nodes:
+                net.add_node(
+                    id=active_id,
+                    text=f"Agent '{namespace}' beliefs are trusted",
+                    metadata={"agent": namespace, "role": "agent_premise"},
+                )
+
+            # Add ns:active as antecedent to the justification
+            if justifications:
+                # Prepend active_id to existing antecedents
+                j = justifications[0]
+                if active_id not in j.antecedents:
+                    j.antecedents.insert(0, active_id)
+            else:
+                # No explicit justification — create SL depending on ns:active
+                justifications.append(Justification(
+                    type="SL",
+                    antecedents=[active_id],
+                    outlist=outlist,
+                    label=label or f"added by agent: {namespace}",
+                ))
+
+            # Also resolve namespace in antecedent references
+            for j in justifications:
+                j.antecedents = [_resolve_namespace(a, namespace) for a in j.antecedents]
+                j.outlist = [_resolve_namespace(o, namespace) for o in j.outlist]
+
         node = net.add_node(
             id=node_id,
             text=text,
@@ -1011,6 +1108,7 @@ def list_nodes(
     premises_only: bool = False,
     has_dependents: bool = False,
     challenged: bool = False,
+    namespace: str | None = None,
     db_path: str = DEFAULT_DB,
 ) -> dict:
     """List nodes with optional filters.
@@ -1020,6 +1118,8 @@ def list_nodes(
     with _with_network(db_path) as net:
         nodes = []
         for nid, node in sorted(net.nodes.items()):
+            if namespace and not nid.startswith(f"{namespace}:"):
+                continue
             if status and node.truth_value != status:
                 continue
             if premises_only and node.justifications:
@@ -1037,3 +1137,82 @@ def list_nodes(
                 "challenges": node.metadata.get("challenges", []),
             })
         return {"nodes": nodes, "count": len(nodes)}
+
+
+def deduplicate(
+    threshold: float = 0.5,
+    auto: bool = False,
+    db_path: str = DEFAULT_DB,
+) -> dict:
+    """Find clusters of IN beliefs with similar IDs (likely duplicates).
+
+    Uses Jaccard similarity on ID tokens to detect beliefs that say the
+    same thing under slightly different IDs.
+
+    Args:
+        threshold: Minimum Jaccard similarity to consider a pair (default: 0.5)
+        auto: If True, retract all but the oldest belief in each cluster
+        db_path: Path to database
+
+    Returns: {"clusters": list[dict], "retracted": list[str]}
+    """
+    from .derive import _tokenize_id, _jaccard
+
+    with _with_network(db_path, write=auto) as net:
+        in_nodes = [(nid, n) for nid, n in sorted(net.nodes.items())
+                    if n.truth_value == "IN"]
+
+        # Build token sets once
+        tokens = {nid: _tokenize_id(nid) for nid, _ in in_nodes}
+
+        # Union-find to group similar beliefs
+        parent = {nid: nid for nid, _ in in_nodes}
+
+        def find(x):
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(a, b):
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[ra] = rb
+
+        for i, (nid_a, _) in enumerate(in_nodes):
+            for nid_b, _ in in_nodes[i + 1:]:
+                if _jaccard(tokens[nid_a], tokens[nid_b]) >= threshold:
+                    union(nid_a, nid_b)
+
+        # Collect clusters (only groups of 2+)
+        from collections import defaultdict
+        groups = defaultdict(list)
+        for nid, _ in in_nodes:
+            groups[find(nid)].append(nid)
+
+        clusters = []
+        retracted = []
+        for members in groups.values():
+            if len(members) < 2:
+                continue
+            cluster = {
+                "beliefs": [
+                    {"id": nid, "text": net.nodes[nid].text,
+                     "dependents": len(net.nodes[nid].dependents)}
+                    for nid in sorted(members)
+                ],
+                "size": len(members),
+            }
+            clusters.append(cluster)
+
+            if auto:
+                # Keep the one with the most dependents (tie-break: first alphabetically)
+                keep = max(members, key=lambda nid: (len(net.nodes[nid].dependents), -ord(nid[0])))
+                for nid in members:
+                    if nid != keep:
+                        net.retract(nid)
+                        retracted.append(nid)
+                cluster["kept"] = keep
+
+        clusters.sort(key=lambda c: -c["size"])
+        return {"clusters": clusters, "retracted": retracted}

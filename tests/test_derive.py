@@ -9,10 +9,13 @@ from reasons_lib.derive import (
     validate_proposals,
     apply_proposals,
     write_proposals_file,
+    find_similar_out,
     _detect_agents,
     _filter_by_topic,
     _sample_beliefs,
     _get_depth,
+    _tokenize_id,
+    _jaccard,
 )
 
 
@@ -406,3 +409,149 @@ def test_accept_applies_proposals(simple_network, tmp_path):
 
     node = api.show_node("accepted-belief", db_path=simple_network)
     assert node["truth_value"] == "IN"
+
+
+# --- Duplicate detection tests ---
+
+def test_tokenize_id():
+    assert _tokenize_id("gl108-response-validation-disabled") == {
+        "gl108", "response", "validation", "disabled",
+    }
+
+
+def test_tokenize_id_with_namespace():
+    assert _tokenize_id("agent-a:gl108-disabled") == {
+        "agent", "a", "gl108", "disabled",
+    }
+
+
+def test_jaccard_identical():
+    assert _jaccard({"a", "b", "c"}, {"a", "b", "c"}) == 1.0
+
+
+def test_jaccard_disjoint():
+    assert _jaccard({"a", "b"}, {"c", "d"}) == 0.0
+
+
+def test_jaccard_partial():
+    assert _jaccard({"a", "b", "c"}, {"a", "b", "d"}) == pytest.approx(0.5)
+
+
+def test_jaccard_empty():
+    assert _jaccard(set(), {"a"}) == 0.0
+
+
+def test_find_similar_out_catches_variant_ids():
+    nodes = {
+        "gl108-safety-validation-disabled": {
+            "truth_value": "OUT", "text": "GL-108 safety validation is disabled",
+        },
+        "fact-a": {"truth_value": "IN", "text": "Alpha"},
+    }
+    matches = find_similar_out("gl108-response-validation-disabled", nodes)
+    assert len(matches) == 1
+    assert matches[0][0] == "gl108-safety-validation-disabled"
+    assert matches[0][1] >= 0.5
+
+
+def test_find_similar_out_ignores_in_beliefs():
+    nodes = {
+        "gl108-safety-validation-disabled": {
+            "truth_value": "IN", "text": "GL-108 safety validation is disabled",
+        },
+    }
+    matches = find_similar_out("gl108-response-validation-disabled", nodes)
+    assert matches == []
+
+
+def test_find_similar_out_no_match():
+    nodes = {
+        "unrelated-network-config": {
+            "truth_value": "OUT", "text": "Network config is old",
+        },
+    }
+    matches = find_similar_out("gl108-response-validation-disabled", nodes)
+    assert matches == []
+
+
+def test_validate_proposals_skips_similar_to_retracted():
+    """The core bug: variant IDs of retracted beliefs should be caught."""
+    nodes = {
+        "fact-a": {"truth_value": "IN"},
+        "fact-b": {"truth_value": "IN"},
+        "gl108-safety-validation-disabled": {
+            "truth_value": "OUT",
+            "text": "GL-108 safety validation is disabled",
+        },
+    }
+    proposals = [
+        {"id": "gl108-response-validation-disabled",
+         "antecedents": ["fact-a", "fact-b"], "unless": [],
+         "text": "GL-108 response validation is disabled",
+         "kind": "derive", "label": "test"},
+    ]
+    valid, skipped = validate_proposals(proposals, nodes)
+    assert len(valid) == 0
+    assert len(skipped) == 1
+    assert "similar to retracted" in skipped[0][1]
+    assert "gl108-safety-validation-disabled" in skipped[0][1]
+
+
+def test_validate_proposals_allows_unrelated():
+    """Proposals unrelated to retracted beliefs should pass through."""
+    nodes = {
+        "fact-a": {"truth_value": "IN"},
+        "fact-b": {"truth_value": "IN"},
+        "gl108-safety-validation-disabled": {
+            "truth_value": "OUT",
+            "text": "GL-108 safety validation is disabled",
+        },
+    }
+    proposals = [
+        {"id": "auth-token-rotation-needed",
+         "antecedents": ["fact-a", "fact-b"], "unless": [],
+         "text": "Auth tokens need rotation",
+         "kind": "derive", "label": "test"},
+    ]
+    valid, skipped = validate_proposals(proposals, nodes)
+    assert len(valid) == 1
+    assert len(skipped) == 0
+
+
+# --- Deduplicate tests ---
+
+def test_deduplicate_finds_clusters(db):
+    api.add_node("gl108-validation-disabled", "GL-108 validation disabled", db_path=db)
+    api.add_node("gl108-safety-validation-disabled", "GL-108 safety validation disabled", db_path=db)
+    api.add_node("gl108-response-validation-disabled", "GL-108 response validation disabled", db_path=db)
+    api.add_node("unrelated-auth-config", "Auth config is fine", db_path=db)
+
+    result = api.deduplicate(db_path=db)
+    assert len(result["clusters"]) == 1
+    assert result["clusters"][0]["size"] == 3
+    assert result["retracted"] == []
+
+
+def test_deduplicate_no_clusters(db):
+    api.add_node("auth-config", "Auth config", db_path=db)
+    api.add_node("network-topology", "Network topology", db_path=db)
+    api.add_node("database-schema", "Database schema", db_path=db)
+
+    result = api.deduplicate(db_path=db)
+    assert len(result["clusters"]) == 0
+
+
+def test_deduplicate_auto_retracts(db):
+    api.add_node("gl108-validation-disabled", "GL-108 validation disabled", db_path=db)
+    api.add_node("gl108-safety-validation-disabled", "GL-108 safety validation disabled", db_path=db)
+    api.add_node("gl108-response-validation-disabled", "GL-108 response validation disabled", db_path=db)
+
+    result = api.deduplicate(auto=True, db_path=db)
+    assert len(result["clusters"]) == 1
+    assert len(result["retracted"]) == 2
+    assert result["clusters"][0]["kept"] not in result["retracted"]
+
+    # Verify only one is still IN
+    status = api.get_status(db_path=db)
+    in_nodes = [n for n in status["nodes"] if n["truth_value"] == "IN"]
+    assert len(in_nodes) == 1
