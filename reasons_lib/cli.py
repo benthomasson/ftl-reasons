@@ -41,6 +41,20 @@ def cmd_add(args):
         sys.exit(1)
 
 
+def _print_cascade(result):
+    """Print cascade results, splitting went_out from went_in."""
+    went_out = result.get("went_out", [])
+    went_in = result.get("went_in", [])
+    if went_out:
+        print(f"  Went OUT ({len(went_out)}):")
+        for nid in went_out:
+            print(f"    [-] {nid}")
+    if went_in:
+        print(f"  Went IN ({len(went_in)}):")
+        for nid in went_in:
+            print(f"    [+] {nid}")
+
+
 def cmd_retract(args):
     try:
         result = api.retract_node(args.node_id, reason=args.reason or "", db_path=args.db)
@@ -51,7 +65,8 @@ def cmd_retract(args):
     if not result["changed"]:
         print(f"{args.node_id} is already OUT")
     else:
-        print(f"Retracted: {', '.join(result['changed'])}")
+        print(f"Retracted {args.node_id}")
+        _print_cascade(result)
 
 
 def cmd_assert(args):
@@ -64,7 +79,8 @@ def cmd_assert(args):
     if not result["changed"]:
         print(f"{args.node_id} is already IN")
     else:
-        print(f"Asserted: {', '.join(result['changed'])}")
+        print(f"Asserted {args.node_id}")
+        _print_cascade(result)
 
 
 def _print_what_if_results(result, action, node_id):

@@ -203,11 +203,14 @@ def retract_node(node_id: str, reason: str = "", db_path: str = DEFAULT_DB) -> d
         reason: Why this node is being retracted
         db_path: Path to database
 
-    Returns: {"changed": list[str]}
+    Returns: {"changed": list[str], "went_out": list[str], "went_in": list[str]}
     """
     with _with_network(db_path, write=True) as net:
+        before = {nid: n.truth_value for nid, n in net.nodes.items()}
         changed = net.retract(node_id, reason=reason)
-        return {"changed": changed}
+        went_out = [nid for nid in changed if before.get(nid) == "IN" and net.nodes[nid].truth_value == "OUT"]
+        went_in = [nid for nid in changed if before.get(nid) == "OUT" and net.nodes[nid].truth_value == "IN"]
+        return {"changed": changed, "went_out": went_out, "went_in": went_in}
 
 
 def what_if_retract(node_id: str, db_path: str = DEFAULT_DB) -> dict:
@@ -350,11 +353,14 @@ def _cascade_depth(net, target_id: str, retracted_id: str) -> int:
 def assert_node(node_id: str, db_path: str = DEFAULT_DB) -> dict:
     """Assert a node and cascade restoration.
 
-    Returns: {"changed": list[str]}
+    Returns: {"changed": list[str], "went_out": list[str], "went_in": list[str]}
     """
     with _with_network(db_path, write=True) as net:
+        before = {nid: n.truth_value for nid, n in net.nodes.items()}
         changed = net.assert_node(node_id)
-        return {"changed": changed}
+        went_out = [nid for nid in changed if before.get(nid) == "IN" and net.nodes[nid].truth_value == "OUT"]
+        went_in = [nid for nid in changed if before.get(nid) == "OUT" and net.nodes[nid].truth_value == "IN"]
+        return {"changed": changed, "went_out": went_out, "went_in": went_in}
 
 
 def get_status(db_path: str = DEFAULT_DB) -> dict:
