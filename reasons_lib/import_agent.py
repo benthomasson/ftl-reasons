@@ -165,18 +165,7 @@ def import_agent(
                 network.nogoods.append(nogood)
                 nogoods_imported += 1
 
-    # Recompute truth values from the justification graph.
-    # Imported truth values (IN/OUT) may not match what the justifications
-    # actually support, since the source snapshot can diverge from the
-    # imported dependency structure.
-    propagated = 0
-    for node in network.nodes.values():
-        if node.justifications:
-            old = node.truth_value
-            new = network._compute_truth(node)
-            if old != new:
-                node.truth_value = new
-                propagated += 1
+    propagated = len(network.recompute_all())
 
     return {
         "agent": agent_name,

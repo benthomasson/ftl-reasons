@@ -613,6 +613,22 @@ class Network:
         """Return all node IDs currently IN."""
         return [nid for nid, node in self.nodes.items() if node.truth_value == "IN"]
 
+    def recompute_all(self) -> list[str]:
+        """Recompute truth values for all derived nodes from the justification graph.
+
+        Returns list of node IDs whose truth values changed.
+        """
+        changed = []
+        for nid, node in self.nodes.items():
+            if node.justifications:
+                old = node.truth_value
+                new = self._compute_truth(node)
+                if old != new:
+                    node.truth_value = new
+                    changed.append(nid)
+                    self._log("recompute", nid, new)
+        return changed
+
     def _propagate(self, changed_id: str) -> list[str]:
         """BFS propagation of truth value changes through dependents."""
         changed = []

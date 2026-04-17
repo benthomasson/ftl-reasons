@@ -323,19 +323,11 @@ def cmd_trace(args):
 
 
 def cmd_propagate(args):
-    # Propagate is a special case — not in api.py since it's a maintenance operation
     from .storage import Storage
     store = Storage(args.db)
     net = store.load()
 
-    changed = []
-    for node in net.nodes.values():
-        if node.justifications:
-            old = node.truth_value
-            new = net._compute_truth(node)
-            if old != new:
-                node.truth_value = new
-                changed.append(node.id)
+    changed = net.recompute_all()
 
     store.save(net)
     store.close()
