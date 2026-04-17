@@ -1139,6 +1139,26 @@ def list_nodes(
         return {"nodes": nodes, "count": len(nodes)}
 
 
+def _rewrite_dependents(net, old_id: str, new_id: str):
+    """Rewrite justifications that reference old_id to point at new_id.
+
+    Updates both the justification antecedents/outlist and the dependents
+    reverse index so that derived beliefs survive deduplication.
+    """
+    old_node = net.nodes[old_id]
+    new_node = net.nodes[new_id]
+    for dep_id in list(old_node.dependents):
+        dep = net.nodes[dep_id]
+        for j in dep.justifications:
+            if old_id in j.antecedents:
+                j.antecedents = [new_id if a == old_id else a for a in j.antecedents]
+                new_node.dependents.add(dep_id)
+            if old_id in j.outlist:
+                j.outlist = [new_id if o == old_id else o for o in j.outlist]
+                new_node.dependents.add(dep_id)
+        old_node.dependents.discard(dep_id)
+
+
 def deduplicate(
     threshold: float = 0.5,
     auto: bool = False,
@@ -1209,6 +1229,7 @@ def deduplicate(
                 keep = max(members, key=lambda nid: (len(net.nodes[nid].dependents), nid))
                 for nid in members:
                     if nid != keep:
+                        _rewrite_dependents(net, old_id=nid, new_id=keep)
                         net.retract(nid)
                         retracted.append(nid)
                 cluster["kept"] = keep

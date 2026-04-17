@@ -555,3 +555,37 @@ def test_deduplicate_auto_retracts(db):
     status = api.get_status(db_path=db)
     in_nodes = [n for n in status["nodes"] if n["truth_value"] == "IN"]
     assert len(in_nodes) == 1
+
+
+def test_deduplicate_rewrites_dependents(db):
+    """Derived beliefs that depended on a retracted duplicate survive via rewrite."""
+    api.add_node("gl108-validation-disabled", "GL-108 validation disabled", db_path=db)
+    api.add_node("gl108-safety-validation-disabled", "GL-108 safety validation disabled", db_path=db)
+    # Derived belief depends on one of the duplicates
+    api.add_node("safety-pipeline-broken", "Safety pipeline is broken",
+                 sl="gl108-validation-disabled", label="derived", db_path=db)
+
+    result = api.deduplicate(auto=True, db_path=db)
+    kept = result["clusters"][0]["kept"]
+
+    # The derived belief should still be IN
+    node = api.show_node("safety-pipeline-broken", db_path=db)
+    assert node["truth_value"] == "IN"
+    # Its justification should now point at the kept belief
+    assert kept in node["justifications"][0]["antecedents"]
+
+
+def test_deduplicate_rewrites_outlist(db):
+    """Outlist references to retracted duplicates are rewritten."""
+    api.add_node("gl108-validation-disabled", "GL-108 validation disabled", db_path=db)
+    api.add_node("gl108-safety-validation-disabled", "GL-108 safety validation disabled", db_path=db)
+    # Gated belief: IN unless the duplicate is IN
+    api.add_node("safe-to-deploy", "Safe to deploy",
+                 unless="gl108-validation-disabled", label="gated", db_path=db)
+
+    result = api.deduplicate(auto=True, db_path=db)
+    kept = result["clusters"][0]["kept"]
+
+    # The gated belief's outlist should now reference the kept belief
+    node = api.show_node("safe-to-deploy", db_path=db)
+    assert kept in node["justifications"][0]["outlist"]
