@@ -425,6 +425,35 @@ def build_prompt(nodes, domain=None, topic=None, budget=300, sample=False,
     return prompt, stats
 
 
+def _tokenize_id(node_id):
+    """Split a belief ID into a set of lowercase tokens."""
+    return set(node_id.lower().replace(":", "-").split("-"))
+
+
+def _jaccard(a, b):
+    """Jaccard similarity between two sets."""
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)
+
+
+def find_similar_out(proposal_id, nodes, threshold=0.5):
+    """Find OUT beliefs whose ID is similar to the proposed ID.
+
+    Returns list of (out_id, similarity) above threshold, sorted by similarity desc.
+    """
+    p_tokens = _tokenize_id(proposal_id)
+    matches = []
+    for nid, node in nodes.items():
+        if node.get("truth_value") != "OUT":
+            continue
+        sim = _jaccard(p_tokens, _tokenize_id(nid))
+        if sim >= threshold:
+            matches.append((nid, sim))
+    matches.sort(key=lambda x: -x[1])
+    return matches
+
+
 def validate_proposals(proposals, nodes):
     """Validate proposals against the network. Returns (valid, skipped)."""
     valid = []
@@ -437,6 +466,11 @@ def validate_proposals(proposals, nodes):
             continue
         if p["id"] in nodes:
             skipped.append((p, "already exists"))
+            continue
+        similar = find_similar_out(p["id"], nodes)
+        if similar:
+            best_id, best_sim = similar[0]
+            skipped.append((p, f"similar to retracted belief: {best_id} ({best_sim:.0%} overlap)"))
             continue
         valid.append(p)
     return valid, skipped
