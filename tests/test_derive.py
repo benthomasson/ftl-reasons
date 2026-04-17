@@ -632,6 +632,34 @@ def test_write_and_parse_dedup_plan(tmp_path):
     assert parsed[0]["retract"] == ["gl108-safety-validation-disabled"]
 
 
+def test_dedup_plan_end_to_end(db, tmp_path):
+    """Full workflow: deduplicate(auto=False) -> write plan -> parse -> apply."""
+    api.add_node("gl108-validation-disabled", "GL-108 validation disabled", db_path=db)
+    api.add_node("gl108-safety-validation-disabled", "GL-108 safety validation disabled", db_path=db)
+
+    # Step 1: find clusters (no auto)
+    result = api.deduplicate(auto=False, db_path=db)
+    assert len(result["clusters"]) == 1
+    assert result["clusters"][0]["kept"] is not None
+
+    # Step 2: write plan
+    out = str(tmp_path / "plan.md")
+    api.write_dedup_plan(result["clusters"], out)
+
+    # Step 3: parse plan — must have a KEEP
+    text = Path(out).read_text()
+    assert "[KEEP]" in text
+    assert "[RETRACT]" in text
+    parsed = api.parse_dedup_plan(text)
+    assert len(parsed) == 1
+    assert parsed[0]["keep"] is not None
+    assert len(parsed[0]["retract"]) >= 1
+
+    # Step 4: apply
+    apply_result = api.apply_dedup_plan(parsed, db_path=db)
+    assert len(apply_result["retracted"]) >= 1
+
+
 def test_apply_dedup_plan(db):
     """Apply a dedup plan: rewrites justifications and retracts."""
     api.add_node("gl108-validation-disabled", "GL-108 validation disabled", db_path=db)

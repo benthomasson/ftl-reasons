@@ -1223,16 +1223,16 @@ def deduplicate(
                 ],
                 "size": len(members),
             }
+            keep = max(members, key=lambda nid: (len(net.nodes[nid].dependents), nid))
+            cluster["kept"] = keep
             clusters.append(cluster)
 
             if auto:
-                keep = max(members, key=lambda nid: (len(net.nodes[nid].dependents), nid))
                 for nid in members:
                     if nid != keep:
                         _rewrite_dependents(net, old_id=nid, new_id=keep)
                         net.retract(nid)
                         retracted.append(nid)
-                cluster["kept"] = keep
 
         clusters.sort(key=lambda c: -c["size"])
         return {"clusters": clusters, "retracted": retracted}
