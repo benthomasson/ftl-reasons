@@ -561,31 +561,46 @@ def test_deduplicate_rewrites_dependents(db):
     """Derived beliefs that depended on a retracted duplicate survive via rewrite."""
     api.add_node("gl108-validation-disabled", "GL-108 validation disabled", db_path=db)
     api.add_node("gl108-safety-validation-disabled", "GL-108 safety validation disabled", db_path=db)
-    # Derived belief depends on one of the duplicates
+    # Give the first node 2 dependents so it's kept (most dependents wins)
+    api.add_node("other-derived", "Other conclusion",
+                 sl="gl108-validation-disabled", label="filler", db_path=db)
+    api.add_node("another-derived", "Another conclusion",
+                 sl="gl108-validation-disabled", label="filler", db_path=db)
+    # This derived belief depends on the node that will be RETRACTED
     api.add_node("safety-pipeline-broken", "Safety pipeline is broken",
-                 sl="gl108-validation-disabled", label="derived", db_path=db)
+                 sl="gl108-safety-validation-disabled", label="derived", db_path=db)
 
     result = api.deduplicate(auto=True, db_path=db)
     kept = result["clusters"][0]["kept"]
+    assert kept == "gl108-validation-disabled"
+    assert "gl108-safety-validation-disabled" in result["retracted"]
 
-    # The derived belief should still be IN
+    # The derived belief should still be IN (rewrite saved it)
     node = api.show_node("safety-pipeline-broken", db_path=db)
     assert node["truth_value"] == "IN"
-    # Its justification should now point at the kept belief
+    # Its justification should now point at the kept belief, not the retracted one
     assert kept in node["justifications"][0]["antecedents"]
+    assert "gl108-safety-validation-disabled" not in node["justifications"][0]["antecedents"]
 
 
 def test_deduplicate_rewrites_outlist(db):
     """Outlist references to retracted duplicates are rewritten."""
     api.add_node("gl108-validation-disabled", "GL-108 validation disabled", db_path=db)
     api.add_node("gl108-safety-validation-disabled", "GL-108 safety validation disabled", db_path=db)
-    # Gated belief: IN unless the duplicate is IN
+    # Give the first node 2 dependents so it's kept
+    api.add_node("other-derived", "Other conclusion",
+                 sl="gl108-validation-disabled", label="filler", db_path=db)
+    api.add_node("another-derived", "Another conclusion",
+                 sl="gl108-validation-disabled", label="filler", db_path=db)
+    # Gated belief: IN unless the retracted duplicate is IN
     api.add_node("safe-to-deploy", "Safe to deploy",
-                 unless="gl108-validation-disabled", label="gated", db_path=db)
+                 unless="gl108-safety-validation-disabled", label="gated", db_path=db)
 
     result = api.deduplicate(auto=True, db_path=db)
     kept = result["clusters"][0]["kept"]
+    assert kept == "gl108-validation-disabled"
 
     # The gated belief's outlist should now reference the kept belief
     node = api.show_node("safe-to-deploy", db_path=db)
     assert kept in node["justifications"][0]["outlist"]
+    assert "gl108-safety-validation-disabled" not in node["justifications"][0]["outlist"]
