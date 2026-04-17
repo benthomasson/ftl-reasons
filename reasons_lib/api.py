@@ -1151,7 +1151,7 @@ def deduplicate(
 
     Args:
         threshold: Minimum Jaccard similarity to consider a pair (default: 0.5)
-        auto: If True, retract all but the oldest belief in each cluster
+        auto: If True, retract all but the most-connected belief in each cluster
         db_path: Path to database
 
     Returns: {"clusters": list[dict], "retracted": list[str]}
@@ -1206,8 +1206,7 @@ def deduplicate(
             clusters.append(cluster)
 
             if auto:
-                # Keep the one with the most dependents (tie-break: first alphabetically)
-                keep = max(members, key=lambda nid: (len(net.nodes[nid].dependents), -ord(nid[0])))
+                keep = max(members, key=lambda nid: (len(net.nodes[nid].dependents), nid))
                 for nid in members:
                     if nid != keep:
                         net.retract(nid)
