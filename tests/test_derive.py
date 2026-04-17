@@ -1,5 +1,7 @@
 """Tests for derive: reasoning chain derivation."""
 
+from pathlib import Path
+
 import pytest
 
 from reasons_lib import api
@@ -555,3 +557,153 @@ def test_deduplicate_auto_retracts(db):
     status = api.get_status(db_path=db)
     in_nodes = [n for n in status["nodes"] if n["truth_value"] == "IN"]
     assert len(in_nodes) == 1
+
+
+def test_deduplicate_rewrites_dependents(db):
+    """Derived beliefs that depended on a retracted duplicate survive via rewrite."""
+    api.add_node("gl108-validation-disabled", "GL-108 validation disabled", db_path=db)
+    api.add_node("gl108-safety-validation-disabled", "GL-108 safety validation disabled", db_path=db)
+    # Give the first node 2 dependents so it's kept (most dependents wins)
+    api.add_node("other-derived", "Other conclusion",
+                 sl="gl108-validation-disabled", label="filler", db_path=db)
+    api.add_node("another-derived", "Another conclusion",
+                 sl="gl108-validation-disabled", label="filler", db_path=db)
+    # This derived belief depends on the node that will be RETRACTED
+    api.add_node("safety-pipeline-broken", "Safety pipeline is broken",
+                 sl="gl108-safety-validation-disabled", label="derived", db_path=db)
+
+    result = api.deduplicate(auto=True, db_path=db)
+    kept = result["clusters"][0]["kept"]
+    assert kept == "gl108-validation-disabled"
+    assert "gl108-safety-validation-disabled" in result["retracted"]
+
+    # The derived belief should still be IN (rewrite saved it)
+    node = api.show_node("safety-pipeline-broken", db_path=db)
+    assert node["truth_value"] == "IN"
+    # Its justification should now point at the kept belief, not the retracted one
+    assert kept in node["justifications"][0]["antecedents"]
+    assert "gl108-safety-validation-disabled" not in node["justifications"][0]["antecedents"]
+
+
+def test_deduplicate_rewrites_outlist(db):
+    """Outlist references to retracted duplicates are rewritten."""
+    api.add_node("gl108-validation-disabled", "GL-108 validation disabled", db_path=db)
+    api.add_node("gl108-safety-validation-disabled", "GL-108 safety validation disabled", db_path=db)
+    # Give the first node 2 dependents so it's kept
+    api.add_node("other-derived", "Other conclusion",
+                 sl="gl108-validation-disabled", label="filler", db_path=db)
+    api.add_node("another-derived", "Another conclusion",
+                 sl="gl108-validation-disabled", label="filler", db_path=db)
+    # Gated belief: IN unless the retracted duplicate is IN
+    api.add_node("safe-to-deploy", "Safe to deploy",
+                 unless="gl108-safety-validation-disabled", label="gated", db_path=db)
+
+    result = api.deduplicate(auto=True, db_path=db)
+    kept = result["clusters"][0]["kept"]
+    assert kept == "gl108-validation-disabled"
+
+    # The gated belief's outlist should now reference the kept belief
+    node = api.show_node("safe-to-deploy", db_path=db)
+    assert kept in node["justifications"][0]["outlist"]
+    assert "gl108-safety-validation-disabled" not in node["justifications"][0]["outlist"]
+
+
+# --- Dedup plan workflow tests ---
+
+def test_write_and_parse_dedup_plan(tmp_path):
+    """Plan file round-trips through write and parse."""
+    clusters = [
+        {
+            "beliefs": [
+                {"id": "gl108-validation-disabled", "text": "GL-108 validation disabled", "dependents": 2},
+                {"id": "gl108-safety-validation-disabled", "text": "GL-108 safety validation disabled", "dependents": 0},
+            ],
+            "size": 2,
+            "kept": "gl108-validation-disabled",
+        },
+    ]
+    out = str(tmp_path / "plan.md")
+    api.write_dedup_plan(clusters, out)
+
+    text = Path(out).read_text()
+    parsed = api.parse_dedup_plan(text)
+    assert len(parsed) == 1
+    assert parsed[0]["keep"] == "gl108-validation-disabled"
+    assert parsed[0]["retract"] == ["gl108-safety-validation-disabled"]
+
+
+def test_dedup_plan_end_to_end(db, tmp_path):
+    """Full workflow: deduplicate(auto=False) -> write plan -> parse -> apply."""
+    api.add_node("gl108-validation-disabled", "GL-108 validation disabled", db_path=db)
+    api.add_node("gl108-safety-validation-disabled", "GL-108 safety validation disabled", db_path=db)
+
+    # Step 1: find clusters (no auto)
+    result = api.deduplicate(auto=False, db_path=db)
+    assert len(result["clusters"]) == 1
+    assert result["clusters"][0]["kept"] is not None
+
+    # Step 2: write plan
+    out = str(tmp_path / "plan.md")
+    api.write_dedup_plan(result["clusters"], out)
+
+    # Step 3: parse plan — must have a KEEP
+    text = Path(out).read_text()
+    assert "[KEEP]" in text
+    assert "[RETRACT]" in text
+    parsed = api.parse_dedup_plan(text)
+    assert len(parsed) == 1
+    assert parsed[0]["keep"] is not None
+    assert len(parsed[0]["retract"]) >= 1
+
+    # Step 4: apply
+    apply_result = api.apply_dedup_plan(parsed, db_path=db)
+    assert len(apply_result["retracted"]) >= 1
+
+
+def test_apply_dedup_plan(db):
+    """Apply a dedup plan: rewrites justifications and retracts."""
+    api.add_node("gl108-validation-disabled", "GL-108 validation disabled", db_path=db)
+    api.add_node("gl108-safety-validation-disabled", "GL-108 safety validation disabled", db_path=db)
+    # Derived belief depends on the one that will be retracted
+    api.add_node("other-dep", "Filler", sl="gl108-validation-disabled", label="f", db_path=db)
+    api.add_node("another-dep", "Filler 2", sl="gl108-validation-disabled", label="f", db_path=db)
+    api.add_node("safety-broken", "Safety broken",
+                 sl="gl108-safety-validation-disabled", label="d", db_path=db)
+
+    plan = [{"keep": "gl108-validation-disabled",
+             "retract": ["gl108-safety-validation-disabled"]}]
+    result = api.apply_dedup_plan(plan, db_path=db)
+    assert result["retracted"] == ["gl108-safety-validation-disabled"]
+    assert result["errors"] == []
+
+    # Derived belief survived via rewrite
+    node = api.show_node("safety-broken", db_path=db)
+    assert node["truth_value"] == "IN"
+    assert "gl108-validation-disabled" in node["justifications"][0]["antecedents"]
+
+
+def test_apply_dedup_plan_missing_node(db):
+    """Plan with missing nodes reports errors."""
+    api.add_node("existing-node", "Exists", db_path=db)
+    plan = [{"keep": "existing-node", "retract": ["nonexistent"]}]
+    result = api.apply_dedup_plan(plan, db_path=db)
+    assert len(result["errors"]) == 1
+    assert "nonexistent" in result["errors"][0]
+
+
+def test_dedup_plan_user_can_edit_kept(db):
+    """User can change which belief is KEEP in the plan."""
+    api.add_node("gl108-validation-disabled", "GL-108 validation disabled", db_path=db)
+    api.add_node("gl108-safety-validation-disabled", "GL-108 safety validation disabled", db_path=db)
+
+    # User edits the plan to keep the other one
+    plan = [{"keep": "gl108-safety-validation-disabled",
+             "retract": ["gl108-validation-disabled"]}]
+    result = api.apply_dedup_plan(plan, db_path=db)
+    assert result["retracted"] == ["gl108-validation-disabled"]
+
+    # The user's chosen belief is still IN
+    node = api.show_node("gl108-safety-validation-disabled", db_path=db)
+    assert node["truth_value"] == "IN"
+    node = api.show_node("gl108-validation-disabled", db_path=db)
+    assert node["truth_value"] == "OUT"

@@ -1139,6 +1139,26 @@ def list_nodes(
         return {"nodes": nodes, "count": len(nodes)}
 
 
+def _rewrite_dependents(net, old_id: str, new_id: str):
+    """Rewrite justifications that reference old_id to point at new_id.
+
+    Updates both the justification antecedents/outlist and the dependents
+    reverse index so that derived beliefs survive deduplication.
+    """
+    old_node = net.nodes[old_id]
+    new_node = net.nodes[new_id]
+    for dep_id in list(old_node.dependents):
+        dep = net.nodes[dep_id]
+        for j in dep.justifications:
+            if old_id in j.antecedents:
+                j.antecedents = [new_id if a == old_id else a for a in j.antecedents]
+                new_node.dependents.add(dep_id)
+            if old_id in j.outlist:
+                j.outlist = [new_id if o == old_id else o for o in j.outlist]
+                new_node.dependents.add(dep_id)
+        old_node.dependents.discard(dep_id)
+
+
 def deduplicate(
     threshold: float = 0.5,
     auto: bool = False,
@@ -1203,15 +1223,108 @@ def deduplicate(
                 ],
                 "size": len(members),
             }
+            keep = max(members, key=lambda nid: (len(net.nodes[nid].dependents), nid))
+            cluster["kept"] = keep
             clusters.append(cluster)
 
             if auto:
-                keep = max(members, key=lambda nid: (len(net.nodes[nid].dependents), nid))
                 for nid in members:
                     if nid != keep:
+                        _rewrite_dependents(net, old_id=nid, new_id=keep)
                         net.retract(nid)
                         retracted.append(nid)
-                cluster["kept"] = keep
 
         clusters.sort(key=lambda c: -c["size"])
         return {"clusters": clusters, "retracted": retracted}
+
+
+def write_dedup_plan(clusters: list[dict], output_path: str) -> str:
+    """Write a dedup plan file for human review.
+
+    Format is parseable by parse_dedup_plan(). Each cluster lists the
+    kept belief and the beliefs to retract. Remove clusters or lines
+    you disagree with before accepting.
+    """
+    path = Path(output_path)
+    with open(path, "w") as f:
+        f.write("# Deduplication Plan\n\n")
+        f.write("Review each cluster below. Delete any cluster you want to skip,\n")
+        f.write("or change which belief is KEEP vs RETRACT. Then run:\n")
+        f.write("  reasons deduplicate --accept proposed-dedup.md\n\n")
+        f.write("---\n\n")
+
+        for i, cluster in enumerate(clusters, 1):
+            f.write(f"## Cluster {i} ({cluster['size']} beliefs)\n\n")
+            kept = cluster.get("kept")
+            for b in cluster["beliefs"]:
+                action = "KEEP" if b["id"] == kept else "RETRACT"
+                deps = f"  ({b['dependents']} dependents)" if b["dependents"] else ""
+                f.write(f"- [{action}] `{b['id']}`{deps}\n")
+                f.write(f"  {b['text']}\n")
+            f.write("\n")
+
+    return str(path)
+
+
+def parse_dedup_plan(plan_text: str) -> list[dict]:
+    """Parse a dedup plan file into actionable clusters.
+
+    Returns list of {"keep": str, "retract": list[str]} dicts.
+    """
+    import re
+    clusters = []
+    current_keep = None
+    current_retract = []
+
+    for line in plan_text.splitlines():
+        if line.startswith("## Cluster"):
+            if current_keep and current_retract:
+                clusters.append({"keep": current_keep, "retract": current_retract})
+            current_keep = None
+            current_retract = []
+            continue
+
+        m = re.match(r"- \[(KEEP|RETRACT)\] `(\S+?)`", line)
+        if m:
+            action, node_id = m.group(1), m.group(2)
+            if action == "KEEP":
+                current_keep = node_id
+            else:
+                current_retract.append(node_id)
+
+    if current_keep and current_retract:
+        clusters.append({"keep": current_keep, "retract": current_retract})
+
+    return clusters
+
+
+def apply_dedup_plan(
+    plan: list[dict],
+    db_path: str = DEFAULT_DB,
+) -> dict:
+    """Apply a reviewed dedup plan: rewrite justifications and retract duplicates.
+
+    Args:
+        plan: list of {"keep": str, "retract": list[str]} from parse_dedup_plan
+        db_path: Path to database
+
+    Returns: {"applied": int, "retracted": list[str], "errors": list[str]}
+    """
+    with _with_network(db_path, write=True) as net:
+        retracted = []
+        errors = []
+        for cluster in plan:
+            keep = cluster["keep"]
+            if keep not in net.nodes:
+                errors.append(f"keep node not found: {keep}")
+                continue
+            for old_id in cluster["retract"]:
+                if old_id not in net.nodes:
+                    errors.append(f"retract node not found: {old_id}")
+                    continue
+                if net.nodes[old_id].truth_value == "OUT":
+                    continue
+                _rewrite_dependents(net, old_id=old_id, new_id=keep)
+                net.retract(old_id)
+                retracted.append(old_id)
+        return {"applied": len(plan), "retracted": retracted, "errors": errors}
