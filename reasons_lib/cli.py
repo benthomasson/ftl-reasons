@@ -490,6 +490,27 @@ def cmd_lookup(args):
 
 
 def cmd_deduplicate(args):
+    if args.accept:
+        accept_path = Path(args.accept)
+        if not accept_path.exists():
+            print(f"File not found: {accept_path}", file=sys.stderr)
+            sys.exit(1)
+        plan = api.parse_dedup_plan(accept_path.read_text())
+        if not plan:
+            print("No clusters found in plan file.")
+            return
+        result = api.apply_dedup_plan(plan, db_path=args.db)
+        for err in result["errors"]:
+            print(f"  ERROR: {err}", file=sys.stderr)
+        if result["retracted"]:
+            print(f"Retracted {len(result['retracted'])} duplicates "
+                  f"(from {result['applied']} cluster(s)).")
+            for nid in result["retracted"]:
+                print(f"  RETRACTED {nid}")
+        else:
+            print("No duplicates to retract.")
+        return
+
     result = api.deduplicate(
         threshold=args.threshold,
         auto=args.auto,
@@ -504,7 +525,7 @@ def cmd_deduplicate(args):
         print(f"\nCluster {i} ({cluster['size']} beliefs):")
         for b in cluster["beliefs"]:
             deps = f"  [{b['dependents']} dependents]" if b["dependents"] else ""
-            kept = "  ← kept" if cluster.get("kept") == b["id"] else ""
+            kept = "  <- kept" if cluster.get("kept") == b["id"] else ""
             retracted = "  RETRACTED" if b["id"] in result["retracted"] else ""
             print(f"  {b['id']}{deps}{kept}{retracted}")
             print(f"    {b['text'][:100]}")
@@ -514,7 +535,10 @@ def cmd_deduplicate(args):
     if result["retracted"]:
         print(f"Retracted {len(result['retracted'])} duplicates.")
     elif not args.auto:
-        print("Run with --auto to retract duplicates (keeps one per cluster).")
+        output = args.output
+        api.write_dedup_plan(result["clusters"], output)
+        print(f"\nWrote {output} — review, then run:")
+        print(f"  reasons deduplicate --accept {output}")
 
 
 def _derive_one_round(args, round_num=None):
@@ -939,6 +963,10 @@ def main():
                    help="Jaccard similarity threshold for ID tokens (default: 0.5)")
     p.add_argument("--auto", action="store_true",
                    help="Automatically retract duplicates (keeps one per cluster)")
+    p.add_argument("-o", "--output", default="proposed-dedup.md",
+                   help="Output file for dedup plan (default: proposed-dedup.md)")
+    p.add_argument("--accept", metavar="FILE",
+                   help="Apply a reviewed dedup plan file")
 
     # namespaces
     sub.add_parser("namespaces", help="List all agent namespaces in the database")
