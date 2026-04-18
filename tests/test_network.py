@@ -118,6 +118,37 @@ class TestRetraction:
         assert "b" not in changed
 
 
+    def test_retract_already_out_pins_retracted(self):
+        """Retracting an already-OUT node should still set _retracted.
+
+        If B is OUT because its antecedent A is OUT, explicitly retracting B
+        should pin it so it doesn't resurrect when A comes back.
+        """
+        net = Network()
+        net.add_node("a", "Premise A")
+        net.add_node(
+            "b", "Derived B",
+            justifications=[Justification(type="SL", antecedents=["a"])],
+        )
+
+        net.retract("a")
+        assert net.nodes["b"].truth_value == "OUT"
+
+        # B is already OUT — retract it explicitly to pin it
+        result = net.retract("b")
+        assert result == []  # no state change
+        assert net.nodes["b"].metadata.get("_retracted") is True
+
+        # Restore A — C would come back but B should stay pinned
+        net.assert_node("a")
+        assert net.nodes["a"].truth_value == "IN"
+        assert net.nodes["b"].truth_value == "OUT", "pinned node resurrected"
+
+        # recompute_all should also respect the pin
+        net.recompute_all()
+        assert net.nodes["b"].truth_value == "OUT", "recompute resurrected pinned node"
+
+
 class TestRestoration:
     """Restoration — re-asserting a node restores dependents."""
 

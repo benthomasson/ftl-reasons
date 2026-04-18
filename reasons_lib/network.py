@@ -87,6 +87,7 @@ class Network:
 
         node = self.nodes[node_id]
         if node.truth_value == "OUT":
+            node.metadata["_retracted"] = True
             return []
 
         node.truth_value = "OUT"
