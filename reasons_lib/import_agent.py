@@ -233,6 +233,17 @@ def import_agent(
     }
 
 
+def _justifications_match(old, new):
+    """Check if two justification lists are equivalent."""
+    if len(old) != len(new):
+        return False
+    for a, b in zip(old, new):
+        if (a.type != b.type or a.antecedents != b.antecedents
+                or a.outlist != b.outlist or a.label != b.label):
+            return False
+    return True
+
+
 def _update_node_justifications(network, node_id, new_justifications):
     """Replace justifications on an existing node, fixing dependent registrations."""
     node = network.nodes[node_id]
@@ -490,9 +501,10 @@ def sync_agent(
             node.metadata["imported_from"] = source_path
 
             if is_out:
-                _update_node_justifications(network, node_id, [])
+                if not _justifications_match(node.justifications, []):
+                    _update_node_justifications(network, node_id, [])
+                    changed = True
                 retract_after.append(node_id)
-                changed = True
             else:
                 antecedents = []
                 for dep_id in claim["depends_on"]:
@@ -512,7 +524,9 @@ def sync_agent(
                         label=f"imported from agent: {agent_name}",
                     )
                 ]
-                _update_node_justifications(network, node_id, new_justs)
+                if not _justifications_match(node.justifications, new_justs):
+                    _update_node_justifications(network, node_id, new_justs)
+                    changed = True
 
                 if node.metadata.get("_retracted"):
                     node.metadata.pop("_retracted", None)
@@ -731,9 +745,10 @@ def sync_agent_json(
             node.metadata["imported_from"] = source_path
 
             if is_out:
-                _update_node_justifications(network, node_id, [])
+                if not _justifications_match(node.justifications, []):
+                    _update_node_justifications(network, node_id, [])
+                    changed = True
                 retract_after.append(node_id)
-                changed = True
             else:
                 justifications = []
                 for j in ndata.get("justifications", []):
@@ -755,7 +770,9 @@ def sync_agent_json(
                         outlist=[inactive_id],
                         label=f"imported from agent: {agent_name}",
                     )]
-                _update_node_justifications(network, node_id, justifications)
+                if not _justifications_match(node.justifications, justifications):
+                    _update_node_justifications(network, node_id, justifications)
+                    changed = True
 
                 if node.metadata.get("_retracted"):
                     node.metadata.pop("_retracted", None)

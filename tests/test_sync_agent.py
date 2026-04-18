@@ -364,6 +364,55 @@ class TestSyncJson:
         assert node["truth_value"] == "IN"
 
 
+class TestSyncCountingAccuracy:
+    def test_unchanged_beliefs_counted_correctly(self, initial_import):
+        """When nothing changes, beliefs_updated should be 0."""
+        db, tmp_path = initial_import
+        p = tmp_path / "beliefs.md"
+        p.write_text(INITIAL_BELIEFS)
+
+        result = api.sync_agent("test-agent", str(p), db_path=db)
+        assert result["beliefs_updated"] == 0
+        assert result["beliefs_unchanged"] >= 2  # alpha-fact, beta-depends-alpha
+
+    def test_justification_only_change_counted_as_update(self, initial_import):
+        """Changing only dependencies (not text) should count as an update."""
+        db, tmp_path = initial_import
+
+        # Add a new premise, then change beta to depend on it instead of alpha
+        # (text stays the same, only depends_on changes)
+        updated = """\
+## Beliefs
+
+### alpha-fact [IN] OBSERVATION
+Alpha is the first letter of the Greek alphabet
+- Source: alphabet.md
+- Date: 2026-03-28
+
+### new-premise [IN] OBSERVATION
+A new premise
+- Source: alphabet.md
+- Date: 2026-04-18
+
+### beta-depends-alpha [IN] DERIVED
+Beta follows alpha in the alphabet
+- Source: alphabet.md
+- Date: 2026-03-28
+- Depends on: new-premise
+
+### gamma-stale [STALE] OBSERVATION
+Gamma is the fourth letter
+- Source: old.md
+- Stale reason: gamma is actually third
+"""
+        p = tmp_path / "beliefs.md"
+        p.write_text(updated)
+
+        result = api.sync_agent("test-agent", str(p), db_path=db)
+        assert result["beliefs_added"] == 1  # new-premise
+        assert result["beliefs_updated"] >= 1  # beta's justification changed
+
+
 class TestSyncFirstTime:
     def test_sync_works_as_initial_import(self, db, tmp_path):
         """Sync on a fresh agent (no prior import) should work like import."""
