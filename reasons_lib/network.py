@@ -90,6 +90,7 @@ class Network:
             return []
 
         node.truth_value = "OUT"
+        node.metadata["_retracted"] = True
         if reason:
             node.metadata["retract_reason"] = reason
         changed = [node_id]
@@ -112,6 +113,7 @@ class Network:
             return []
 
         node.truth_value = "IN"
+        node.metadata.pop("_retracted", None)
         changed = [node_id]
         self._log("assert", node_id, "IN")
 
@@ -624,7 +626,7 @@ class Network:
         for _ in range(max_iterations):
             changed_this_pass = []
             for nid, node in self.nodes.items():
-                if node.justifications:
+                if node.justifications and not node.metadata.get("_retracted"):
                     old = node.truth_value
                     new = self._compute_truth(node)
                     if old != new:
@@ -651,6 +653,8 @@ class Network:
                     continue
 
                 dep = self.nodes[dep_id]
+                if dep.metadata.get("_retracted"):
+                    continue
                 old_value = dep.truth_value
                 new_value = self._compute_truth(dep)
 
