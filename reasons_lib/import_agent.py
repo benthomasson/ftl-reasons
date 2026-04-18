@@ -165,6 +165,8 @@ def import_agent(
                 network.nogoods.append(nogood)
                 nogoods_imported += 1
 
+    propagated = len(network.recompute_all())
+
     return {
         "agent": agent_name,
         "prefix": prefix,
@@ -173,5 +175,6 @@ def import_agent(
         "claims_imported": imported,
         "claims_skipped": skipped,
         "claims_retracted": retracted,
+        "claims_propagated": propagated,
         "nogoods_imported": nogoods_imported,
     }

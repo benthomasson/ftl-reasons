@@ -323,19 +323,11 @@ def cmd_trace(args):
 
 
 def cmd_propagate(args):
-    # Propagate is a special case — not in api.py since it's a maintenance operation
     from .storage import Storage
     store = Storage(args.db)
     net = store.load()
 
-    changed = []
-    for node in net.nodes.values():
-        if node.justifications:
-            old = node.truth_value
-            new = net._compute_truth(node)
-            if old != new:
-                node.truth_value = new
-                changed.append(node.id)
+    changed = net.recompute_all()
 
     store.save(net)
     store.close()
@@ -395,6 +387,8 @@ def cmd_import_agent(args):
         print(f"  Skipped:   {result['claims_skipped']} (already in network)")
     if result['claims_retracted']:
         print(f"  Retracted: {result['claims_retracted']} (STALE/OUT in source)")
+    if result.get('claims_propagated'):
+        print(f"  Propagated: {result['claims_propagated']} (truth values recomputed)")
     if result['nogoods_imported']:
         print(f"  Nogoods:   {result['nogoods_imported']}")
     print(f"\n  To revoke all: reasons retract {result['active_node']}")
