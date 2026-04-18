@@ -109,6 +109,7 @@ def _get_depth(node_id, nodes, derived, memo=None):
     if node_id not in derived:
         memo[node_id] = 0
         return 0
+    memo[node_id] = 0  # cycle guard
     max_d = 0
     for j in derived[node_id].get("justifications", []):
         for a in j.get("antecedents", []):
@@ -362,39 +363,39 @@ def build_prompt(nodes, domain=None, topic=None, budget=300, sample=False,
     if topic:
         nodes = _filter_by_topic(nodes, topic)
 
-    # Apply structural filters
-    if premises_only:
-        nodes = {k: v for k, v in nodes.items()
-                 if not v.get("justifications")}
-    if has_dependents:
-        referenced = set()
-        for v in nodes.values():
-            for j in v.get("justifications", []):
-                referenced.update(j.get("antecedents", []))
-                referenced.update(j.get("outlist", []))
-        nodes = {k: v for k, v in nodes.items() if k in referenced}
-
-    derived = {k: v for k, v in nodes.items()
-               if v.get("justifications") and len(v["justifications"]) > 0}
-    in_nodes = {k: v for k, v in nodes.items() if v.get("truth_value") == "IN"}
+    # Compute depth and dependency info from the full graph before filtering
+    all_derived = {k: v for k, v in nodes.items()
+                   if v.get("justifications") and len(v["justifications"]) > 0}
     memo = {}
-    max_depth = max((_get_depth(k, nodes, derived, memo) for k in derived), default=0)
+    max_depth = max((_get_depth(k, nodes, all_derived, memo) for k in all_derived), default=0)
 
-    # Apply depth filters
-    if min_depth is not None or max_depth_filter is not None:
+    referenced = set()
+    for v in nodes.values():
+        for j in v.get("justifications", []):
+            referenced.update(j.get("antecedents", []))
+            referenced.update(j.get("outlist", []))
+
+    # Apply all filters
+    if premises_only or has_dependents or min_depth is not None or max_depth_filter is not None:
         filtered = {}
         for k, v in nodes.items():
-            d = _get_depth(k, nodes, derived, memo)
+            if premises_only and v.get("justifications"):
+                continue
+            if has_dependents and k not in referenced:
+                continue
+            d = _get_depth(k, nodes, all_derived, memo)
             if min_depth is not None and d < min_depth:
                 continue
             if max_depth_filter is not None and d > max_depth_filter:
                 continue
             filtered[k] = v
         nodes = filtered
-        derived = {k: v for k, v in nodes.items()
-                   if v.get("justifications") and len(v["justifications"]) > 0}
-        in_nodes = {k: v for k, v in nodes.items() if v.get("truth_value") == "IN"}
-        max_depth = max((_get_depth(k, nodes, derived, memo) for k in derived), default=0)
+
+    derived = {k: v for k, v in nodes.items()
+               if v.get("justifications") and len(v["justifications"]) > 0}
+    in_nodes = {k: v for k, v in nodes.items() if v.get("truth_value") == "IN"}
+    if min_depth is not None or max_depth_filter is not None:
+        max_depth = max((_get_depth(k, nodes, all_derived, memo) for k in derived), default=0)
 
     agents = _detect_agents(nodes)
 
