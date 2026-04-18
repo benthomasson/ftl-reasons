@@ -342,7 +342,7 @@ def parse_proposals(response):
 
 
 def build_prompt(nodes, domain=None, topic=None, budget=300, sample=False,
-                 seed=None):
+                 seed=None, min_depth=None, max_depth_filter=None):
     """Build the full derive prompt from a network's nodes dict.
 
     Args:
@@ -352,6 +352,8 @@ def build_prompt(nodes, domain=None, topic=None, budget=300, sample=False,
         budget: Maximum number of beliefs to include in the prompt (default: 300).
         sample: If True, randomly sample beliefs instead of alphabetical truncation.
         seed: Random seed for reproducible sampling.
+        min_depth: Only include beliefs at this depth or deeper.
+        max_depth_filter: Only include beliefs at this depth or shallower.
 
     Returns: (prompt_text, stats_dict)
     """
@@ -364,6 +366,21 @@ def build_prompt(nodes, domain=None, topic=None, budget=300, sample=False,
     in_nodes = {k: v for k, v in nodes.items() if v.get("truth_value") == "IN"}
     memo = {}
     max_depth = max((_get_depth(k, nodes, derived, memo) for k in derived), default=0)
+
+    # Apply depth filters
+    if min_depth is not None or max_depth_filter is not None:
+        filtered = {}
+        for k, v in nodes.items():
+            d = _get_depth(k, nodes, derived, memo)
+            if min_depth is not None and d < min_depth:
+                continue
+            if max_depth_filter is not None and d > max_depth_filter:
+                continue
+            filtered[k] = v
+        nodes = filtered
+        derived = {k: v for k, v in nodes.items()
+                   if v.get("justifications") and len(v["justifications"]) > 0}
+        in_nodes = {k: v for k, v in nodes.items() if v.get("truth_value") == "IN"}
 
     agents = _detect_agents(nodes)
 
@@ -419,6 +436,10 @@ def build_prompt(nodes, domain=None, topic=None, budget=300, sample=False,
     }
     if topic:
         stats["topic"] = topic
+    if min_depth is not None:
+        stats["min_depth"] = min_depth
+    if max_depth_filter is not None:
+        stats["max_depth_filter"] = max_depth_filter
     stats["budget"] = budget
     stats["sample"] = sample
 
