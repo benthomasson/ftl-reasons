@@ -394,6 +394,38 @@ def cmd_import_agent(args):
     print(f"\n  To revoke all: reasons retract {result['active_node']}")
 
 
+def cmd_sync_agent(args):
+    try:
+        result = api.sync_agent(
+            agent_name=args.agent_name,
+            beliefs_file=args.beliefs_file,
+            nogoods_file=args.nogoods_file,
+            only_in=args.only_in,
+            db_path=args.db,
+        )
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Agent '{result['agent']}' synced:")
+    if result['created_premise']:
+        print(f"  Created premise: {result['active_node']}")
+    if result['beliefs_added']:
+        print(f"  Added:     {result['beliefs_added']} new beliefs")
+    if result['beliefs_updated']:
+        print(f"  Updated:   {result['beliefs_updated']} beliefs")
+    if result['beliefs_removed']:
+        print(f"  Removed:   {result['beliefs_removed']} beliefs (retracted)")
+    if result['beliefs_retracted']:
+        print(f"  Retracted: {result['beliefs_retracted']} (OUT/STALE in source)")
+    if result['beliefs_unchanged']:
+        print(f"  Unchanged: {result['beliefs_unchanged']}")
+    if result.get('beliefs_propagated'):
+        print(f"  Propagated: {result['beliefs_propagated']} (truth values recomputed)")
+    if result['nogoods_imported']:
+        print(f"  Nogoods:   {result['nogoods_imported']}")
+
+
 def cmd_import_beliefs(args):
     try:
         result = api.import_beliefs(
@@ -945,6 +977,13 @@ def main():
     p.add_argument("--nogoods", dest="nogoods_file", help="Path to nogoods.md (auto-detected if next to beliefs.md)")
     p.add_argument("--only-in", action="store_true", help="Only import beliefs with status IN")
 
+    # sync-agent
+    p = sub.add_parser("sync-agent", help="Sync another agent's beliefs (remote wins)")
+    p.add_argument("agent_name", help="Agent name (must match previous import)")
+    p.add_argument("beliefs_file", help="Path to the agent's beliefs.md or network.json")
+    p.add_argument("--nogoods", dest="nogoods_file", help="Path to nogoods.md (auto-detected if next to beliefs.md)")
+    p.add_argument("--only-in", action="store_true", help="Only sync beliefs with status IN")
+
     # import-beliefs
     p = sub.add_parser("import-beliefs", help="Import a beliefs.md registry")
     p.add_argument("beliefs_file", help="Path to beliefs.md")
@@ -1031,6 +1070,7 @@ def main():
         "derive": cmd_derive,
         "accept": cmd_accept,
         "import-agent": cmd_import_agent,
+        "sync-agent": cmd_sync_agent,
         "import-beliefs": cmd_import_beliefs,
         "import-json": cmd_import_json,
         "export": cmd_export,
