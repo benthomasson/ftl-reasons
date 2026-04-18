@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ftl-reasons"
-version = "0.16.0"
+version = "0.17.0"
 description = "Reasons — automatic belief retraction and dependency-directed backtracking"
 readme = "README.md"
 license = "MIT"
