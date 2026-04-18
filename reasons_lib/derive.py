@@ -376,18 +376,20 @@ def build_prompt(nodes, domain=None, topic=None, budget=300, sample=False,
             referenced.update(j.get("outlist", []))
 
     # Apply all filters
-    if premises_only or has_dependents or min_depth is not None or max_depth_filter is not None:
+    need_depth = min_depth is not None or max_depth_filter is not None
+    if premises_only or has_dependents or need_depth:
         filtered = {}
         for k, v in nodes.items():
             if premises_only and v.get("justifications"):
                 continue
             if has_dependents and k not in referenced:
                 continue
-            d = _get_depth(k, nodes, all_derived, memo)
-            if min_depth is not None and d < min_depth:
-                continue
-            if max_depth_filter is not None and d > max_depth_filter:
-                continue
+            if need_depth:
+                d = _get_depth(k, nodes, all_derived, memo)
+                if min_depth is not None and d < min_depth:
+                    continue
+                if max_depth_filter is not None and d > max_depth_filter:
+                    continue
             filtered[k] = v
         nodes = filtered
 
