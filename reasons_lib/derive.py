@@ -303,10 +303,10 @@ def parse_proposals(response):
     for match in new_pattern.finditer(response):
         proposal = {
             "kind": match.group(1).lower(),
-            "id": match.group(2),
+            "id": match.group(2).strip("`"),
             "text": match.group(3).strip(),
-            "antecedents": [a.strip() for a in match.group(4).split(",")],
-            "unless": [u.strip() for u in match.group(5).split(",")]
+            "antecedents": [a.strip().strip("`") for a in match.group(4).split(",")],
+            "unless": [u.strip().strip("`") for u in match.group(5).split(",")]
                       if match.group(5) else [],
             "label": match.group(6).strip(),
         }
