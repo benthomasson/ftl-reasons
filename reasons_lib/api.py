@@ -1127,12 +1127,32 @@ def _format_minimal(net, matched_ids: list[str], neighbor_ids: set[str]) -> str:
     return "\n".join(parts)
 
 
+def _node_depth(nid, net, memo=None):
+    """Compute depth of a node: 0 for premises, max(antecedent depths)+1 for derived."""
+    if memo is None:
+        memo = {}
+    if nid in memo:
+        return memo[nid]
+    node = net.nodes.get(nid)
+    if not node or not node.justifications:
+        memo[nid] = 0
+        return 0
+    max_d = 0
+    for j in node.justifications:
+        for a in j.antecedents:
+            max_d = max(max_d, _node_depth(a, net, memo))
+    memo[nid] = max_d + 1
+    return max_d + 1
+
+
 def list_nodes(
     status: str | None = None,
     premises_only: bool = False,
     has_dependents: bool = False,
     challenged: bool = False,
     namespace: str | None = None,
+    min_depth: int | None = None,
+    max_depth: int | None = None,
     db_path: str = DEFAULT_DB,
 ) -> dict:
     """List nodes with optional filters.
@@ -1140,6 +1160,7 @@ def list_nodes(
     Returns: {"nodes": list[dict], "count": int}
     """
     with _with_network(db_path) as net:
+        memo = {} if (min_depth is not None or max_depth is not None) else None
         nodes = []
         for nid, node in sorted(net.nodes.items()):
             if namespace and not nid.startswith(f"{namespace}:"):
@@ -1152,6 +1173,12 @@ def list_nodes(
                 continue
             if challenged and not node.metadata.get("challenges"):
                 continue
+            if memo is not None:
+                d = _node_depth(nid, net, memo)
+                if min_depth is not None and d < min_depth:
+                    continue
+                if max_depth is not None and d > max_depth:
+                    continue
             nodes.append({
                 "id": nid,
                 "text": node.text,

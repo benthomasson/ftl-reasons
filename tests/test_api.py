@@ -205,3 +205,33 @@ class TestEndToEnd:
 
         status = api.get_status(db_path=db_path)
         assert status["in_count"] == 3
+
+
+class TestListNodesDepth:
+
+    def test_list_min_depth(self, db_path):
+        api.add_node("p1", "premise", db_path=db_path)
+        api.add_node("d1", "derived", sl="p1", label="t", db_path=db_path)
+
+        result = api.list_nodes(min_depth=1, db_path=db_path)
+        ids = [n["id"] for n in result["nodes"]]
+        assert "d1" in ids
+        assert "p1" not in ids
+
+    def test_list_max_depth(self, db_path):
+        api.add_node("p1", "premise", db_path=db_path)
+        api.add_node("d1", "derived", sl="p1", label="t", db_path=db_path)
+
+        result = api.list_nodes(max_depth=0, db_path=db_path)
+        ids = [n["id"] for n in result["nodes"]]
+        assert "p1" in ids
+        assert "d1" not in ids
+
+    def test_list_depth_range(self, db_path):
+        api.add_node("p", "premise", db_path=db_path)
+        api.add_node("mid", "mid", sl="p", label="t", db_path=db_path)
+        api.add_node("top", "top", sl="mid", label="t", db_path=db_path)
+
+        result = api.list_nodes(min_depth=1, max_depth=1, db_path=db_path)
+        ids = [n["id"] for n in result["nodes"]]
+        assert ids == ["mid"]

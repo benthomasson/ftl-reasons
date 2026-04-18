@@ -153,6 +153,24 @@ def test_build_prompt_depth_range(db):
     assert stats["total_derived"] == 1
 
 
+def test_build_prompt_premises_only(simple_network):
+    data = api.export_network(db_path=simple_network)
+    prompt, stats = build_prompt(data["nodes"], premises_only=True)
+
+    assert stats["total_derived"] == 0
+    assert stats["total_in"] == 3
+    assert "fact-a" in prompt
+    assert "derived-ab" not in prompt
+
+
+def test_build_prompt_has_dependents(simple_network):
+    data = api.export_network(db_path=simple_network)
+    _, stats = build_prompt(data["nodes"], has_dependents=True)
+
+    # fact-a and fact-b are antecedents of derived-ab, fact-c has no dependents
+    assert stats["total_in"] == 2
+
+
 def test_parse_proposals_derive():
     response = """Here are my proposals:
 

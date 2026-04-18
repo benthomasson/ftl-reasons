@@ -342,7 +342,8 @@ def parse_proposals(response):
 
 
 def build_prompt(nodes, domain=None, topic=None, budget=300, sample=False,
-                 seed=None, min_depth=None, max_depth_filter=None):
+                 seed=None, min_depth=None, max_depth_filter=None,
+                 premises_only=False, has_dependents=False):
     """Build the full derive prompt from a network's nodes dict.
 
     Args:
@@ -360,6 +361,18 @@ def build_prompt(nodes, domain=None, topic=None, budget=300, sample=False,
     # Apply topic filter before anything else
     if topic:
         nodes = _filter_by_topic(nodes, topic)
+
+    # Apply structural filters
+    if premises_only:
+        nodes = {k: v for k, v in nodes.items()
+                 if not v.get("justifications")}
+    if has_dependents:
+        referenced = set()
+        for v in nodes.values():
+            for j in v.get("justifications", []):
+                referenced.update(j.get("antecedents", []))
+                referenced.update(j.get("outlist", []))
+        nodes = {k: v for k, v in nodes.items() if k in referenced}
 
     derived = {k: v for k, v in nodes.items()
                if v.get("justifications") and len(v["justifications"]) > 0}
