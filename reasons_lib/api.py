@@ -608,7 +608,10 @@ def import_agent(
     only_in: bool = False,
     db_path: str = DEFAULT_DB,
 ) -> dict:
-    """Import another agent's beliefs.md into the local RMS with namespacing.
+    """Import another agent's beliefs into the local RMS with namespacing.
+
+    Accepts beliefs.md (markdown) or network.json (JSON export) files.
+    JSON files preserve full justification structure including outlists.
 
     Each belief is prefixed with 'agent_name:' and depends on a premise
     node 'agent_name:active'. Retracting that premise cascades OUT all
@@ -616,11 +619,26 @@ def import_agent(
 
     Returns: {"agent": str, "claims_imported": int, "claims_skipped": int, ...}
     """
-    from .import_agent import import_agent as _import_agent
-
     beliefs_path = Path(beliefs_file)
     if not beliefs_path.exists():
         raise FileNotFoundError(f"File not found: {beliefs_file}")
+
+    if beliefs_path.suffix == ".json":
+        from .import_agent import import_agent_json as _import_agent_json
+        import json as json_mod
+
+        data = json_mod.loads(beliefs_path.read_text())
+
+        with _with_network(db_path, write=True) as net:
+            return _import_agent_json(
+                net,
+                agent_name=agent_name,
+                data=data,
+                only_in=only_in,
+                source_path=str(beliefs_path),
+            )
+
+    from .import_agent import import_agent as _import_agent
 
     beliefs_text = beliefs_path.read_text()
 

@@ -193,6 +193,154 @@ Derived but marked OUT in source snapshot
     assert node["truth_value"] == "IN"
 
 
+def test_import_agent_preserves_outlist(db, tmp_path):
+    """Unless/outlist relationships should survive import with namespacing."""
+    beliefs_text = """\
+## Beliefs
+
+### base-fact [IN] OBSERVATION
+A base fact
+- Source: test.md
+- Date: 2026-04-17
+
+### blocker [IN] OBSERVATION
+A blocking condition
+- Source: test.md
+- Date: 2026-04-17
+
+### gated-belief [IN] DERIVED
+Only true when blocker is OUT
+- Source: test.md
+- Date: 2026-04-17
+- Depends on: base-fact
+- Unless: blocker
+"""
+    p = tmp_path / "outlist_beliefs.md"
+    p.write_text(beliefs_text)
+
+    api.import_agent("ol-agent", str(p), db_path=db)
+
+    node = api.show_node("ol-agent:gated-belief", db_path=db)
+    j = node["justifications"][0]
+    assert "ol-agent:base-fact" in j["antecedents"]
+    assert "ol-agent:blocker" in j["outlist"]
+    # blocker is IN, so gated-belief should be OUT
+    assert node["truth_value"] == "OUT"
+
+
+def test_import_agent_supersession_preserved(db, tmp_path):
+    """Supersession via outlist: v1 stays OUT when v2 is IN."""
+    beliefs_text = """\
+## Beliefs
+
+### security-v1 [OUT] OBSERVATION
+Old security posture
+- Source: test.md
+- Date: 2026-04-17
+- Unless: security-v2
+
+### security-v2 [IN] OBSERVATION
+New security posture that supersedes v1
+- Source: test.md
+- Date: 2026-04-17
+"""
+    p = tmp_path / "supersede_beliefs.md"
+    p.write_text(beliefs_text)
+
+    api.import_agent("sec-agent", str(p), db_path=db)
+
+    v1 = api.show_node("sec-agent:security-v1", db_path=db)
+    v2 = api.show_node("sec-agent:security-v2", db_path=db)
+    assert v2["truth_value"] == "IN"
+    assert v1["truth_value"] == "OUT"
+    assert "sec-agent:security-v2" in v1["justifications"][0]["outlist"]
+
+
+def test_import_agent_json(db, tmp_path):
+    """Import from JSON export preserves full justification structure."""
+    import json
+
+    data = {
+        "nodes": {
+            "premise-a": {
+                "text": "A premise",
+                "truth_value": "IN",
+                "justifications": [],
+                "source": "test.md",
+            },
+            "derived-b": {
+                "text": "Derived from A unless C",
+                "truth_value": "IN",
+                "justifications": [{
+                    "type": "SL",
+                    "antecedents": ["premise-a"],
+                    "outlist": ["blocker-c"],
+                    "label": "test justification",
+                }],
+                "source": "test.md",
+            },
+            "blocker-c": {
+                "text": "A blocker",
+                "truth_value": "OUT",
+                "justifications": [],
+                "source": "test.md",
+            },
+        },
+        "nogoods": [],
+    }
+
+    p = tmp_path / "network.json"
+    p.write_text(json.dumps(data))
+
+    result = api.import_agent("json-agent", str(p), db_path=db)
+    assert result["claims_imported"] == 3
+
+    node = api.show_node("json-agent:derived-b", db_path=db)
+    j = node["justifications"][0]
+    assert "json-agent:premise-a" in j["antecedents"]
+    assert "json-agent:blocker-c" in j["outlist"]
+    assert node["truth_value"] == "IN"
+
+
+def test_import_agent_json_outlist_blocks(db, tmp_path):
+    """JSON import: when outlist node is IN, gated belief stays OUT."""
+    import json
+
+    data = {
+        "nodes": {
+            "fact": {
+                "text": "A fact",
+                "truth_value": "IN",
+                "justifications": [],
+            },
+            "blocker": {
+                "text": "Active blocker",
+                "truth_value": "IN",
+                "justifications": [],
+            },
+            "gated": {
+                "text": "Gated on blocker being OUT",
+                "truth_value": "IN",
+                "justifications": [{
+                    "type": "SL",
+                    "antecedents": ["fact"],
+                    "outlist": ["blocker"],
+                    "label": "gated",
+                }],
+            },
+        },
+        "nogoods": [],
+    }
+
+    p = tmp_path / "network.json"
+    p.write_text(json.dumps(data))
+
+    api.import_agent("gate-agent", str(p), db_path=db)
+
+    node = api.show_node("gate-agent:gated", db_path=db)
+    assert node["truth_value"] == "OUT"
+
+
 def test_import_agent_nogoods(db, beliefs_file):
     result = api.import_agent("test-agent", beliefs_file, db_path=db)
     assert result["nogoods_imported"] == 1
