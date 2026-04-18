@@ -102,6 +102,21 @@ class TestParseBeliefs:
         assert by_id["derived-c"]["depends_on"] == ["premise-a", "premise-b"]
         assert by_id["premise-a"]["depends_on"] == []
 
+    def test_parses_unless(self):
+        text = """\
+### gated [IN] DERIVED
+A gated belief
+- Depends on: fact-a
+- Unless: blocker-x, blocker-y
+"""
+        claims = parse_beliefs(text)
+        assert claims[0]["unless"] == ["blocker-x", "blocker-y"]
+
+    def test_parses_unless_empty_default(self):
+        claims = parse_beliefs(SAMPLE_BELIEFS)
+        by_id = {c["id"]: c for c in claims}
+        assert by_id["premise-a"]["unless"] == []
+
     def test_parses_stale_metadata(self):
         claims = parse_beliefs(SAMPLE_BELIEFS)
         by_id = {c["id"]: c for c in claims}

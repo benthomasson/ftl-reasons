@@ -925,7 +925,7 @@ def main():
     # import-agent
     p = sub.add_parser("import-agent", help="Import another agent's beliefs with namespacing")
     p.add_argument("agent_name", help="Agent name (used as namespace prefix)")
-    p.add_argument("beliefs_file", help="Path to the agent's beliefs.md")
+    p.add_argument("beliefs_file", help="Path to the agent's beliefs.md or network.json")
     p.add_argument("--nogoods", dest="nogoods_file", help="Path to nogoods.md (auto-detected if next to beliefs.md)")
     p.add_argument("--only-in", action="store_true", help="Only import beliefs with status IN")
 

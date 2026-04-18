@@ -58,6 +58,7 @@ def parse_beliefs(text: str) -> list[dict]:
                 "source_hash": "",
                 "date": "",
                 "depends_on": [],
+                "unless": [],
                 "stale_reason": "",
                 "superseded_by": "",
             }
@@ -75,6 +76,9 @@ def parse_beliefs(text: str) -> list[dict]:
         elif line.startswith("- Depends on: "):
             deps = line[len("- Depends on: "):].strip()
             current["depends_on"] = [d.strip() for d in deps.split(",") if d.strip()]
+        elif line.startswith("- Unless: "):
+            unless = line[len("- Unless: "):].strip()
+            current["unless"] = [u.strip() for u in unless.split(",") if u.strip()]
         elif line.lower().startswith("- stale reason: "):
             current["stale_reason"] = line[line.index(": ") + 2:].strip()
         elif line.lower().startswith("- superseded by: "):
@@ -182,14 +186,16 @@ def import_into_network(
             skipped += 1
             continue
 
-        # Build justifications from depends_on
+        # Build justifications from depends_on and unless
         justifications = None
         deps_in_network = [d for d in claim["depends_on"] if d in claim_by_id]
-        if deps_in_network:
+        unless_in_network = [u for u in claim.get("unless", []) if u in claim_by_id]
+        if deps_in_network or unless_in_network:
             justifications = [
                 Justification(
                     type="SL",
                     antecedents=deps_in_network,
+                    outlist=unless_in_network,
                     label=f"imported from beliefs: {claim['type']}",
                 )
             ]
