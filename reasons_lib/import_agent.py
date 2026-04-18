@@ -260,7 +260,7 @@ def import_agent_json(
             antecedents = [active_id]
             for a in j.get("antecedents", []):
                 antecedents.append(f"{prefix}{a}")
-            outlist = [f"{prefix}{o}" for o in j.get("outlist", [])]
+            outlist = [f"{prefix}{o}" for o in j.get("outlist", []) if o in nodes]
             justifications.append(Justification(
                 type=j.get("type", "SL"),
                 antecedents=antecedents,
