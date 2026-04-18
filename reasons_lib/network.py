@@ -620,7 +620,8 @@ class Network:
         node insertion order.  Returns list of node IDs whose truth values changed.
         """
         all_changed: set[str] = set()
-        while True:
+        max_iterations = len(self.nodes) + 1
+        for _ in range(max_iterations):
             changed_this_pass = []
             for nid, node in self.nodes.items():
                 if node.justifications:
