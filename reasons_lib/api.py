@@ -1137,6 +1137,7 @@ def _node_depth(nid, net, memo=None):
     if not node or not node.justifications:
         memo[nid] = 0
         return 0
+    memo[nid] = 0  # cycle guard
     max_d = 0
     for j in node.justifications:
         for a in j.antecedents:
