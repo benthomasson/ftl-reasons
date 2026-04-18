@@ -585,6 +585,8 @@ def _derive_one_round(args, round_num=None):
     prompt, stats = build_prompt(
         nodes, domain=args.domain, topic=args.topic,
         budget=args.budget, sample=args.sample, seed=args.seed,
+        min_depth=args.min_depth, max_depth_filter=args.max_depth,
+        premises_only=args.premises, has_dependents=args.has_dependents,
     )
 
     print(f"{prefix}Network: {stats['total_in']} IN beliefs, "
@@ -592,6 +594,10 @@ def _derive_one_round(args, round_num=None):
           file=sys.stderr)
     if stats.get("topic"):
         print(f"{prefix}Topic filter: {stats['topic']}", file=sys.stderr)
+    if stats.get("min_depth") is not None or stats.get("max_depth_filter") is not None:
+        lo = stats.get("min_depth", 0)
+        hi = stats.get("max_depth_filter", "∞")
+        print(f"{prefix}Depth filter: {lo}–{hi}", file=sys.stderr)
     if stats.get("sample"):
         print(f"{prefix}Sampling: {stats['budget']} beliefs (random)", file=sys.stderr)
     elif stats.get("budget", 300) != 300:
@@ -763,6 +769,8 @@ def cmd_list(args):
         has_dependents=args.has_dependents,
         challenged=args.challenged,
         namespace=getattr(args, "namespace", None),
+        min_depth=args.min_depth,
+        max_depth=args.max_depth,
         db_path=args.db,
     )
 
@@ -912,6 +920,14 @@ def main():
                    help="Random seed for reproducible sampling")
     p.add_argument("--timeout", type=int, default=300,
                    help="Model timeout in seconds (default: 300)")
+    p.add_argument("--premises", action="store_true",
+                   help="Only include premises (no justifications)")
+    p.add_argument("--has-dependents", action="store_true",
+                   help="Only include nodes that others depend on")
+    p.add_argument("--min-depth", type=int, default=None,
+                   help="Only include beliefs at this depth or deeper (0=premises)")
+    p.add_argument("--max-depth", type=int, default=None,
+                   help="Only include beliefs at this depth or shallower")
     p.add_argument("--exhaust", action="store_true",
                    help="Repeat derive until no new proposals (implies --auto)")
     p.add_argument("--max-rounds", type=int, default=10,
@@ -988,6 +1004,10 @@ def main():
     p.add_argument("--has-dependents", action="store_true", help="Only show nodes that others depend on")
     p.add_argument("--challenged", action="store_true", help="Only show nodes with active challenges")
     p.add_argument("-n", "--namespace", help="Filter to nodes in this namespace")
+    p.add_argument("--min-depth", type=int, default=None,
+                   help="Only show beliefs at this depth or deeper (0=premises)")
+    p.add_argument("--max-depth", type=int, default=None,
+                   help="Only show beliefs at this depth or shallower")
 
     args = parser.parse_args()
     if not args.command:

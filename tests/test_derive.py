@@ -119,6 +119,58 @@ def test_get_depth():
     assert _get_depth("d", nodes, derived) == 2
 
 
+def test_build_prompt_min_depth(simple_network):
+    data = api.export_network(db_path=simple_network)
+    _, stats = build_prompt(data["nodes"], min_depth=1)
+
+    assert stats["min_depth"] == 1
+    # Only derived-ab (depth 1) passes the filter
+    assert stats["total_in"] == 1
+    assert stats["total_derived"] == 1
+
+
+def test_build_prompt_max_depth(simple_network):
+    data = api.export_network(db_path=simple_network)
+    prompt, stats = build_prompt(data["nodes"], max_depth_filter=0)
+
+    assert stats["max_depth_filter"] == 0
+    # Only premises (depth 0) remain
+    assert "fact-a" in prompt
+    assert stats["total_derived"] == 0
+    assert stats["total_in"] == 3
+
+
+def test_build_prompt_depth_range(db):
+    api.add_node("zz-premise-node", "A premise", db_path=db)
+    api.add_node("zz-mid-node", "Middle derived", sl="zz-premise-node", label="test", db_path=db)
+    api.add_node("zz-top-node", "Top derived", sl="zz-mid-node", label="test", db_path=db)
+
+    data = api.export_network(db_path=db)
+    _, stats = build_prompt(data["nodes"], min_depth=1, max_depth_filter=1)
+
+    # Only zz-mid-node (depth 1) passes
+    assert stats["total_in"] == 1
+    assert stats["total_derived"] == 1
+
+
+def test_build_prompt_premises_only(simple_network):
+    data = api.export_network(db_path=simple_network)
+    prompt, stats = build_prompt(data["nodes"], premises_only=True)
+
+    assert stats["total_derived"] == 0
+    assert stats["total_in"] == 3
+    assert "fact-a" in prompt
+    assert "derived-ab" not in prompt
+
+
+def test_build_prompt_has_dependents(simple_network):
+    data = api.export_network(db_path=simple_network)
+    _, stats = build_prompt(data["nodes"], has_dependents=True)
+
+    # fact-a and fact-b are antecedents of derived-ab, fact-c has no dependents
+    assert stats["total_in"] == 2
+
+
 def test_parse_proposals_derive():
     response = """Here are my proposals:
 

@@ -109,6 +109,7 @@ def _get_depth(node_id, nodes, derived, memo=None):
     if node_id not in derived:
         memo[node_id] = 0
         return 0
+    memo[node_id] = 0  # cycle guard
     max_d = 0
     for j in derived[node_id].get("justifications", []):
         for a in j.get("antecedents", []):
@@ -342,7 +343,8 @@ def parse_proposals(response):
 
 
 def build_prompt(nodes, domain=None, topic=None, budget=300, sample=False,
-                 seed=None):
+                 seed=None, min_depth=None, max_depth_filter=None,
+                 premises_only=False, has_dependents=False):
     """Build the full derive prompt from a network's nodes dict.
 
     Args:
@@ -352,6 +354,8 @@ def build_prompt(nodes, domain=None, topic=None, budget=300, sample=False,
         budget: Maximum number of beliefs to include in the prompt (default: 300).
         sample: If True, randomly sample beliefs instead of alphabetical truncation.
         seed: Random seed for reproducible sampling.
+        min_depth: Only include beliefs at this depth or deeper.
+        max_depth_filter: Only include beliefs at this depth or shallower.
 
     Returns: (prompt_text, stats_dict)
     """
@@ -359,11 +363,41 @@ def build_prompt(nodes, domain=None, topic=None, budget=300, sample=False,
     if topic:
         nodes = _filter_by_topic(nodes, topic)
 
+    # Compute depth and dependency info from the full graph before filtering
+    all_derived = {k: v for k, v in nodes.items()
+                   if v.get("justifications") and len(v["justifications"]) > 0}
+    memo = {}
+    max_depth = max((_get_depth(k, nodes, all_derived, memo) for k in all_derived), default=0)
+
+    referenced = set()
+    for v in nodes.values():
+        for j in v.get("justifications", []):
+            referenced.update(j.get("antecedents", []))
+            referenced.update(j.get("outlist", []))
+
+    # Apply all filters
+    need_depth = min_depth is not None or max_depth_filter is not None
+    if premises_only or has_dependents or need_depth:
+        filtered = {}
+        for k, v in nodes.items():
+            if premises_only and v.get("justifications"):
+                continue
+            if has_dependents and k not in referenced:
+                continue
+            if need_depth:
+                d = _get_depth(k, nodes, all_derived, memo)
+                if min_depth is not None and d < min_depth:
+                    continue
+                if max_depth_filter is not None and d > max_depth_filter:
+                    continue
+            filtered[k] = v
+        nodes = filtered
+
     derived = {k: v for k, v in nodes.items()
                if v.get("justifications") and len(v["justifications"]) > 0}
     in_nodes = {k: v for k, v in nodes.items() if v.get("truth_value") == "IN"}
-    memo = {}
-    max_depth = max((_get_depth(k, nodes, derived, memo) for k in derived), default=0)
+    if premises_only or has_dependents or need_depth:
+        max_depth = max((_get_depth(k, nodes, all_derived, memo) for k in derived), default=0)
 
     agents = _detect_agents(nodes)
 
@@ -419,6 +453,10 @@ def build_prompt(nodes, domain=None, topic=None, budget=300, sample=False,
     }
     if topic:
         stats["topic"] = topic
+    if min_depth is not None:
+        stats["min_depth"] = min_depth
+    if max_depth_filter is not None:
+        stats["max_depth_filter"] = max_depth_filter
     stats["budget"] = budget
     stats["sample"] = sample
 
