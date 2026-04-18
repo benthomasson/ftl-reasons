@@ -396,7 +396,7 @@ def build_prompt(nodes, domain=None, topic=None, budget=300, sample=False,
     derived = {k: v for k, v in nodes.items()
                if v.get("justifications") and len(v["justifications"]) > 0}
     in_nodes = {k: v for k, v in nodes.items() if v.get("truth_value") == "IN"}
-    if min_depth is not None or max_depth_filter is not None:
+    if premises_only or has_dependents or need_depth:
         max_depth = max((_get_depth(k, nodes, all_derived, memo) for k in derived), default=0)
 
     agents = _detect_agents(nodes)
