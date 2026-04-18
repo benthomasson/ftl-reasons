@@ -2,12 +2,13 @@
 
 Creates namespaced nodes (agent:belief-id) so beliefs from multiple agents
 can coexist without collision. Each agent gets a premise node (agent:active)
-that all its beliefs depend on — retracting it cascades OUT every belief
-from that agent.
+and a relay node (agent:inactive) that provides a kill switch — retracting
+agent:active makes agent:inactive go IN, which cascades OUT every belief
+from that agent via outlist.
 
-This implements multi-agent belief tracking at the file level: read another
-agent's beliefs.md or network.json, import them with provenance, and let
-the local RMS handle truth maintenance across agents.
+The agent:active premise is NOT placed in antecedents (which would provide
+an always-valid fallback defeating per-belief retraction). Instead,
+agent:inactive is placed in the outlist of each imported belief.
 
 Usage:
     reasons import-agent aap-expert ~/git/aap-expert/beliefs.md
@@ -22,6 +23,52 @@ from .import_beliefs import parse_beliefs, parse_nogoods
 from .network import Network
 
 
+def _fixup_dependents(network):
+    """Re-register dependents for all nodes.
+
+    Outlist nodes may have been added after the nodes that reference them,
+    so add_node couldn't register the dependency at creation time.
+    """
+    for node in network.nodes.values():
+        for j in node.justifications:
+            for ant_id in j.antecedents:
+                if ant_id in network.nodes:
+                    network.nodes[ant_id].dependents.add(node.id)
+            for out_id in j.outlist:
+                if out_id in network.nodes:
+                    network.nodes[out_id].dependents.add(node.id)
+
+
+def _ensure_agent_nodes(network, agent_name, source_path=""):
+    """Create agent:active and agent:inactive nodes if they don't exist.
+
+    Returns (active_id, inactive_id, created_premise).
+    """
+    active_id = f"{agent_name}:active"
+    inactive_id = f"{agent_name}:inactive"
+
+    created_premise = False
+    if active_id not in network.nodes:
+        network.add_node(
+            id=active_id,
+            text=f"Agent '{agent_name}' beliefs are trusted",
+            source=source_path,
+            metadata={"agent": agent_name, "role": "agent_premise"},
+        )
+        created_premise = True
+
+    if inactive_id not in network.nodes:
+        network.add_node(
+            id=inactive_id,
+            text=f"Agent '{agent_name}' kill switch — IN when active is OUT",
+            justifications=[Justification(type="SL", antecedents=[], outlist=[active_id])],
+            source=source_path,
+            metadata={"agent": agent_name, "role": "agent_inactive"},
+        )
+
+    return active_id, inactive_id, created_premise
+
+
 def import_agent(
     network: Network,
     agent_name: str,
@@ -33,9 +80,12 @@ def import_agent(
     """Import another agent's beliefs into the network with namespacing.
 
     Each belief is prefixed with 'agent_name:' to avoid ID collisions.
-    A premise node 'agent_name:active' is created — all imported beliefs
-    depend on it via SL justification. Retracting 'agent_name:active'
-    cascades OUT every belief from that agent.
+    A premise node 'agent_name:active' is created along with a relay node
+    'agent_name:inactive' (IN when active is OUT). Imported beliefs have
+    inactive in their outlist — retracting active cascades everything OUT.
+
+    Beliefs that are OUT/STALE in the source are imported as bare premises
+    with no justification, so recompute_all cannot resurrect them.
 
     Args:
         network: The local RMS network to import into.
@@ -49,19 +99,9 @@ def import_agent(
         Summary dict with counts.
     """
     prefix = f"{agent_name}:"
-    active_id = f"{agent_name}:active"
-
-    # Create or reuse the agent premise node
-    if active_id not in network.nodes:
-        network.add_node(
-            id=active_id,
-            text=f"Agent '{agent_name}' beliefs are trusted",
-            source=source_path,
-            metadata={"agent": agent_name, "role": "agent_premise"},
-        )
-        created_premise = True
-    else:
-        created_premise = False
+    active_id, inactive_id, created_premise = _ensure_agent_nodes(
+        network, agent_name, source_path
+    )
 
     claims = parse_beliefs(beliefs_text)
 
@@ -96,7 +136,7 @@ def import_agent(
     imported = 0
     skipped = 0
     retracted = 0
-    updated = 0
+    retract_after = []
 
     for claim in ordered:
         node_id = f"{prefix}{claim['id']}"
@@ -105,29 +145,31 @@ def import_agent(
             skipped += 1
             continue
 
-        # Build antecedents: always include the agent:active premise,
-        # plus any remapped depends_on from within this agent's beliefs
-        antecedents = [active_id]
-        for dep_id in claim["depends_on"]:
-            prefixed_dep = f"{prefix}{dep_id}"
-            if dep_id in claim_by_id:
-                antecedents.append(prefixed_dep)
+        is_out = claim["status"] in ("STALE", "OUT")
 
-        # Build outlist: remap unless references to namespaced IDs
-        outlist = []
-        for out_id in claim.get("unless", []):
-            prefixed_out = f"{prefix}{out_id}"
-            if out_id in claim_by_id:
-                outlist.append(prefixed_out)
+        if is_out:
+            justifications = []
+        else:
+            antecedents = []
+            for dep_id in claim["depends_on"]:
+                prefixed_dep = f"{prefix}{dep_id}"
+                if dep_id in claim_by_id:
+                    antecedents.append(prefixed_dep)
 
-        justifications = [
-            Justification(
-                type="SL",
-                antecedents=antecedents,
-                outlist=outlist,
-                label=f"imported from agent: {agent_name}",
-            )
-        ]
+            outlist = [inactive_id]
+            for out_id in claim.get("unless", []):
+                prefixed_out = f"{prefix}{out_id}"
+                if out_id in claim_by_id:
+                    outlist.append(prefixed_out)
+
+            justifications = [
+                Justification(
+                    type="SL",
+                    antecedents=antecedents,
+                    outlist=outlist,
+                    label=f"imported from agent: {agent_name}",
+                )
+            ]
 
         metadata = {
             "agent": agent_name,
@@ -140,7 +182,7 @@ def import_agent(
         network.add_node(
             id=node_id,
             text=claim["text"],
-            justifications=justifications,
+            justifications=justifications if justifications else None,
             source=claim["source"],
             source_hash=claim["source_hash"],
             date=claim["date"],
@@ -148,10 +190,8 @@ def import_agent(
         )
         imported += 1
 
-        # STALE and OUT claims get retracted after adding
-        if claim["status"] in ("STALE", "OUT"):
-            network.retract(node_id)
-            retracted += 1
+        if is_out:
+            retract_after.append(node_id)
 
     # Import nogoods (remapped to prefixed IDs)
     nogoods_imported = 0
@@ -172,7 +212,12 @@ def import_agent(
                 network.nogoods.append(nogood)
                 nogoods_imported += 1
 
+    _fixup_dependents(network)
     propagated = len(network.recompute_all())
+
+    for node_id in retract_after:
+        network.retract(node_id)
+        retracted += 1
 
     return {
         "agent": agent_name,
@@ -198,20 +243,14 @@ def import_agent_json(
 
     JSON format preserves full justification structure including outlists,
     providing lossless import of non-monotonic relationships.
+
+    Uses agent:inactive in outlist (not agent:active in antecedents) so
+    per-belief retraction works. OUT beliefs are imported as bare premises.
     """
     prefix = f"{agent_name}:"
-    active_id = f"{agent_name}:active"
-
-    if active_id not in network.nodes:
-        network.add_node(
-            id=active_id,
-            text=f"Agent '{agent_name}' beliefs are trusted",
-            source=source_path,
-            metadata={"agent": agent_name, "role": "agent_premise"},
-        )
-        created_premise = True
-    else:
-        created_premise = False
+    active_id, inactive_id, created_premise = _ensure_agent_nodes(
+        network, agent_name, source_path
+    )
 
     nodes = data.get("nodes", {})
 
@@ -246,6 +285,7 @@ def import_agent_json(
     imported = 0
     skipped = 0
     retracted = 0
+    retract_after = []
 
     for nid, ndata in ordered:
         node_id = f"{prefix}{nid}"
@@ -254,27 +294,32 @@ def import_agent_json(
             skipped += 1
             continue
 
-        # Rebuild justifications with namespaced references
-        justifications = []
-        for j in ndata.get("justifications", []):
-            antecedents = [active_id]
-            for a in j.get("antecedents", []):
-                antecedents.append(f"{prefix}{a}")
-            outlist = [f"{prefix}{o}" for o in j.get("outlist", []) if o in nodes]
-            justifications.append(Justification(
-                type=j.get("type", "SL"),
-                antecedents=antecedents,
-                outlist=outlist,
-                label=j.get("label", f"imported from agent: {agent_name}"),
-            ))
+        is_out = ndata.get("truth_value") == "OUT"
 
-        is_premise = not ndata.get("justifications")
-        if not justifications and not (is_premise and ndata.get("truth_value") == "OUT"):
-            justifications = [Justification(
-                type="SL",
-                antecedents=[active_id],
-                label=f"imported from agent: {agent_name}",
-            )]
+        if is_out:
+            justifications = []
+        else:
+            justifications = []
+            for j in ndata.get("justifications", []):
+                antecedents = [f"{prefix}{a}" for a in j.get("antecedents", [])]
+                outlist = [inactive_id]
+                outlist.extend(
+                    f"{prefix}{o}" for o in j.get("outlist", []) if o in nodes
+                )
+                justifications.append(Justification(
+                    type=j.get("type", "SL"),
+                    antecedents=antecedents,
+                    outlist=outlist,
+                    label=j.get("label", f"imported from agent: {agent_name}"),
+                ))
+
+            if not justifications:
+                justifications = [Justification(
+                    type="SL",
+                    antecedents=[],
+                    outlist=[inactive_id],
+                    label=f"imported from agent: {agent_name}",
+                )]
 
         metadata = ndata.get("metadata", {}).copy()
         metadata.update({
@@ -294,9 +339,8 @@ def import_agent_json(
         )
         imported += 1
 
-        if ndata.get("truth_value") == "OUT":
-            network.retract(node_id)
-            retracted += 1
+        if is_out:
+            retract_after.append(node_id)
 
     # Import nogoods
     nogoods_imported = 0
@@ -314,7 +358,12 @@ def import_agent_json(
             ))
             nogoods_imported += 1
 
+    _fixup_dependents(network)
     propagated = len(network.recompute_all())
+
+    for node_id in retract_after:
+        network.retract(node_id)
+        retracted += 1
 
     return {
         "agent": agent_name,

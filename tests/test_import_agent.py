@@ -86,10 +86,12 @@ def test_import_agent_remaps_dependencies(db, beliefs_file):
     node = api.show_node("test-agent:beta-depends-alpha", db_path=db)
     assert node["truth_value"] == "IN"
 
-    # Should depend on both the agent premise and the remapped alpha
+    # Should depend on remapped alpha (not active — active is no longer an antecedent)
     j = node["justifications"][0]
-    assert "test-agent:active" in j["antecedents"]
     assert "test-agent:alpha-fact" in j["antecedents"]
+    assert "test-agent:active" not in j["antecedents"]
+    # Kill switch via outlist
+    assert "test-agent:inactive" in j["outlist"]
 
 
 def test_import_agent_retract_premise_cascades(db, beliefs_file):
@@ -149,8 +151,8 @@ def test_import_multiple_agents(db, beliefs_file):
     api.import_agent("agent-b", beliefs_file, db_path=db)
 
     status = api.get_status(db_path=db)
-    # 2 premises + 2 * 3 beliefs = 8 total
-    assert status["total"] == 8
+    # 2 active + 2 inactive + 2 * 3 beliefs = 10 total
+    assert status["total"] == 10
 
     # Both agents have their own alpha-fact
     a = api.show_node("agent-a:alpha-fact", db_path=db)
@@ -166,8 +168,8 @@ def test_import_multiple_agents(db, beliefs_file):
     assert b["truth_value"] == "IN"
 
 
-def test_import_agent_propagates_truth_values(db, tmp_path):
-    """OUT beliefs with all antecedents IN should flip IN after propagation."""
+def test_import_agent_preserves_out_status(db, tmp_path):
+    """OUT beliefs from source stay OUT — not resurrected by recompute."""
     beliefs_text = """\
 ## Beliefs
 
@@ -187,10 +189,8 @@ Derived but marked OUT in source snapshot
 
     result = api.import_agent("prop-agent", str(p), db_path=db)
 
-    assert result["claims_propagated"] >= 1
-
     node = api.show_node("prop-agent:derived-out", db_path=db)
-    assert node["truth_value"] == "IN"
+    assert node["truth_value"] == "OUT"
 
 
 def test_import_agent_preserves_outlist(db, tmp_path):
@@ -229,7 +229,7 @@ Only true when blocker is OUT
 
 
 def test_import_agent_supersession_preserved(db, tmp_path):
-    """Supersession via outlist: v1 stays OUT when v2 is IN."""
+    """Supersession: v1 is OUT in source, imported as bare premise (stays OUT)."""
     beliefs_text = """\
 ## Beliefs
 
@@ -253,7 +253,8 @@ New security posture that supersedes v1
     v2 = api.show_node("sec-agent:security-v2", db_path=db)
     assert v2["truth_value"] == "IN"
     assert v1["truth_value"] == "OUT"
-    assert "sec-agent:security-v2" in v1["justifications"][0]["outlist"]
+    # v1 is OUT in source → imported as bare premise (no justification)
+    assert v1["justifications"] == []
 
 
 def test_import_agent_json(db, tmp_path):
@@ -298,8 +299,16 @@ def test_import_agent_json(db, tmp_path):
     node = api.show_node("json-agent:derived-b", db_path=db)
     j = node["justifications"][0]
     assert "json-agent:premise-a" in j["antecedents"]
+    assert "json-agent:active" not in j["antecedents"]
     assert "json-agent:blocker-c" in j["outlist"]
+    assert "json-agent:inactive" in j["outlist"]
+    # blocker-c is OUT → outlist satisfied → derived-b is IN
     assert node["truth_value"] == "IN"
+
+    # blocker-c is OUT in source → bare premise, retracted
+    blocker = api.show_node("json-agent:blocker-c", db_path=db)
+    assert blocker["truth_value"] == "OUT"
+    assert blocker["justifications"] == []
 
 
 def test_import_agent_json_outlist_blocks(db, tmp_path):
@@ -339,6 +348,104 @@ def test_import_agent_json_outlist_blocks(db, tmp_path):
 
     node = api.show_node("gate-agent:gated", db_path=db)
     assert node["truth_value"] == "OUT"
+
+
+def test_retracted_belief_survives_propagate(db, tmp_path):
+    """Regression: retracted imported beliefs must not resurrect on propagate.
+
+    This is the core bug from issue #16 — active premise as antecedent
+    provided an always-valid fallback that defeated per-belief retraction.
+    """
+    beliefs_text = """\
+## Beliefs
+
+### premise-a [IN] OBSERVATION
+A premise that will be retracted
+- Source: test.md
+- Date: 2026-04-18
+
+### derived-b [IN] DERIVED
+Depends on premise-a
+- Source: test.md
+- Date: 2026-04-18
+- Depends on: premise-a
+"""
+    p = tmp_path / "beliefs.md"
+    p.write_text(beliefs_text)
+
+    api.import_agent("fix-agent", str(p), db_path=db)
+
+    # Both should be IN after import
+    a = api.show_node("fix-agent:premise-a", db_path=db)
+    assert a["truth_value"] == "IN"
+    b = api.show_node("fix-agent:derived-b", db_path=db)
+    assert b["truth_value"] == "IN"
+
+    # Retract the premise — should cascade to derived
+    result = api.retract_node("fix-agent:premise-a", db_path=db)
+    assert "fix-agent:premise-a" in result["changed"]
+
+    # Run propagate (recompute_all) — retractions must stick
+    from reasons_lib.storage import Storage
+
+    store = Storage(db)
+    net = store.load()
+    net.recompute_all()
+    store.save(net)
+    store.close()
+
+    a = api.show_node("fix-agent:premise-a", db_path=db)
+    assert a["truth_value"] == "OUT", "retracted premise resurrected on propagate"
+
+    b = api.show_node("fix-agent:derived-b", db_path=db)
+    assert b["truth_value"] == "OUT", "dependent of retracted premise resurrected"
+
+
+def test_retracted_json_belief_survives_propagate(db, tmp_path):
+    """Same as above but via JSON import path."""
+    import json
+
+    data = {
+        "nodes": {
+            "premise-a": {
+                "text": "A premise",
+                "truth_value": "IN",
+                "justifications": [],
+            },
+            "derived-b": {
+                "text": "Depends on A",
+                "truth_value": "IN",
+                "justifications": [{
+                    "type": "SL",
+                    "antecedents": ["premise-a"],
+                }],
+            },
+        },
+        "nogoods": [],
+    }
+
+    p = tmp_path / "network.json"
+    p.write_text(json.dumps(data))
+
+    api.import_agent("jfix-agent", str(p), db_path=db)
+
+    # Retract the premise
+    api.retract_node("jfix-agent:premise-a", db_path=db)
+
+    # Run propagate — retractions must stick
+    from reasons_lib.storage import Storage
+
+    store = Storage(db)
+    net = store.load()
+    net.recompute_all()
+    store.save(net)
+    store.close()
+
+    a = api.show_node("jfix-agent:premise-a", db_path=db)
+    assert a["truth_value"] == "OUT", "retracted premise resurrected on propagate"
+
+    b = api.show_node("jfix-agent:derived-b", db_path=db)
+    assert b["truth_value"] == "OUT", "dependent of retracted premise resurrected"
 
 
 def test_import_agent_nogoods(db, beliefs_file):

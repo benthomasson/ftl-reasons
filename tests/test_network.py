@@ -118,6 +118,37 @@ class TestRetraction:
         assert "b" not in changed
 
 
+    def test_retract_already_out_pins_retracted(self):
+        """Retracting an already-OUT node should still set _retracted.
+
+        If B is OUT because its antecedent A is OUT, explicitly retracting B
+        should pin it so it doesn't resurrect when A comes back.
+        """
+        net = Network()
+        net.add_node("a", "Premise A")
+        net.add_node(
+            "b", "Derived B",
+            justifications=[Justification(type="SL", antecedents=["a"])],
+        )
+
+        net.retract("a")
+        assert net.nodes["b"].truth_value == "OUT"
+
+        # B is already OUT — retract it explicitly to pin it
+        result = net.retract("b")
+        assert result == []  # no state change
+        assert net.nodes["b"].metadata.get("_retracted") is True
+
+        # Restore A — C would come back but B should stay pinned
+        net.assert_node("a")
+        assert net.nodes["a"].truth_value == "IN"
+        assert net.nodes["b"].truth_value == "OUT", "pinned node resurrected"
+
+        # recompute_all should also respect the pin
+        net.recompute_all()
+        assert net.nodes["b"].truth_value == "OUT", "recompute resurrected pinned node"
+
+
 class TestRestoration:
     """Restoration — re-asserting a node restores dependents."""
 
@@ -363,4 +394,49 @@ class TestDiamondDependency:
         net.assert_node("a")
         assert net.nodes["b"].truth_value == "IN"
         assert net.nodes["c"].truth_value == "IN"
+        assert net.nodes["d"].truth_value == "IN"
+
+    def test_diamond_with_retracted_intermediate(self):
+        """A → B, A → C, B+C → D. Retract B explicitly, then change A.
+
+        B is retracted (sticky) so propagation skips it. D should stay OUT
+        because B remains OUT. C should still respond to A's changes.
+        """
+        net = Network()
+        net.add_node("a", "Premise A")
+        net.add_node(
+            "b", "Derived B",
+            justifications=[Justification(type="SL", antecedents=["a"])],
+        )
+        net.add_node(
+            "c", "Derived C",
+            justifications=[Justification(type="SL", antecedents=["a"])],
+        )
+        net.add_node(
+            "d", "Derived D",
+            justifications=[Justification(type="SL", antecedents=["b", "c"])],
+        )
+
+        # Explicitly retract B — sticky
+        net.retract("b")
+        assert net.nodes["b"].truth_value == "OUT"
+        assert net.nodes["d"].truth_value == "OUT"  # B is OUT → D invalid
+
+        # Retract and restore A — C follows, B stays retracted, D stays OUT
+        net.retract("a")
+        assert net.nodes["c"].truth_value == "OUT"
+
+        net.assert_node("a")
+        assert net.nodes["c"].truth_value == "IN"
+        assert net.nodes["b"].truth_value == "OUT", "retracted B should not resurrect"
+        assert net.nodes["d"].truth_value == "OUT", "D needs B which is retracted"
+
+        # recompute_all should not resurrect B either
+        net.recompute_all()
+        assert net.nodes["b"].truth_value == "OUT", "recompute resurrected retracted B"
+        assert net.nodes["d"].truth_value == "OUT", "recompute resurrected D via B"
+
+        # Explicitly asserting B clears _retracted — D should come back
+        net.assert_node("b")
+        assert net.nodes["b"].truth_value == "IN"
         assert net.nodes["d"].truth_value == "IN"

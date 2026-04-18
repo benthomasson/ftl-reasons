@@ -557,7 +557,7 @@ def export_network(db_path: str = DEFAULT_DB) -> dict:
                     "source": n.source,
                     "source_hash": n.source_hash,
                     "date": n.date,
-                    "metadata": n.metadata,
+                    "metadata": {k: v for k, v in n.metadata.items() if not k.startswith("_")},
                 }
                 for nid, n in sorted(net.nodes.items())
             },
