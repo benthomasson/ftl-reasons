@@ -169,6 +169,22 @@ Second gated belief
     assert len(proposals) == 2
 
 
+def test_parse_proposals_strips_backticks():
+    response = """
+### DERIVE `cross-validated-readiness`
+Production readiness is cross-validated
+- Antecedents: `product:production-readiness`, `code:full-stack-reliability`
+- Unless: `blocker:critical-bug`
+- Label: cross-validated
+"""
+    proposals = parse_proposals(response)
+    assert len(proposals) == 1
+    p = proposals[0]
+    assert p["id"] == "cross-validated-readiness"
+    assert p["antecedents"] == ["product:production-readiness", "code:full-stack-reliability"]
+    assert p["unless"] == ["blocker:critical-bug"]
+
+
 def test_validate_proposals_missing_antecedent():
     nodes = {"fact-a": {}, "fact-b": {}}
     proposals = [
