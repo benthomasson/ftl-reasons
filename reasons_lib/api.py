@@ -664,6 +664,65 @@ def import_agent(
         )
 
 
+def sync_agent(
+    agent_name: str,
+    beliefs_file: str,
+    nogoods_file: str | None = None,
+    only_in: bool = False,
+    db_path: str = DEFAULT_DB,
+) -> dict:
+    """Sync another agent's beliefs into the local RMS (remote wins).
+
+    Accepts beliefs.md (markdown) or network.json (JSON export) files.
+    Updates existing beliefs, adds new ones, retracts removed ones.
+
+    Returns: {"agent": str, "beliefs_added": int, "beliefs_updated": int, ...}
+    """
+    beliefs_path = Path(beliefs_file)
+    if not beliefs_path.exists():
+        raise FileNotFoundError(f"File not found: {beliefs_file}")
+
+    if beliefs_path.suffix == ".json":
+        from .import_agent import sync_agent_json as _sync_agent_json
+        import json as json_mod
+
+        data = json_mod.loads(beliefs_path.read_text())
+
+        with _with_network(db_path, write=True) as net:
+            return _sync_agent_json(
+                net,
+                agent_name=agent_name,
+                data=data,
+                only_in=only_in,
+                source_path=str(beliefs_path),
+            )
+
+    from .import_agent import sync_agent as _sync_agent
+
+    beliefs_text = beliefs_path.read_text()
+
+    nogoods_text = None
+    if nogoods_file:
+        nogoods_path = Path(nogoods_file)
+        if not nogoods_path.exists():
+            raise FileNotFoundError(f"Nogoods file not found: {nogoods_file}")
+        nogoods_text = nogoods_path.read_text()
+    else:
+        auto_nogoods = beliefs_path.parent / "nogoods.md"
+        if auto_nogoods.exists():
+            nogoods_text = auto_nogoods.read_text()
+
+    with _with_network(db_path, write=True) as net:
+        return _sync_agent(
+            net,
+            agent_name=agent_name,
+            beliefs_text=beliefs_text,
+            nogoods_text=nogoods_text,
+            only_in=only_in,
+            source_path=str(beliefs_path),
+        )
+
+
 def import_json(json_file: str, db_path: str = DEFAULT_DB) -> dict:
     """Import a network from a JSON file (produced by export).
 
