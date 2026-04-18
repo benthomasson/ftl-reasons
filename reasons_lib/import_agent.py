@@ -571,12 +571,17 @@ def sync_agent(
             if is_out:
                 retract_after.append(node_id)
 
-    # Retract beliefs removed from remote
+    # Retract beliefs removed from remote (skip already-retracted)
     beliefs_removed = 0
     removed_ids = local_agent_ids - remote_ids
     for node_id in sorted(removed_ids):
-        network.retract(node_id)
-        beliefs_removed += 1
+        node = network.nodes[node_id]
+        if node.truth_value == "IN":
+            network.retract(node_id)
+            beliefs_removed += 1
+        elif not node.metadata.get("_retracted"):
+            node.metadata["_retracted"] = True
+            beliefs_removed += 1
 
     _fixup_dependents(network)
 
@@ -810,12 +815,17 @@ def sync_agent_json(
             if is_out:
                 retract_after.append(node_id)
 
-    # Retract beliefs removed from remote
+    # Retract beliefs removed from remote (skip already-retracted)
     beliefs_removed = 0
     removed_ids = local_agent_ids - remote_ids
     for node_id in sorted(removed_ids):
-        network.retract(node_id)
-        beliefs_removed += 1
+        node = network.nodes[node_id]
+        if node.truth_value == "IN":
+            network.retract(node_id)
+            beliefs_removed += 1
+        elif not node.metadata.get("_retracted"):
+            node.metadata["_retracted"] = True
+            beliefs_removed += 1
 
     _fixup_dependents(network)
 

@@ -377,3 +377,93 @@ class TestSyncFirstTime:
 
         node = api.show_node("fresh-agent:alpha-fact", db_path=db)
         assert node["truth_value"] == "IN"
+
+
+class TestSyncIdempotency:
+    def test_resync_removed_no_double_count(self, initial_import):
+        """Re-syncing after a removal should not re-count removed beliefs."""
+        db, tmp_path = initial_import
+
+        reduced = """\
+## Beliefs
+
+### alpha-fact [IN] OBSERVATION
+Alpha is the first letter of the Greek alphabet
+- Source: alphabet.md
+- Date: 2026-03-28
+
+### gamma-stale [STALE] OBSERVATION
+Gamma is the fourth letter
+- Source: old.md
+- Stale reason: gamma is actually third
+"""
+        p = tmp_path / "beliefs.md"
+        p.write_text(reduced)
+
+        result1 = api.sync_agent("test-agent", str(p), db_path=db)
+        assert result1["beliefs_removed"] == 1
+
+        # Second sync — removal already happened
+        result2 = api.sync_agent("test-agent", str(p), db_path=db)
+        assert result2["beliefs_removed"] == 0
+
+    def test_sync_twice_unchanged_is_stable(self, initial_import):
+        """Two consecutive syncs with the same data should both be no-ops."""
+        db, tmp_path = initial_import
+        p = tmp_path / "beliefs.md"
+        p.write_text(INITIAL_BELIEFS)
+
+        api.sync_agent("test-agent", str(p), db_path=db)
+        result = api.sync_agent("test-agent", str(p), db_path=db)
+
+        assert result["beliefs_added"] == 0
+        assert result["beliefs_removed"] == 0
+
+
+class TestSyncAgentRevocation:
+    def test_synced_beliefs_still_cascade_on_agent_revocation(self, initial_import):
+        """After sync, revoking agent:active should still cascade OUT all beliefs.
+
+        Regression: assert_node during sync must not detach beliefs from
+        their justifications (which include inactive_id in outlist).
+        """
+        db, tmp_path = initial_import
+        p = tmp_path / "beliefs.md"
+        p.write_text(INITIAL_BELIEFS)
+
+        # Sync (no-op but exercises the update path)
+        api.sync_agent("test-agent", str(p), db_path=db)
+
+        # Verify justifications still have inactive in outlist
+        node = api.show_node("test-agent:alpha-fact", db_path=db)
+        assert any("test-agent:inactive" in j["outlist"] for j in node["justifications"])
+
+        # Revoke the agent
+        api.retract_node("test-agent:active", db_path=db)
+
+        node = api.show_node("test-agent:alpha-fact", db_path=db)
+        assert node["truth_value"] == "OUT"
+
+        beta = api.show_node("test-agent:beta-depends-alpha", db_path=db)
+        assert beta["truth_value"] == "OUT"
+
+    def test_synced_restored_belief_still_cascades(self, initial_import):
+        """After sync restores a locally-retracted belief, agent revocation still works."""
+        db, tmp_path = initial_import
+
+        # Locally retract alpha
+        api.retract_node("test-agent:alpha-fact", db_path=db)
+
+        # Sync restores it (remote says IN)
+        p = tmp_path / "beliefs.md"
+        p.write_text(INITIAL_BELIEFS)
+        api.sync_agent("test-agent", str(p), db_path=db)
+
+        node = api.show_node("test-agent:alpha-fact", db_path=db)
+        assert node["truth_value"] == "IN"
+
+        # Now revoke the agent — everything should go OUT
+        api.retract_node("test-agent:active", db_path=db)
+
+        node = api.show_node("test-agent:alpha-fact", db_path=db)
+        assert node["truth_value"] == "OUT"
