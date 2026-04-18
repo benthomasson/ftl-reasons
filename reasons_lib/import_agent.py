@@ -17,12 +17,14 @@ Usage:
     reasons sync-agent aap-expert ~/git/aap-expert/beliefs.md
 """
 
-from pathlib import Path
-
 from . import Justification, Nogood
 from .import_beliefs import parse_beliefs, parse_nogoods
 from .network import Network
 
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
 
 def _fixup_dependents(network):
     """Re-register dependents for all nodes.
@@ -70,169 +72,6 @@ def _ensure_agent_nodes(network, agent_name, source_path=""):
     return active_id, inactive_id, created_premise
 
 
-def import_agent(
-    network: Network,
-    agent_name: str,
-    beliefs_text: str,
-    nogoods_text: str | None = None,
-    only_in: bool = False,
-    source_path: str = "",
-) -> dict:
-    """Import another agent's beliefs into the network with namespacing.
-
-    Each belief is prefixed with 'agent_name:' to avoid ID collisions.
-    A premise node 'agent_name:active' is created along with a relay node
-    'agent_name:inactive' (IN when active is OUT). Imported beliefs have
-    inactive in their outlist — retracting active cascades everything OUT.
-
-    Beliefs that are OUT/STALE in the source are imported as bare premises
-    with no justification, so recompute_all cannot resurrect them.
-
-    Args:
-        network: The local RMS network to import into.
-        agent_name: Name of the agent (used as namespace prefix).
-        beliefs_text: Contents of the agent's beliefs.md file.
-        nogoods_text: Contents of the agent's nogoods.md file (optional).
-        only_in: If True, only import beliefs with status IN.
-        source_path: Path to the beliefs file (for provenance).
-
-    Returns:
-        Summary dict with counts.
-    """
-    prefix = f"{agent_name}:"
-    active_id, inactive_id, created_premise = _ensure_agent_nodes(
-        network, agent_name, source_path
-    )
-
-    claims = parse_beliefs(beliefs_text)
-
-    if only_in:
-        claims = [c for c in claims if c["status"] == "IN"]
-
-    # Build claim lookup for dependency resolution
-    claim_by_id = {c["id"]: c for c in claims}
-
-    # Topological sort so dependencies are added before dependents
-    ordered = []
-    added = set()
-    remaining = list(claims)
-
-    max_passes = len(remaining) + 1
-    for _ in range(max_passes):
-        if not remaining:
-            break
-        next_remaining = []
-        for c in remaining:
-            deps_in_registry = [d for d in c["depends_on"] if d in claim_by_id]
-            if all(d in added for d in deps_in_registry):
-                ordered.append(c)
-                added.add(c["id"])
-            else:
-                next_remaining.append(c)
-        if len(next_remaining) == len(remaining):
-            ordered.extend(next_remaining)
-            break
-        remaining = next_remaining
-
-    imported = 0
-    skipped = 0
-    retracted = 0
-    retract_after = []
-
-    for claim in ordered:
-        node_id = f"{prefix}{claim['id']}"
-
-        if node_id in network.nodes:
-            skipped += 1
-            continue
-
-        is_out = claim["status"] in ("STALE", "OUT")
-
-        if is_out:
-            justifications = []
-        else:
-            antecedents = []
-            for dep_id in claim["depends_on"]:
-                prefixed_dep = f"{prefix}{dep_id}"
-                if dep_id in claim_by_id:
-                    antecedents.append(prefixed_dep)
-
-            outlist = [inactive_id]
-            for out_id in claim.get("unless", []):
-                prefixed_out = f"{prefix}{out_id}"
-                if out_id in claim_by_id:
-                    outlist.append(prefixed_out)
-
-            justifications = [
-                Justification(
-                    type="SL",
-                    antecedents=antecedents,
-                    outlist=outlist,
-                    label=f"imported from agent: {agent_name}",
-                )
-            ]
-
-        metadata = {
-            "agent": agent_name,
-            "original_id": claim["id"],
-            "imported_from": source_path,
-        }
-        if claim["type"]:
-            metadata["beliefs_type"] = claim["type"]
-
-        network.add_node(
-            id=node_id,
-            text=claim["text"],
-            justifications=justifications if justifications else None,
-            source=claim["source"],
-            source_hash=claim["source_hash"],
-            date=claim["date"],
-            metadata=metadata,
-        )
-        imported += 1
-
-        if is_out:
-            retract_after.append(node_id)
-
-    # Import nogoods (remapped to prefixed IDs)
-    nogoods_imported = 0
-    if nogoods_text:
-        nogoods = parse_nogoods(nogoods_text)
-        for ng in nogoods:
-            prefixed_nodes = [f"{prefix}{a}" for a in ng["affects"]]
-            valid_nodes = [n for n in prefixed_nodes if n in network.nodes]
-            nogood_id = f"{prefix}{ng['id']}"
-            existing_ids = {n.id for n in network.nogoods}
-            if len(valid_nodes) >= 2 and nogood_id not in existing_ids:
-                nogood = Nogood(
-                    id=nogood_id,
-                    nodes=valid_nodes,
-                    discovered=ng["discovered"],
-                    resolution=ng["resolution"],
-                )
-                network.nogoods.append(nogood)
-                nogoods_imported += 1
-
-    _fixup_dependents(network)
-    propagated = len(network.recompute_all())
-
-    for node_id in retract_after:
-        network.retract(node_id)
-        retracted += 1
-
-    return {
-        "agent": agent_name,
-        "prefix": prefix,
-        "active_node": active_id,
-        "created_premise": created_premise,
-        "claims_imported": imported,
-        "claims_skipped": skipped,
-        "claims_retracted": retracted,
-        "claims_propagated": propagated,
-        "nogoods_imported": nogoods_imported,
-    }
-
-
 def _justifications_match(old, new):
     """Check if two justification lists are equivalent."""
     if len(old) != len(new):
@@ -267,123 +106,171 @@ def _update_node_justifications(network, node_id, new_justifications):
                 network.nodes[out_id].dependents.add(node_id)
 
 
-def import_agent_json(
-    network: Network,
-    agent_name: str,
-    data: dict,
-    only_in: bool = False,
-    source_path: str = "",
-) -> dict:
-    """Import an agent's beliefs from JSON export with namespacing.
+# ---------------------------------------------------------------------------
+# Format normalization — both formats produce the same claim structure:
+#   {id, text, is_out, source, source_hash, date, metadata, raw_justifications}
+# where raw_justifications = [{type, antecedents, outlist, label}] with
+# unprefixed IDs.  Filtering (which antecedents/outlist to keep) is done
+# here so the shared logic just prefixes everything.
+# ---------------------------------------------------------------------------
 
-    JSON format preserves full justification structure including outlists,
-    providing lossless import of non-monotonic relationships.
+def _normalize_markdown(beliefs_text, only_in=False):
+    """Convert markdown beliefs to normalized claim dicts."""
+    claims = parse_beliefs(beliefs_text)
+    if only_in:
+        claims = [c for c in claims if c["status"] == "IN"]
 
-    Uses agent:inactive in outlist (not agent:active in antecedents) so
-    per-belief retraction works. OUT beliefs are imported as bare premises.
-    """
-    prefix = f"{agent_name}:"
-    active_id, inactive_id, created_premise = _ensure_agent_nodes(
-        network, agent_name, source_path
-    )
+    claim_ids = {c["id"] for c in claims}
 
+    normalized = []
+    for c in claims:
+        is_out = c["status"] in ("STALE", "OUT")
+        meta = {}
+        if c["type"]:
+            meta["beliefs_type"] = c["type"]
+
+        if is_out:
+            raw_justs = []
+        else:
+            antecedents = [d for d in c["depends_on"] if d in claim_ids]
+            outlist = [o for o in c.get("unless", []) if o in claim_ids]
+            raw_justs = [{"type": "SL", "antecedents": antecedents,
+                          "outlist": outlist, "label": None}]
+
+        normalized.append({
+            "id": c["id"],
+            "text": c["text"],
+            "is_out": is_out,
+            "source": c["source"],
+            "source_hash": c["source_hash"],
+            "date": c["date"],
+            "metadata": meta,
+            "raw_justifications": raw_justs,
+        })
+    return normalized
+
+
+def _normalize_json(data, only_in=False):
+    """Convert JSON nodes to normalized claim dicts."""
     nodes = data.get("nodes", {})
-
     if only_in:
         nodes = {k: v for k, v in nodes.items() if v.get("truth_value") == "IN"}
 
-    # Topological sort by antecedent references
+    node_ids = set(nodes.keys())
+
+    normalized = []
+    for nid, ndata in nodes.items():
+        is_out = ndata.get("truth_value") == "OUT"
+        meta = dict(ndata.get("metadata", {}))
+
+        if is_out:
+            raw_justs = []
+        else:
+            raw_justs = []
+            for j in ndata.get("justifications", []):
+                raw_justs.append({
+                    "type": j.get("type", "SL"),
+                    "antecedents": list(j.get("antecedents", [])),
+                    "outlist": [o for o in j.get("outlist", []) if o in node_ids],
+                    "label": j.get("label"),
+                })
+
+        normalized.append({
+            "id": nid,
+            "text": ndata.get("text", ""),
+            "is_out": is_out,
+            "source": ndata.get("source", ""),
+            "source_hash": ndata.get("source_hash", ""),
+            "date": ndata.get("date", ""),
+            "metadata": meta,
+            "raw_justifications": raw_justs,
+        })
+    return normalized
+
+
+def _normalize_nogoods_markdown(nogoods_text):
+    """Convert markdown nogoods to normalized dicts."""
+    if not nogoods_text:
+        return []
+    return [
+        {"id": ng["id"], "nodes": ng["affects"],
+         "discovered": ng["discovered"], "resolution": ng["resolution"]}
+        for ng in parse_nogoods(nogoods_text)
+    ]
+
+
+def _normalize_nogoods_json(data):
+    """Convert JSON nogoods to normalized dicts."""
+    return [
+        {"id": ng["id"], "nodes": ng.get("nodes", []),
+         "discovered": ng.get("discovered", ""), "resolution": ng.get("resolution", "")}
+        for ng in data.get("nogoods", [])
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Shared operations
+# ---------------------------------------------------------------------------
+
+def _topo_sort_claims(claims):
+    """Topological sort claims by antecedent dependencies."""
+    claim_ids = {c["id"] for c in claims}
     ordered = []
     added = set()
-    remaining = dict(nodes)
-
+    remaining = list(claims)
     max_passes = len(remaining) + 1
     for _ in range(max_passes):
         if not remaining:
             break
-        next_remaining = {}
-        for nid, ndata in remaining.items():
-            all_antes = []
-            for j in ndata.get("justifications", []):
-                all_antes.extend(j.get("antecedents", []))
-            deps_in_set = [a for a in all_antes if a in nodes]
-            if all(d in added for d in deps_in_set):
-                ordered.append((nid, ndata))
-                added.add(nid)
+        next_remaining = []
+        for c in remaining:
+            deps = set()
+            for j in c["raw_justifications"]:
+                deps.update(a for a in j["antecedents"] if a in claim_ids)
+            if all(d in added for d in deps):
+                ordered.append(c)
+                added.add(c["id"])
             else:
-                next_remaining[nid] = ndata
+                next_remaining.append(c)
         if len(next_remaining) == len(remaining):
-            ordered.extend(next_remaining.items())
+            ordered.extend(next_remaining)
             break
         remaining = next_remaining
+    return ordered
 
-    imported = 0
-    skipped = 0
-    retracted = 0
-    retract_after = []
 
-    for nid, ndata in ordered:
-        node_id = f"{prefix}{nid}"
+def _build_justifications(claim, prefix, inactive_id, agent_name):
+    """Build Justification objects from a normalized claim."""
+    if claim["is_out"]:
+        return []
 
-        if node_id in network.nodes:
-            skipped += 1
-            continue
+    justs = []
+    for rj in claim["raw_justifications"]:
+        antecedents = [f"{prefix}{a}" for a in rj["antecedents"]]
+        outlist = [inactive_id] + [f"{prefix}{o}" for o in rj["outlist"]]
+        label = rj["label"] or f"imported from agent: {agent_name}"
+        justs.append(Justification(
+            type=rj["type"], antecedents=antecedents,
+            outlist=outlist, label=label,
+        ))
 
-        is_out = ndata.get("truth_value") == "OUT"
+    if not justs:
+        justs = [Justification(
+            type="SL", antecedents=[], outlist=[inactive_id],
+            label=f"imported from agent: {agent_name}",
+        )]
 
-        if is_out:
-            justifications = []
-        else:
-            justifications = []
-            for j in ndata.get("justifications", []):
-                antecedents = [f"{prefix}{a}" for a in j.get("antecedents", [])]
-                outlist = [inactive_id]
-                outlist.extend(
-                    f"{prefix}{o}" for o in j.get("outlist", []) if o in nodes
-                )
-                justifications.append(Justification(
-                    type=j.get("type", "SL"),
-                    antecedents=antecedents,
-                    outlist=outlist,
-                    label=j.get("label", f"imported from agent: {agent_name}"),
-                ))
+    return justs
 
-            if not justifications:
-                justifications = [Justification(
-                    type="SL",
-                    antecedents=[],
-                    outlist=[inactive_id],
-                    label=f"imported from agent: {agent_name}",
-                )]
 
-        metadata = ndata.get("metadata", {}).copy()
-        metadata.update({
-            "agent": agent_name,
-            "original_id": nid,
-            "imported_from": source_path,
-        })
-
-        network.add_node(
-            id=node_id,
-            text=ndata.get("text", ""),
-            justifications=justifications if justifications else None,
-            source=ndata.get("source", ""),
-            source_hash=ndata.get("source_hash", ""),
-            date=ndata.get("date", ""),
-            metadata=metadata,
-        )
-        imported += 1
-
-        if is_out:
-            retract_after.append(node_id)
-
-    # Import nogoods
-    nogoods_imported = 0
-    for ng in data.get("nogoods", []):
-        prefixed_nodes = [f"{prefix}{n}" for n in ng.get("nodes", [])]
+def _import_nogoods(network, prefix, nogoods):
+    """Import normalized nogoods into the network."""
+    count = 0
+    existing_ids = {n.id for n in network.nogoods}
+    for ng in nogoods:
+        prefixed_nodes = [f"{prefix}{n}" for n in ng["nodes"]]
         valid_nodes = [n for n in prefixed_nodes if n in network.nodes]
         nogood_id = f"{prefix}{ng['id']}"
-        existing_ids = {n.id for n in network.nogoods}
         if len(valid_nodes) >= 2 and nogood_id not in existing_ids:
             network.nogoods.append(Nogood(
                 id=nogood_id,
@@ -391,7 +278,60 @@ def import_agent_json(
                 discovered=ng.get("discovered", ""),
                 resolution=ng.get("resolution", ""),
             ))
-            nogoods_imported += 1
+            existing_ids.add(nogood_id)
+            count += 1
+    return count
+
+
+# ---------------------------------------------------------------------------
+# Shared import / sync logic
+# ---------------------------------------------------------------------------
+
+def _import_claims(network, agent_name, claims, source_path, nogoods):
+    """Import normalized claims into the network."""
+    prefix = f"{agent_name}:"
+    active_id, inactive_id, created_premise = _ensure_agent_nodes(
+        network, agent_name, source_path
+    )
+
+    ordered = _topo_sort_claims(claims)
+
+    imported = 0
+    skipped = 0
+    retracted = 0
+    retract_after = []
+
+    for claim in ordered:
+        node_id = f"{prefix}{claim['id']}"
+
+        if node_id in network.nodes:
+            skipped += 1
+            continue
+
+        justifications = _build_justifications(claim, prefix, inactive_id, agent_name)
+
+        metadata = claim["metadata"].copy()
+        metadata.update({
+            "agent": agent_name,
+            "original_id": claim["id"],
+            "imported_from": source_path,
+        })
+
+        network.add_node(
+            id=node_id,
+            text=claim["text"],
+            justifications=justifications if justifications else None,
+            source=claim["source"],
+            source_hash=claim["source_hash"],
+            date=claim["date"],
+            metadata=metadata,
+        )
+        imported += 1
+
+        if claim["is_out"]:
+            retract_after.append(node_id)
+
+    nogoods_imported = _import_nogoods(network, prefix, nogoods)
 
     _fixup_dependents(network)
     propagated = len(network.recompute_all())
@@ -413,32 +353,13 @@ def import_agent_json(
     }
 
 
-def sync_agent(
-    network: Network,
-    agent_name: str,
-    beliefs_text: str,
-    nogoods_text: str | None = None,
-    only_in: bool = False,
-    source_path: str = "",
-) -> dict:
-    """Sync another agent's beliefs into the network (remote wins).
-
-    Compares the remote beliefs against existing local agent nodes:
-    - New beliefs in remote → added
-    - Beliefs removed from remote → retracted
-    - Changed text/justifications/truth values → updated
-    - _retracted flag cleared when remote says IN
-    """
+def _sync_claims(network, agent_name, claims, source_path, nogoods):
+    """Sync normalized claims into the network (remote wins)."""
     prefix = f"{agent_name}:"
     active_id, inactive_id, created_premise = _ensure_agent_nodes(
         network, agent_name, source_path
     )
 
-    claims = parse_beliefs(beliefs_text)
-    if only_in:
-        claims = [c for c in claims if c["status"] == "IN"]
-
-    claim_by_id = {c["id"]: c for c in claims}
     remote_ids = {f"{prefix}{c['id']}" for c in claims}
 
     infra_ids = {active_id, inactive_id}
@@ -447,26 +368,7 @@ def sync_agent(
         if nid.startswith(prefix) and nid not in infra_ids
     }
 
-    # Topological sort
-    ordered = []
-    added_set = set()
-    remaining = list(claims)
-    max_passes = len(remaining) + 1
-    for _ in range(max_passes):
-        if not remaining:
-            break
-        next_remaining = []
-        for c in remaining:
-            deps_in_registry = [d for d in c["depends_on"] if d in claim_by_id]
-            if all(d in added_set for d in deps_in_registry):
-                ordered.append(c)
-                added_set.add(c["id"])
-            else:
-                next_remaining.append(c)
-        if len(next_remaining) == len(remaining):
-            ordered.extend(next_remaining)
-            break
-        remaining = next_remaining
+    ordered = _topo_sort_claims(claims)
 
     beliefs_added = 0
     beliefs_updated = 0
@@ -476,7 +378,7 @@ def sync_agent(
 
     for claim in ordered:
         node_id = f"{prefix}{claim['id']}"
-        is_out = claim["status"] in ("STALE", "OUT")
+        is_out = claim["is_out"]
 
         if node_id in network.nodes:
             node = network.nodes[node_id]
@@ -496,8 +398,9 @@ def sync_agent(
                 node.date = claim["date"]
                 changed = True
 
-            if claim["type"]:
-                node.metadata["beliefs_type"] = claim["type"]
+            for k, v in claim["metadata"].items():
+                if not k.startswith("_"):
+                    node.metadata[k] = v
             node.metadata["imported_from"] = source_path
 
             if is_out:
@@ -506,24 +409,9 @@ def sync_agent(
                     changed = True
                 retract_after.append(node_id)
             else:
-                antecedents = []
-                for dep_id in claim["depends_on"]:
-                    if dep_id in claim_by_id:
-                        antecedents.append(f"{prefix}{dep_id}")
-
-                outlist = [inactive_id]
-                for out_id in claim.get("unless", []):
-                    if out_id in claim_by_id:
-                        outlist.append(f"{prefix}{out_id}")
-
-                new_justs = [
-                    Justification(
-                        type="SL",
-                        antecedents=antecedents,
-                        outlist=outlist,
-                        label=f"imported from agent: {agent_name}",
-                    )
-                ]
+                new_justs = _build_justifications(
+                    claim, prefix, inactive_id, agent_name
+                )
                 if not _justifications_match(node.justifications, new_justs):
                     _update_node_justifications(network, node_id, new_justs)
                     changed = True
@@ -541,35 +429,16 @@ def sync_agent(
             else:
                 beliefs_unchanged += 1
         else:
-            if is_out:
-                justifications = []
-            else:
-                antecedents = []
-                for dep_id in claim["depends_on"]:
-                    if dep_id in claim_by_id:
-                        antecedents.append(f"{prefix}{dep_id}")
+            justifications = _build_justifications(
+                claim, prefix, inactive_id, agent_name
+            )
 
-                outlist = [inactive_id]
-                for out_id in claim.get("unless", []):
-                    if out_id in claim_by_id:
-                        outlist.append(f"{prefix}{out_id}")
-
-                justifications = [
-                    Justification(
-                        type="SL",
-                        antecedents=antecedents,
-                        outlist=outlist,
-                        label=f"imported from agent: {agent_name}",
-                    )
-                ]
-
-            metadata = {
+            metadata = claim["metadata"].copy()
+            metadata.update({
                 "agent": agent_name,
                 "original_id": claim["id"],
                 "imported_from": source_path,
-            }
-            if claim["type"]:
-                metadata["beliefs_type"] = claim["type"]
+            })
 
             network.add_node(
                 id=node_id,
@@ -585,7 +454,6 @@ def sync_agent(
             if is_out:
                 retract_after.append(node_id)
 
-    # Retract beliefs removed from remote (skip already-retracted)
     beliefs_removed = 0
     removed_ids = local_agent_ids - remote_ids
     for node_id in sorted(removed_ids):
@@ -599,7 +467,6 @@ def sync_agent(
 
     _fixup_dependents(network)
 
-    # Assert nodes that remote says should be IN
     for node_id in assert_after:
         node = network.nodes[node_id]
         node.metadata.pop("_retracted", None)
@@ -608,7 +475,6 @@ def sync_agent(
 
     propagated = len(network.recompute_all())
 
-    # Retract OUT beliefs after recompute
     beliefs_retracted = 0
     for node_id in retract_after:
         if node_id in network.nodes:
@@ -619,24 +485,7 @@ def sync_agent(
                 node.metadata["_retracted"] = True
             beliefs_retracted += 1
 
-    # Nogoods
-    nogoods_imported = 0
-    if nogoods_text:
-        nogoods = parse_nogoods(nogoods_text)
-        for ng in nogoods:
-            prefixed_nodes = [f"{prefix}{a}" for a in ng["affects"]]
-            valid_nodes = [n for n in prefixed_nodes if n in network.nodes]
-            nogood_id = f"{prefix}{ng['id']}"
-            existing_ids = {n.id for n in network.nogoods}
-            if len(valid_nodes) >= 2 and nogood_id not in existing_ids:
-                nogood = Nogood(
-                    id=nogood_id,
-                    nodes=valid_nodes,
-                    discovered=ng["discovered"],
-                    resolution=ng["resolution"],
-                )
-                network.nogoods.append(nogood)
-                nogoods_imported += 1
+    nogoods_imported = _import_nogoods(network, prefix, nogoods)
 
     return {
         "agent": agent_name,
@@ -651,6 +500,71 @@ def sync_agent(
         "beliefs_propagated": propagated,
         "nogoods_imported": nogoods_imported,
     }
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+def import_agent(
+    network: Network,
+    agent_name: str,
+    beliefs_text: str,
+    nogoods_text: str | None = None,
+    only_in: bool = False,
+    source_path: str = "",
+) -> dict:
+    """Import another agent's beliefs into the network with namespacing.
+
+    Each belief is prefixed with 'agent_name:' to avoid ID collisions.
+    A premise node 'agent_name:active' is created along with a relay node
+    'agent_name:inactive' (IN when active is OUT). Imported beliefs have
+    inactive in their outlist — retracting active cascades everything OUT.
+
+    Beliefs that are OUT/STALE in the source are imported as bare premises
+    with no justification, so recompute_all cannot resurrect them.
+    """
+    claims = _normalize_markdown(beliefs_text, only_in)
+    nogoods = _normalize_nogoods_markdown(nogoods_text)
+    return _import_claims(network, agent_name, claims, source_path, nogoods)
+
+
+def import_agent_json(
+    network: Network,
+    agent_name: str,
+    data: dict,
+    only_in: bool = False,
+    source_path: str = "",
+) -> dict:
+    """Import an agent's beliefs from JSON export with namespacing.
+
+    JSON format preserves full justification structure including outlists,
+    providing lossless import of non-monotonic relationships.
+    """
+    claims = _normalize_json(data, only_in)
+    nogoods = _normalize_nogoods_json(data)
+    return _import_claims(network, agent_name, claims, source_path, nogoods)
+
+
+def sync_agent(
+    network: Network,
+    agent_name: str,
+    beliefs_text: str,
+    nogoods_text: str | None = None,
+    only_in: bool = False,
+    source_path: str = "",
+) -> dict:
+    """Sync another agent's beliefs into the network (remote wins).
+
+    Compares the remote beliefs against existing local agent nodes:
+    - New beliefs in remote -> added
+    - Beliefs removed from remote -> retracted
+    - Changed text/justifications/truth values -> updated
+    - _retracted flag cleared when remote says IN
+    """
+    claims = _normalize_markdown(beliefs_text, only_in)
+    nogoods = _normalize_nogoods_markdown(nogoods_text)
+    return _sync_claims(network, agent_name, claims, source_path, nogoods)
 
 
 def sync_agent_json(
@@ -665,233 +579,6 @@ def sync_agent_json(
     Same semantics as sync_agent but for JSON format which preserves
     full justification structure including outlists.
     """
-    prefix = f"{agent_name}:"
-    active_id, inactive_id, created_premise = _ensure_agent_nodes(
-        network, agent_name, source_path
-    )
-
-    nodes = data.get("nodes", {})
-    if only_in:
-        nodes = {k: v for k, v in nodes.items() if v.get("truth_value") == "IN"}
-
-    remote_ids = {f"{prefix}{nid}" for nid in nodes}
-
-    infra_ids = {active_id, inactive_id}
-    local_agent_ids = {
-        nid for nid in network.nodes
-        if nid.startswith(prefix) and nid not in infra_ids
-    }
-
-    # Topological sort
-    ordered = []
-    added_set = set()
-    remaining = dict(nodes)
-    max_passes = len(remaining) + 1
-    for _ in range(max_passes):
-        if not remaining:
-            break
-        next_remaining = {}
-        for nid, ndata in remaining.items():
-            all_antes = []
-            for j in ndata.get("justifications", []):
-                all_antes.extend(j.get("antecedents", []))
-            deps_in_set = [a for a in all_antes if a in nodes]
-            if all(d in added_set for d in deps_in_set):
-                ordered.append((nid, ndata))
-                added_set.add(nid)
-            else:
-                next_remaining[nid] = ndata
-        if len(next_remaining) == len(remaining):
-            ordered.extend(next_remaining.items())
-            break
-        remaining = next_remaining
-
-    beliefs_added = 0
-    beliefs_updated = 0
-    beliefs_unchanged = 0
-    retract_after = []
-    assert_after = []
-
-    for nid, ndata in ordered:
-        node_id = f"{prefix}{nid}"
-        is_out = ndata.get("truth_value") == "OUT"
-
-        if node_id in network.nodes:
-            node = network.nodes[node_id]
-            changed = False
-
-            new_text = ndata.get("text", "")
-            if node.text != new_text:
-                node.text = new_text
-                changed = True
-
-            new_source = ndata.get("source", "")
-            if new_source and node.source != new_source:
-                node.source = new_source
-                changed = True
-            new_hash = ndata.get("source_hash", "")
-            if new_hash and node.source_hash != new_hash:
-                node.source_hash = new_hash
-                changed = True
-            new_date = ndata.get("date", "")
-            if new_date and node.date != new_date:
-                node.date = new_date
-                changed = True
-
-            remote_meta = ndata.get("metadata", {})
-            for k, v in remote_meta.items():
-                if not k.startswith("_"):
-                    node.metadata[k] = v
-            node.metadata["imported_from"] = source_path
-
-            if is_out:
-                if not _justifications_match(node.justifications, []):
-                    _update_node_justifications(network, node_id, [])
-                    changed = True
-                retract_after.append(node_id)
-            else:
-                justifications = []
-                for j in ndata.get("justifications", []):
-                    antecedents = [f"{prefix}{a}" for a in j.get("antecedents", [])]
-                    outlist = [inactive_id]
-                    outlist.extend(
-                        f"{prefix}{o}" for o in j.get("outlist", []) if o in nodes
-                    )
-                    justifications.append(Justification(
-                        type=j.get("type", "SL"),
-                        antecedents=antecedents,
-                        outlist=outlist,
-                        label=j.get("label", f"imported from agent: {agent_name}"),
-                    ))
-                if not justifications:
-                    justifications = [Justification(
-                        type="SL",
-                        antecedents=[],
-                        outlist=[inactive_id],
-                        label=f"imported from agent: {agent_name}",
-                    )]
-                if not _justifications_match(node.justifications, justifications):
-                    _update_node_justifications(network, node_id, justifications)
-                    changed = True
-
-                if node.metadata.get("_retracted"):
-                    node.metadata.pop("_retracted", None)
-                    changed = True
-
-                if node.truth_value == "OUT":
-                    assert_after.append(node_id)
-                    changed = True
-
-            if changed:
-                beliefs_updated += 1
-            else:
-                beliefs_unchanged += 1
-        else:
-            if is_out:
-                justifications = []
-            else:
-                justifications = []
-                for j in ndata.get("justifications", []):
-                    antecedents = [f"{prefix}{a}" for a in j.get("antecedents", [])]
-                    outlist = [inactive_id]
-                    outlist.extend(
-                        f"{prefix}{o}" for o in j.get("outlist", []) if o in nodes
-                    )
-                    justifications.append(Justification(
-                        type=j.get("type", "SL"),
-                        antecedents=antecedents,
-                        outlist=outlist,
-                        label=j.get("label", f"imported from agent: {agent_name}"),
-                    ))
-                if not justifications:
-                    justifications = [Justification(
-                        type="SL",
-                        antecedents=[],
-                        outlist=[inactive_id],
-                        label=f"imported from agent: {agent_name}",
-                    )]
-
-            metadata = ndata.get("metadata", {}).copy()
-            metadata.update({
-                "agent": agent_name,
-                "original_id": nid,
-                "imported_from": source_path,
-            })
-
-            network.add_node(
-                id=node_id,
-                text=ndata.get("text", ""),
-                justifications=justifications if justifications else None,
-                source=ndata.get("source", ""),
-                source_hash=ndata.get("source_hash", ""),
-                date=ndata.get("date", ""),
-                metadata=metadata,
-            )
-            beliefs_added += 1
-
-            if is_out:
-                retract_after.append(node_id)
-
-    # Retract beliefs removed from remote (skip already-retracted)
-    beliefs_removed = 0
-    removed_ids = local_agent_ids - remote_ids
-    for node_id in sorted(removed_ids):
-        node = network.nodes[node_id]
-        if node.truth_value == "IN":
-            network.retract(node_id)
-            beliefs_removed += 1
-        elif not node.metadata.get("_retracted"):
-            node.metadata["_retracted"] = True
-            beliefs_removed += 1
-
-    _fixup_dependents(network)
-
-    # Assert nodes that remote says should be IN
-    for node_id in assert_after:
-        node = network.nodes[node_id]
-        node.metadata.pop("_retracted", None)
-        if node.truth_value == "OUT":
-            network.assert_node(node_id)
-
-    propagated = len(network.recompute_all())
-
-    # Retract OUT beliefs after recompute
-    beliefs_retracted = 0
-    for node_id in retract_after:
-        if node_id in network.nodes:
-            node = network.nodes[node_id]
-            if node.truth_value != "OUT":
-                network.retract(node_id)
-            else:
-                node.metadata["_retracted"] = True
-            beliefs_retracted += 1
-
-    # Nogoods
-    nogoods_imported = 0
-    for ng in data.get("nogoods", []):
-        prefixed_nodes = [f"{prefix}{n}" for n in ng.get("nodes", [])]
-        valid_nodes = [n for n in prefixed_nodes if n in network.nodes]
-        nogood_id = f"{prefix}{ng['id']}"
-        existing_ids = {n.id for n in network.nogoods}
-        if len(valid_nodes) >= 2 and nogood_id not in existing_ids:
-            network.nogoods.append(Nogood(
-                id=nogood_id,
-                nodes=valid_nodes,
-                discovered=ng.get("discovered", ""),
-                resolution=ng.get("resolution", ""),
-            ))
-            nogoods_imported += 1
-
-    return {
-        "agent": agent_name,
-        "prefix": prefix,
-        "active_node": active_id,
-        "created_premise": created_premise,
-        "beliefs_added": beliefs_added,
-        "beliefs_updated": beliefs_updated,
-        "beliefs_removed": beliefs_removed,
-        "beliefs_retracted": beliefs_retracted,
-        "beliefs_unchanged": beliefs_unchanged,
-        "beliefs_propagated": propagated,
-        "nogoods_imported": nogoods_imported,
-    }
+    claims = _normalize_json(data, only_in)
+    nogoods = _normalize_nogoods_json(data)
+    return _sync_claims(network, agent_name, claims, source_path, nogoods)
