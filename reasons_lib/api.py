@@ -122,6 +122,7 @@ def add_node(
     label: str = "",
     source: str = "",
     namespace: str | None = None,
+    any_mode: bool = False,
     db_path: str = DEFAULT_DB,
 ) -> dict:
     """Add a node to the network.
@@ -135,15 +136,20 @@ def add_node(
         label: Justification label
         source: Provenance (repo:path)
         namespace: Optional namespace prefix (auto-creates ns:active premise)
+        any_mode: If True, expand SL into one justification per antecedent (OR)
         db_path: Path to RMS database
 
-    Returns: {"node_id": str, "truth_value": str, "type": str}
+    Returns: {"node_id": str, "truth_value": str, "type": str, "premise_count": int}
     """
     outlist = [o.strip() for o in unless.split(",") if o.strip()] if unless else []
     justifications = []
     if sl:
         antecedents = [a.strip() for a in sl.split(",")]
-        justifications.append(Justification(type="SL", antecedents=antecedents, outlist=outlist, label=label))
+        if any_mode and len(antecedents) > 1:
+            for a in antecedents:
+                justifications.append(Justification(type="SL", antecedents=[a], outlist=outlist, label=label))
+        else:
+            justifications.append(Justification(type="SL", antecedents=antecedents, outlist=outlist, label=label))
     elif cp:
         antecedents = [a.strip() for a in cp.split(",")]
         justifications.append(Justification(type="CP", antecedents=antecedents, outlist=outlist, label=label))
@@ -192,7 +198,73 @@ def add_node(
             source=source,
         )
         jtype = justifications[0].type if justifications else "premise"
-        return {"node_id": node_id, "truth_value": node.truth_value, "type": jtype}
+        max_premises = max((len(j.antecedents) for j in justifications), default=0)
+        return {
+            "node_id": node_id,
+            "truth_value": node.truth_value,
+            "type": jtype,
+            "premise_count": max_premises,
+        }
+
+
+def add_justification(
+    node_id: str,
+    sl: str = "",
+    cp: str = "",
+    unless: str = "",
+    label: str = "",
+    namespace: str | None = None,
+    any_mode: bool = False,
+    db_path: str = DEFAULT_DB,
+) -> dict:
+    """Add a new justification to an existing node.
+
+    Args:
+        node_id: Node to add justification to
+        sl: Comma-separated antecedent IDs for SL justification
+        cp: Comma-separated antecedent IDs for CP justification
+        unless: Comma-separated outlist IDs (must be OUT for justification to hold)
+        label: Justification label
+        namespace: Optional namespace prefix
+        any_mode: If True, expand SL into one justification per antecedent (OR)
+        db_path: Path to RMS database
+
+    Returns: {"node_id", "old_truth_value", "new_truth_value", "changed", "premise_count"}
+    """
+    outlist = [o.strip() for o in unless.split(",") if o.strip()] if unless else []
+
+    if sl:
+        antecedents = [a.strip() for a in sl.split(",")]
+        jtype = "SL"
+    elif cp:
+        antecedents = [a.strip() for a in cp.split(",")]
+        jtype = "CP"
+    elif outlist:
+        antecedents = []
+        jtype = "SL"
+    else:
+        raise ValueError("Must provide --sl, --cp, or --unless")
+
+    with _with_network(db_path, write=True) as net:
+        if namespace:
+            node_id = _resolve_namespace(node_id, namespace)
+            antecedents = [_resolve_namespace(a, namespace) for a in antecedents]
+            outlist = [_resolve_namespace(o, namespace) for o in outlist]
+
+        if any_mode and jtype == "SL" and len(antecedents) > 1:
+            result = None
+            for a in antecedents:
+                j = Justification(type="SL", antecedents=[a], outlist=outlist, label=label)
+                result = net.add_justification(node_id, j)
+            result["premise_count"] = 1
+            return result
+
+        justification = Justification(
+            type=jtype, antecedents=antecedents, outlist=outlist, label=label,
+        )
+        result = net.add_justification(node_id, justification)
+        result["premise_count"] = len(antecedents)
+        return result
 
 
 def retract_node(node_id: str, reason: str = "", db_path: str = DEFAULT_DB) -> dict:
@@ -203,14 +275,31 @@ def retract_node(node_id: str, reason: str = "", db_path: str = DEFAULT_DB) -> d
         reason: Why this node is being retracted
         db_path: Path to database
 
-    Returns: {"changed": list[str], "went_out": list[str], "went_in": list[str]}
+    Returns: {"changed", "went_out", "went_in", "restoration_hints"}
     """
     with _with_network(db_path, write=True) as net:
         before = {nid: n.truth_value for nid, n in net.nodes.items()}
         changed = net.retract(node_id, reason=reason)
         went_out = [nid for nid in changed if before.get(nid) == "IN" and net.nodes[nid].truth_value == "OUT"]
         went_in = [nid for nid in changed if before.get(nid) == "OUT" and net.nodes[nid].truth_value == "IN"]
-        return {"changed": changed, "went_out": went_out, "went_in": went_in}
+
+        hints = []
+        for nid in went_out:
+            if nid == node_id:
+                continue
+            node = net.nodes[nid]
+            for j in node.justifications:
+                if j.type == "SL" and len(j.antecedents) >= 2:
+                    still_in = [a for a in j.antecedents if a in net.nodes and net.nodes[a].truth_value == "IN"]
+                    if still_in:
+                        hints.append({
+                            "node_id": nid,
+                            "all_premises": j.antecedents,
+                            "surviving_premises": still_in,
+                        })
+                    break
+
+        return {"changed": changed, "went_out": went_out, "went_in": went_in, "restoration_hints": hints}
 
 
 def what_if_retract(node_id: str, db_path: str = DEFAULT_DB) -> dict:

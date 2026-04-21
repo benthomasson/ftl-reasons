@@ -338,6 +338,39 @@ class Network:
 
         return {"old_id": old_id, "new_id": new_id, "changed": changed}
 
+    def add_justification(self, node_id: str, justification: "Justification") -> dict:
+        """Add a justification to an existing node and propagate."""
+        if node_id not in self.nodes:
+            raise KeyError(f"Node '{node_id}' not found")
+
+        node = self.nodes[node_id]
+        old_value = node.truth_value
+
+        for ant_id in justification.antecedents:
+            if ant_id in self.nodes:
+                self.nodes[ant_id].dependents.add(node_id)
+        for out_id in justification.outlist:
+            if out_id in self.nodes:
+                self.nodes[out_id].dependents.add(node_id)
+
+        node.justifications.append(justification)
+
+        new_value = self._compute_truth(node)
+        changed = []
+
+        if old_value != new_value:
+            node.truth_value = new_value
+            changed.append(node_id)
+            changed.extend(self._propagate(node_id))
+
+        self._log("add-justification", node_id, new_value)
+        return {
+            "node_id": node_id,
+            "old_truth_value": old_value,
+            "new_truth_value": new_value,
+            "changed": changed,
+        }
+
     def challenge(self, target_id: str, reason: str, challenge_id: str | None = None) -> dict:
         """Challenge a node — create a challenge node and add it to the target's outlist.
 

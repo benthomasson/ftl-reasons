@@ -22,6 +22,13 @@ def cmd_init(args):
         sys.exit(1)
 
 
+def _warn_multi_premise(premise_count, any_mode):
+    """Print a tip when an SL has 3+ premises and --any was not used."""
+    if premise_count >= 3 and not any_mode:
+        print(f"  Tip: This SL requires ALL {premise_count} premises to be IN. If any single")
+        print(f"  premise is sufficient, use --any to create separate justifications.")
+
+
 def cmd_add(args):
     try:
         result = api.add_node(
@@ -33,10 +40,34 @@ def cmd_add(args):
             label=args.label or "",
             source=args.source or "",
             namespace=getattr(args, "namespace", None),
+            any_mode=getattr(args, "any", False),
             db_path=args.db,
         )
         print(f"Added {result['node_id']} [{result['truth_value']}] ({result['type']})")
+        _warn_multi_premise(result.get("premise_count", 0), getattr(args, "any", False))
     except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def cmd_add_justification(args):
+    try:
+        result = api.add_justification(
+            node_id=args.node_id,
+            sl=args.sl or "",
+            cp=args.cp or "",
+            unless=args.unless or "",
+            label=args.label or "",
+            namespace=getattr(args, "namespace", None),
+            any_mode=getattr(args, "any", False),
+            db_path=args.db,
+        )
+        print(f"Added justification to {result['node_id']}")
+        print(f"  Truth value: {result['old_truth_value']} → {result['new_truth_value']}")
+        if result["changed"]:
+            print(f"  Cascade: {', '.join(result['changed'])}")
+        _warn_multi_premise(result.get("premise_count", 0), getattr(args, "any", False))
+    except (KeyError, ValueError) as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
@@ -55,6 +86,17 @@ def _print_cascade(result):
             print(f"    [+] {nid}")
 
 
+def _print_restoration_hints(hints):
+    """Print hints when multi-premise SL nodes go OUT with surviving premises."""
+    for hint in hints:
+        surviving = ", ".join(hint["surviving_premises"])
+        print(f"  Note: {hint['node_id']} went OUT because its justification required ALL of")
+        print(f"    {hint['all_premises']}")
+        print(f"    Surviving premises still IN: {surviving}")
+        print(f"    If any single premise is sufficient, restore with:")
+        print(f"      reasons add-justification {hint['node_id']} --sl {surviving} --any")
+
+
 def cmd_retract(args):
     try:
         result = api.retract_node(args.node_id, reason=args.reason or "", db_path=args.db)
@@ -67,6 +109,8 @@ def cmd_retract(args):
     else:
         print(f"Retracted {args.node_id}")
         _print_cascade(result)
+        if result.get("restoration_hints"):
+            _print_restoration_hints(result["restoration_hints"])
 
 
 def cmd_assert(args):
@@ -849,9 +893,20 @@ def main():
     p.add_argument("--sl", metavar="A,B", help="SL justification: comma-separated antecedent IDs")
     p.add_argument("--cp", metavar="A,B", help="CP justification: comma-separated antecedent IDs")
     p.add_argument("--unless", metavar="X,Y", help="Outlist: comma-separated node IDs that must be OUT")
+    p.add_argument("--any", action="store_true", help="Expand SL into one justification per premise (OR instead of AND)")
     p.add_argument("--label", help="Justification label")
     p.add_argument("--source", help="Provenance (repo:path)")
     p.add_argument("-n", "--namespace", help="Namespace prefix (auto-creates ns:active premise)")
+
+    # add-justification
+    p = sub.add_parser("add-justification", help="Add a justification to an existing node")
+    p.add_argument("node_id", help="Node to add justification to")
+    p.add_argument("--sl", metavar="A,B", help="SL justification: comma-separated antecedent IDs")
+    p.add_argument("--cp", metavar="A,B", help="CP justification: comma-separated antecedent IDs")
+    p.add_argument("--unless", metavar="X,Y", help="Outlist: comma-separated node IDs that must be OUT")
+    p.add_argument("--any", action="store_true", help="Expand SL into one justification per premise (OR instead of AND)")
+    p.add_argument("--label", help="Justification label")
+    p.add_argument("-n", "--namespace", help="Namespace prefix")
 
     # retract
     p = sub.add_parser("retract", help="Retract a node (mark OUT + cascade)")
@@ -1056,6 +1111,7 @@ def main():
     commands = {
         "init": cmd_init,
         "add": cmd_add,
+        "add-justification": cmd_add_justification,
         "retract": cmd_retract,
         "assert": cmd_assert,
         "what-if": cmd_what_if,
