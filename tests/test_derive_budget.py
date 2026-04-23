@@ -47,13 +47,15 @@ def _make_nodes(agent_beliefs, local_beliefs=None):
 def _count_local_shown(output):
     """Extract 'showing N' from the Local beliefs header."""
     m = re.search(r"Local beliefs \(\d+ beliefs, showing (\d+)\)", output)
-    return int(m.group(1)) if m else None
+    assert m is not None, f"Local beliefs header not found in output:\n{output[:500]}"
+    return int(m.group(1))
 
 
 def _count_agent_shown(output, agent_name):
     """Extract 'showing N' from an agent header."""
     m = re.search(rf"Agent: {re.escape(agent_name)} \(\d+ beliefs, showing (\d+)\)", output)
-    return int(m.group(1)) if m else None
+    assert m is not None, f"Agent header for {agent_name} not found in output:\n{output[:500]}"
+    return int(m.group(1))
 
 
 # --- Core regression: count is N, not N² ---
@@ -61,11 +63,11 @@ def _count_agent_shown(output, agent_name):
 class TestCountLinearNotQuadratic:
 
     def test_six_beliefs_one_agent(self):
-        """With 6 agent beliefs and budget=20, locals get ~15 (not buggy 5).
+        """With 6 agent beliefs and budget=20, locals get 15 (not buggy 5).
 
         Proportional budget: agent_budget=max(5, int(20*6/26))=5,
         count=5, remaining=max(5, 20-5)=15.
-        With the old bug: count=6*6=36, remaining=max(5, 20-36)=5.
+        With the old bug: count=5*5=25, remaining=max(5, 20-25)=5.
         """
         nodes, derived, agents = _make_nodes(
             {"agent-a": [f"b{i}" for i in range(6)]},
@@ -73,7 +75,6 @@ class TestCountLinearNotQuadratic:
         )
         output = _build_beliefs_section(nodes, derived, agents, max_beliefs=20)
         local_shown = _count_local_shown(output)
-        assert local_shown is not None
         assert local_shown > 5, "Bug regression: locals starved to floor"
         assert local_shown == 15
 
@@ -86,8 +87,6 @@ class TestCountLinearNotQuadratic:
         output = _build_beliefs_section(nodes, derived, agents, max_beliefs=20)
         agent_shown = _count_agent_shown(output, "agent-a")
         local_shown = _count_local_shown(output)
-        assert agent_shown is not None
-        assert local_shown is not None
         total_used = agent_shown + local_shown
         assert total_used <= 20
 
@@ -109,7 +108,6 @@ class TestMultiAgent:
         a_shown = _count_agent_shown(output, "agent-a")
         b_shown = _count_agent_shown(output, "agent-b")
         local_shown = _count_local_shown(output)
-        assert a_shown is not None and b_shown is not None
         agent_total = a_shown + b_shown
         assert local_shown == max(5, 20 - agent_total)
 
@@ -124,7 +122,7 @@ class TestMultiAgent:
         )
         output = _build_beliefs_section(nodes, derived, agents, max_beliefs=30)
         total_agent = sum(
-            _count_agent_shown(output, a) or 0 for a in ["alpha", "beta", "gamma"]
+            _count_agent_shown(output, a) for a in ["alpha", "beta", "gamma"]
         )
         local_shown = _count_local_shown(output)
         assert local_shown == max(5, 30 - total_agent)
@@ -243,7 +241,6 @@ class TestSampling:
             nodes, derived, agents, max_beliefs=20, sample=True, seed=42,
         )
         local_shown = _count_local_shown(output)
-        assert local_shown is not None
         assert local_shown >= 5
 
     def test_sample_mode_deterministic(self):
@@ -280,6 +277,5 @@ class TestBuildPromptIntegration:
         prompt, stats = build_prompt(data["nodes"], budget=20)
         assert stats["agents"] == 1
         local_shown = _count_local_shown(prompt)
-        assert local_shown is not None
         assert local_shown >= 5
         assert local_shown <= 20
