@@ -686,6 +686,10 @@ class Network:
                 if dep_id in visited:
                     continue
 
+                if dep_id not in self.nodes:
+                    self._log("warn", dep_id, f"dangling dependent of {current_id}")
+                    continue
+
                 dep = self.nodes[dep_id]
                 if dep.metadata.get("_retracted"):
                     continue
