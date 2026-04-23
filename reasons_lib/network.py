@@ -8,6 +8,7 @@ Implements Doyle's (1979) TMS algorithm:
 - Retracted nodes stay in the network (enables restoration without rederivation)
 """
 
+import re
 from collections import deque
 from datetime import datetime
 
@@ -20,8 +21,18 @@ class Network:
     def __init__(self):
         self.nodes: dict[str, Node] = {}
         self.nogoods: list[Nogood] = []
+        self._next_nogood_id: int = 1
         self.repos: dict[str, str] = {}  # name → path mapping
         self.log: list[dict] = []  # propagation audit trail
+
+    def _compute_next_nogood_id(self) -> None:
+        """Derive _next_nogood_id from existing nogoods so IDs stay unique after deletions."""
+        max_id = 0
+        for ng in self.nogoods:
+            m = re.fullmatch(r"nogood-(\d+)", ng.id)
+            if m:
+                max_id = max(max_id, int(m.group(1)))
+        self._next_nogood_id = max_id + 1
 
     def add_node(
         self,
@@ -255,7 +266,8 @@ class Network:
             if nid not in self.nodes:
                 raise KeyError(f"Node '{nid}' not found")
 
-        nogood_id = f"nogood-{len(self.nogoods) + 1:03d}"
+        nogood_id = f"nogood-{self._next_nogood_id:03d}"
+        self._next_nogood_id += 1
         nogood = Nogood(
             id=nogood_id,
             nodes=list(node_ids),

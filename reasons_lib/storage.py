@@ -187,6 +187,8 @@ class Storage:
                 resolution=resolution,
             ))
 
+        network._compute_next_nogood_id()
+
         # Load repos
         try:
             repos_cursor = self.conn.execute("SELECT name, path FROM repos")

@@ -241,6 +241,8 @@ def import_into_network(
                 network.nogoods.append(nogood)
                 nogoods_imported += 1
 
+        network._compute_next_nogood_id()
+
     return {
         "claims_imported": imported,
         "claims_skipped": skipped,

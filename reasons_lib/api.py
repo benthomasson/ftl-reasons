@@ -934,6 +934,8 @@ def import_json(json_file: str, db_path: str = DEFAULT_DB) -> dict:
             net.nogoods.append(nogood)
             nogoods_imported += 1
 
+        net._compute_next_nogood_id()
+
         # Import repos
         for name, path in data.get("repos", {}).items():
             net.repos[name] = path
