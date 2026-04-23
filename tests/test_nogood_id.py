@@ -126,8 +126,8 @@ class TestPersistence:
         net.add_nogood(["a", "b"])
         net.add_nogood(["c", "d"])
         storage.save(net)
-        # Remove the meta row to simulate an old database
-        storage.conn.execute("DELETE FROM network_meta")
+        # Drop the table entirely to simulate an old database
+        storage.conn.execute("DROP TABLE IF EXISTS network_meta")
         storage.conn.commit()
         storage.close()
 
@@ -136,6 +136,8 @@ class TestPersistence:
         assert loaded._next_nogood_id == 3
         loaded.add_nogood(["a", "c"])
         assert loaded.nogoods[-1].id == "nogood-003"
+        # Verify save works after upgrade
+        storage2.save(loaded)
         storage2.close()
 
 

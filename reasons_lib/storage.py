@@ -191,24 +191,26 @@ class Storage:
                 resolution=resolution,
             ))
 
-        # Load network metadata
+        # Load network metadata — persisted counter takes priority,
+        # otherwise derive from existing nogoods to avoid ID collisions
+        loaded_counter = False
         try:
             row = self.conn.execute(
                 "SELECT value FROM network_meta WHERE key = 'next_nogood_id'"
             ).fetchone()
             if row:
                 network._next_nogood_id = int(row[0])
-            elif network.nogoods:
-                # Old database without persisted counter — derive from existing nogoods
-                import re
-                max_id = 0
-                for ng in network.nogoods:
-                    m = re.fullmatch(r"nogood-(\d+)", ng.id)
-                    if m:
-                        max_id = max(max_id, int(m.group(1)))
-                network._next_nogood_id = max_id + 1
+                loaded_counter = True
         except Exception:
             pass  # network_meta table may not exist in old databases
+        if not loaded_counter and network.nogoods:
+            import re
+            max_id = 0
+            for ng in network.nogoods:
+                m = re.fullmatch(r"nogood-(\d+)", ng.id)
+                if m:
+                    max_id = max(max_id, int(m.group(1)))
+            network._next_nogood_id = max_id + 1
 
         # Load repos
         try:

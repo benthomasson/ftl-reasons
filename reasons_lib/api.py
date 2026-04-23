@@ -7,6 +7,7 @@ or argparse. Each function opens the database, operates, saves, and closes.
 All functions return dicts suitable for JSON serialization.
 """
 
+import re
 from pathlib import Path
 
 from . import Justification
@@ -922,7 +923,7 @@ def import_json(json_file: str, db_path: str = DEFAULT_DB) -> dict:
             remaining = next_remaining
 
         # Import nogoods
-        import re
+
         from . import Nogood
         nogoods_imported = 0
         for ng_data in data.get("nogoods", []):
