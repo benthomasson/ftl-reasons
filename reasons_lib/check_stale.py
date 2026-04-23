@@ -47,8 +47,15 @@ def check_stale(
 ) -> list[dict]:
     """Check all IN nodes for source staleness.
 
-    Returns a list of dicts for each stale node:
-        {"node_id": str, "old_hash": str, "new_hash": str, "source": str}
+    Returns a list of dicts for each stale or missing-source node::
+
+        # Content changed on disk:
+        {"node_id": str, "old_hash": str, "new_hash": str,
+         "source": str, "source_path": str, "reason": "content_changed"}
+
+        # Source file no longer exists:
+        {"node_id": str, "old_hash": str, "new_hash": None,
+         "source": str, "source_path": None, "reason": "source_deleted"}
     """
     results = []
 
@@ -60,6 +67,14 @@ def check_stale(
 
         path = resolve_source_path(node.source, repos)
         if path is None:
+            results.append({
+                "node_id": nid,
+                "old_hash": node.source_hash,
+                "new_hash": None,
+                "source": node.source,
+                "source_path": None,
+                "reason": "source_deleted",
+            })
             continue
 
         current_hash = hash_file(path)
@@ -70,6 +85,7 @@ def check_stale(
                 "new_hash": current_hash,
                 "source": node.source,
                 "source_path": str(path),
+                "reason": "content_changed",
             })
 
     return results
