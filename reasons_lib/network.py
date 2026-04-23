@@ -23,6 +23,50 @@ class Network:
         self.repos: dict[str, str] = {}  # name → path mapping
         self.log: list[dict] = []  # propagation audit trail
 
+    def _rebuild_dependents(self) -> None:
+        """Rebuild the dependents reverse index from justifications.
+
+        This is the single canonical implementation. All other rebuild
+        call sites should delegate here.
+        """
+        for node in self.nodes.values():
+            node.dependents = set()
+        for node in self.nodes.values():
+            for j in node.justifications:
+                for ant_id in j.antecedents:
+                    if ant_id in self.nodes:
+                        self.nodes[ant_id].dependents.add(node.id)
+                for out_id in j.outlist:
+                    if out_id in self.nodes:
+                        self.nodes[out_id].dependents.add(node.id)
+
+    def verify_dependents(self) -> list[str]:
+        """Compare live dependents index against what justifications imply.
+
+        Returns a list of error strings. Empty list means consistent.
+        """
+        expected: dict[str, set[str]] = {nid: set() for nid in self.nodes}
+        for node in self.nodes.values():
+            for j in node.justifications:
+                for ant_id in j.antecedents:
+                    if ant_id in self.nodes:
+                        expected[ant_id].add(node.id)
+                for out_id in j.outlist:
+                    if out_id in self.nodes:
+                        expected[out_id].add(node.id)
+
+        errors = []
+        for nid in self.nodes:
+            live = self.nodes[nid].dependents
+            exp = expected.get(nid, set())
+            extras = live - exp
+            missing = exp - live
+            if extras:
+                errors.append(f"{nid}: extra dependents {extras}")
+            if missing:
+                errors.append(f"{nid}: missing dependents {missing}")
+        return errors
+
     def add_node(
         self,
         id: str,

@@ -165,15 +165,8 @@ class Storage:
             )
             network.nodes[nid] = node
 
-        # Rebuild dependent index (both inlist and outlist)
-        for node in network.nodes.values():
-            for j in node.justifications:
-                for ant_id in j.antecedents:
-                    if ant_id in network.nodes:
-                        network.nodes[ant_id].dependents.add(node.id)
-                for out_id in j.outlist:
-                    if out_id in network.nodes:
-                        network.nodes[out_id].dependents.add(node.id)
+        # Rebuild dependent index from justifications (canonical method)
+        network._rebuild_dependents()
 
         # Load nogoods
         ng_cursor = self.conn.execute(
