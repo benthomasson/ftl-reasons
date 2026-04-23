@@ -211,7 +211,7 @@ def _build_beliefs_section(nodes, derived, agents=None, max_beliefs=300,
             for belief_id in belief_ids:
                 text = agent_beliefs[belief_id]["text"][:120]
                 lines.append(f"- `{belief_id}`: {text}")
-                count += len(belief_ids)
+            count += len(belief_ids)
 
         # Non-agent beliefs
         if non_agent:
