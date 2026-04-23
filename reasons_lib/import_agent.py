@@ -32,14 +32,7 @@ def _fixup_dependents(network):
     Outlist nodes may have been added after the nodes that reference them,
     so add_node couldn't register the dependency at creation time.
     """
-    for node in network.nodes.values():
-        for j in node.justifications:
-            for ant_id in j.antecedents:
-                if ant_id in network.nodes:
-                    network.nodes[ant_id].dependents.add(node.id)
-            for out_id in j.outlist:
-                if out_id in network.nodes:
-                    network.nodes[out_id].dependents.add(node.id)
+    network._rebuild_dependents()
 
 
 def _ensure_agent_nodes(network, agent_name, source_path=""):
@@ -85,25 +78,8 @@ def _justifications_match(old, new):
 
 def _update_node_justifications(network, node_id, new_justifications):
     """Replace justifications on an existing node, fixing dependent registrations."""
-    node = network.nodes[node_id]
-
-    for j in node.justifications:
-        for ant_id in j.antecedents:
-            if ant_id in network.nodes:
-                network.nodes[ant_id].dependents.discard(node_id)
-        for out_id in j.outlist:
-            if out_id in network.nodes:
-                network.nodes[out_id].dependents.discard(node_id)
-
-    node.justifications = new_justifications
-
-    for j in new_justifications:
-        for ant_id in j.antecedents:
-            if ant_id in network.nodes:
-                network.nodes[ant_id].dependents.add(node_id)
-        for out_id in j.outlist:
-            if out_id in network.nodes:
-                network.nodes[out_id].dependents.add(node_id)
+    network.nodes[node_id].justifications = new_justifications
+    network._rebuild_dependents()
 
 
 # ---------------------------------------------------------------------------
