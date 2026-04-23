@@ -440,3 +440,23 @@ class TestDiamondDependency:
         net.assert_node("b")
         assert net.nodes["b"].truth_value == "IN"
         assert net.nodes["d"].truth_value == "IN"
+
+
+class TestDanglingDependents:
+    """Propagation handles dangling dependent references gracefully."""
+
+    def test_propagate_skips_dangling_dependent(self):
+        net = Network()
+        net.add_node("a", "premise A")
+        net.nodes["a"].dependents.add("nonexistent")
+        net.retract("a")  # triggers _propagate — should not crash
+
+    def test_propagate_logs_dangling_warning(self):
+        net = Network()
+        net.add_node("a", "premise A")
+        net.nodes["a"].dependents.add("ghost")
+        net.retract("a")
+        warnings = [e for e in net.log if e["action"] == "warn"]
+        assert len(warnings) == 1
+        assert warnings[0]["target"] == "ghost"
+        assert "dangling" in warnings[0]["value"]
