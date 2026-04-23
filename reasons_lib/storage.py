@@ -198,6 +198,15 @@ class Storage:
             ).fetchone()
             if row:
                 network._next_nogood_id = int(row[0])
+            elif network.nogoods:
+                # Old database without persisted counter — derive from existing nogoods
+                import re
+                max_id = 0
+                for ng in network.nogoods:
+                    m = re.fullmatch(r"nogood-(\d+)", ng.id)
+                    if m:
+                        max_id = max(max_id, int(m.group(1)))
+                network._next_nogood_id = max_id + 1
         except Exception:
             pass  # network_meta table may not exist in old databases
 

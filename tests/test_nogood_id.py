@@ -114,6 +114,30 @@ class TestPersistence:
         assert loaded._next_nogood_id == 1
         storage2.close()
 
+    def test_old_db_with_nogoods_derives_counter(self, tmp_path):
+        """Old DB with existing nogoods must derive counter, not start at 1."""
+        db_path = str(tmp_path / "reasons.db")
+        storage = Storage(db_path)
+        net = Network()
+        net.add_node("a", "A")
+        net.add_node("b", "B")
+        net.add_node("c", "C")
+        net.add_node("d", "D")
+        net.add_nogood(["a", "b"])
+        net.add_nogood(["c", "d"])
+        storage.save(net)
+        # Remove the meta row to simulate an old database
+        storage.conn.execute("DELETE FROM network_meta")
+        storage.conn.commit()
+        storage.close()
+
+        storage2 = Storage(db_path)
+        loaded = storage2.load()
+        assert loaded._next_nogood_id == 3
+        loaded.add_nogood(["a", "c"])
+        assert loaded.nogoods[-1].id == "nogood-003"
+        storage2.close()
+
 
 class TestImportJson:
 
