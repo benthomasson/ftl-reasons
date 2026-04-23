@@ -545,9 +545,13 @@ def cmd_check_stale(args):
         return
 
     for item in result["stale"]:
-        print(f"  STALE  {item['node_id']}")
-        print(f"         source: {item['source']}")
-        print(f"         hash: {item['old_hash']} -> {item['new_hash']}")
+        if item.get("reason") == "source_deleted":
+            print(f"  DELETED  {item['node_id']}")
+            print(f"           source: {item['source']}")
+        else:
+            print(f"  STALE  {item['node_id']}")
+            print(f"         source: {item['source']}")
+            print(f"         hash: {item['old_hash']} -> {item['new_hash']}")
         print()
 
     fresh = result["checked"] - result["stale_count"]

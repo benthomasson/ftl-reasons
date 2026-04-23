@@ -75,6 +75,7 @@ class TestCheckStale:
         assert results[0]["node_id"] == "a"
         assert results[0]["old_hash"] == old_hash
         assert results[0]["new_hash"] != old_hash
+        assert results[0]["reason"] == "content_changed"
 
     def test_skips_out_nodes(self, tmp_path):
         f = tmp_path / "source.md"
@@ -97,12 +98,17 @@ class TestCheckStale:
         results = check_stale(net, repos={"myrepo": tmp_path})
         assert results == []
 
-    def test_skips_missing_source_files(self, tmp_path):
+    def test_reports_missing_source_files(self, tmp_path):
         net = Network()
         net.add_node("a", "Premise A", source="myrepo/missing.md", source_hash="abc123")
 
         results = check_stale(net, repos={"myrepo": tmp_path})
-        assert results == []
+        assert len(results) == 1
+        assert results[0]["node_id"] == "a"
+        assert results[0]["reason"] == "source_deleted"
+        assert results[0]["new_hash"] is None
+        assert results[0]["source_path"] is None
+        assert results[0]["old_hash"] == "abc123"
 
     def test_multiple_stale(self, tmp_path):
         f1 = tmp_path / "a.md"
