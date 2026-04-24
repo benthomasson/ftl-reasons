@@ -15,7 +15,7 @@ class TestHashFile:
         f = tmp_path / "test.md"
         f.write_text("hello world")
         h = hash_file(f)
-        expected = hashlib.sha256(b"hello world").hexdigest()[:16]
+        expected = hashlib.sha256(b"hello world").hexdigest()
         assert h == expected
 
     def test_hash_changes_with_content(self, tmp_path):
@@ -51,7 +51,7 @@ class TestCheckStale:
     def test_fresh_node(self, tmp_path):
         f = tmp_path / "source.md"
         f.write_text("original content")
-        h = hashlib.sha256(b"original content").hexdigest()[:16]
+        h = hashlib.sha256(b"original content").hexdigest()
 
         net = Network()
         net.add_node("a", "Premise A", source="myrepo/source.md", source_hash=h)
@@ -62,7 +62,7 @@ class TestCheckStale:
     def test_stale_node(self, tmp_path):
         f = tmp_path / "source.md"
         f.write_text("original content")
-        old_hash = hashlib.sha256(b"original content").hexdigest()[:16]
+        old_hash = hashlib.sha256(b"original content").hexdigest()
 
         net = Network()
         net.add_node("a", "Premise A", source="myrepo/source.md", source_hash=old_hash)
@@ -80,7 +80,7 @@ class TestCheckStale:
     def test_skips_out_nodes(self, tmp_path):
         f = tmp_path / "source.md"
         f.write_text("original")
-        old_hash = hashlib.sha256(b"original").hexdigest()[:16]
+        old_hash = hashlib.sha256(b"original").hexdigest()
 
         net = Network()
         net.add_node("a", "Premise A", source="myrepo/source.md", source_hash=old_hash)
@@ -117,8 +117,8 @@ class TestCheckStale:
         f2.write_text("old b")
 
         net = Network()
-        net.add_node("a", "Node A", source="r/a.md", source_hash=hashlib.sha256(b"old a").hexdigest()[:16])
-        net.add_node("b", "Node B", source="r/b.md", source_hash=hashlib.sha256(b"old b").hexdigest()[:16])
+        net.add_node("a", "Node A", source="r/a.md", source_hash=hashlib.sha256(b"old a").hexdigest())
+        net.add_node("b", "Node B", source="r/b.md", source_hash=hashlib.sha256(b"old b").hexdigest())
 
         f1.write_text("new a")
         f2.write_text("new b")

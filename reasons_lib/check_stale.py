@@ -12,8 +12,8 @@ from .network import Network
 
 
 def hash_file(path: Path) -> str:
-    """SHA-256 hash of file content, first 16 hex chars."""
-    return hashlib.sha256(path.read_bytes()).hexdigest()[:16]
+    """Full SHA-256 hash of file content (64 hex chars)."""
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def resolve_source_path(source: str, repos: dict[str, Path] | None = None) -> Path | None:
