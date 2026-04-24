@@ -2,7 +2,23 @@
 
 from reasons_lib import Justification
 from reasons_lib.network import Network
-from reasons_lib.compact import compact
+from reasons_lib.compact import compact, estimate_tokens
+
+
+class TestEstimateTokens:
+
+    def test_uses_char_count_not_word_count(self):
+        text = "a longish sentence with several words in it here"
+        assert estimate_tokens(text) == len(text) // 4
+        assert estimate_tokens(text) != len(text.split())
+
+    def test_minimum_one_token(self):
+        assert estimate_tokens("") == 1
+        assert estimate_tokens("hi") == 1
+
+    def test_long_text(self):
+        text = "a" * 400
+        assert estimate_tokens(text) == 100
 
 
 class TestCompact:
@@ -58,6 +74,43 @@ class TestCompact:
             net.add_node(f"node-{i:03d}", f"This is node number {i} with some text")
         result = compact(net, budget=100)
         assert "more IN nodes omitted" in result
+
+    def test_budget_limits_out_nodes(self):
+        net = Network()
+        for i in range(50):
+            net.add_node(f"out-{i:03d}", f"This is retracted node number {i} with text")
+            net.retract(f"out-{i:03d}")
+        result = compact(net, budget=100)
+        assert "more OUT nodes omitted" in result
+
+    def test_budget_limits_nogoods(self):
+        net = Network()
+        for i in range(50):
+            a = f"a{i:03d}"
+            b = f"b{i:03d}"
+            net.add_node(a, f"Node {a}")
+            net.add_node(b, f"Node {b}")
+            net.add_nogood([a, b])
+        result = compact(net, budget=100)
+        assert "more nogoods omitted" in result
+
+    def test_budget_respected_across_all_sections(self):
+        net = Network()
+        # Add nogoods, OUT nodes, and IN nodes
+        net.add_node("a", "Premise A")
+        net.add_node("b", "Premise B")
+        net.add_nogood(["a", "b"])
+        for i in range(20):
+            net.add_node(f"out-{i:03d}", f"Retracted node {i}")
+            net.retract(f"out-{i:03d}")
+        for i in range(20):
+            net.add_node(f"in-{i:03d}", f"Active node {i}")
+        result = compact(net, budget=200)
+        # The token count line should show we're within budget
+        for line in result.splitlines():
+            if line.startswith("Token count:"):
+                count = int(line.split("~")[1].split("/")[0].strip())
+                assert count <= 200
 
     def test_most_depended_on_first(self):
         net = Network()
