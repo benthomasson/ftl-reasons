@@ -220,6 +220,25 @@ class TestVisibleTo:
         with pytest.raises(PermissionError):
             api.explain_node("fin", visible_to=["hr"], db_path=db_path)
 
+    def test_explain_inherits_restriction_from_antecedent(self, db_path):
+        """Tag inheritance prevents explain from leaking restricted antecedents.
+
+        A derived node inherits its parent's tags, so a caller without
+        access to the parent also can't explain the derived node.
+        """
+        api.add_node("secret", "Secret finance data", access_tags=["finance"], db_path=db_path)
+        api.add_node("derived", "Derived from secret", sl="secret", db_path=db_path)
+
+        # derived inherits ["finance"] — caller without finance can't explain it
+        with pytest.raises(PermissionError):
+            api.explain_node("derived", visible_to=["public"], db_path=db_path)
+
+        # caller with finance can explain and sees the antecedent (allowed)
+        result = api.explain_node("derived", visible_to=["finance"], db_path=db_path)
+        step_ids = [s["node"] for s in result["steps"]]
+        assert "derived" in step_ids
+        assert "secret" in step_ids
+
     def test_trace_raises_on_forbidden(self, db_path):
         api.add_node("fin", "Finance", access_tags=["finance"], db_path=db_path)
         api.add_node("derived", "Derived", sl="fin", db_path=db_path)
