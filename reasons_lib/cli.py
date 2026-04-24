@@ -30,6 +30,9 @@ def _warn_multi_premise(premise_count, any_mode):
 
 
 def cmd_add(args):
+    access_tags = None
+    if getattr(args, "access_tags", None):
+        access_tags = [t.strip() for t in args.access_tags.split(",") if t.strip()]
     try:
         result = api.add_node(
             node_id=args.node_id,
@@ -41,6 +44,7 @@ def cmd_add(args):
             source=args.source or "",
             namespace=getattr(args, "namespace", None),
             any_mode=getattr(args, "any", False),
+            access_tags=access_tags,
             db_path=args.db,
         )
         print(f"Added {result['node_id']} [{result['truth_value']}] ({result['type']})")
@@ -190,7 +194,7 @@ def cmd_what_if(args):
 
 
 def cmd_status(args):
-    result = api.get_status(db_path=args.db)
+    result = api.get_status(visible_to=_parse_visible_to(args), db_path=args.db)
 
     if not result["nodes"]:
         print("No nodes in the network.")
@@ -206,10 +210,14 @@ def cmd_status(args):
 
 
 def cmd_show(args):
+    visible_to = _parse_visible_to(args)
     try:
-        node = api.show_node(args.node_id, db_path=args.db)
+        node = api.show_node(args.node_id, visible_to=visible_to, db_path=args.db)
     except KeyError as e:
         print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    except PermissionError as e:
+        print(f"Access denied: {e}", file=sys.stderr)
         sys.exit(1)
 
     print(f"ID:     {node['id']}")
@@ -238,9 +246,12 @@ def cmd_show(args):
 
 def cmd_explain(args):
     try:
-        result = api.explain_node(args.node_id, db_path=args.db)
+        result = api.explain_node(args.node_id, visible_to=_parse_visible_to(args), db_path=args.db)
     except KeyError as e:
         print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    except PermissionError as e:
+        print(f"Access denied: {e}", file=sys.stderr)
         sys.exit(1)
 
     for step in result["steps"]:
@@ -347,11 +358,31 @@ def cmd_nogood(args):
         print(f"Retracted: {', '.join(result['changed'])}")
 
 
-def cmd_trace(args):
+def cmd_trace_access_tags(args):
     try:
-        result = api.trace_assumptions(args.node_id, db_path=args.db)
+        result = api.trace_access_tags(args.node_id, visible_to=_parse_visible_to(args), db_path=args.db)
     except KeyError as e:
         print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    except PermissionError as e:
+        print(f"Access denied: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    if not result["access_tags"]:
+        print(f"{args.node_id} has no access tags in its dependency chain (unrestricted).")
+        return
+
+    print(f"{args.node_id} depends on data tagged: {', '.join(result['access_tags'])}")
+
+
+def cmd_trace(args):
+    try:
+        result = api.trace_assumptions(args.node_id, visible_to=_parse_visible_to(args), db_path=args.db)
+    except KeyError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    except PermissionError as e:
+        print(f"Access denied: {e}", file=sys.stderr)
         sys.exit(1)
 
     if not result["premises"]:
@@ -501,12 +532,12 @@ def cmd_import_json(args):
 
 
 def cmd_export(args):
-    data = api.export_network(db_path=args.db)
+    data = api.export_network(visible_to=_parse_visible_to(args), db_path=args.db)
     print(json.dumps(data, indent=2))
 
 
 def cmd_export_markdown(args):
-    md = api.export_markdown(db_path=args.db)
+    md = api.export_markdown(visible_to=_parse_visible_to(args), db_path=args.db)
     if args.output:
         Path(args.output).write_text(md)
         print(f"Written to {args.output}")
@@ -563,19 +594,27 @@ def cmd_compact(args):
     summary = api.compact(
         budget=args.budget,
         truncate=not args.no_truncate,
+        visible_to=_parse_visible_to(args),
         db_path=args.db,
     )
     print(summary)
 
 
+def _parse_visible_to(args):
+    val = getattr(args, "visible_to", None)
+    if val is not None:
+        return [t.strip() for t in val.split(",") if t.strip()]
+    return None
+
+
 def cmd_search(args):
     fmt = getattr(args, "format", "markdown")
-    result = api.search(args.query, db_path=args.db, format=fmt)
+    result = api.search(args.query, visible_to=_parse_visible_to(args), db_path=args.db, format=fmt)
     print(result)
 
 
 def cmd_lookup(args):
-    result = api.lookup(args.query, db_path=args.db)
+    result = api.lookup(args.query, visible_to=_parse_visible_to(args), db_path=args.db)
     print(result)
 
 
@@ -851,6 +890,7 @@ def cmd_list(args):
         namespace=getattr(args, "namespace", None),
         min_depth=args.min_depth,
         max_depth=args.max_depth,
+        visible_to=_parse_visible_to(args),
         db_path=args.db,
     )
 
@@ -901,6 +941,7 @@ def main():
     p.add_argument("--label", help="Justification label")
     p.add_argument("--source", help="Provenance (repo:path)")
     p.add_argument("-n", "--namespace", help="Namespace prefix (auto-creates ns:active premise)")
+    p.add_argument("--access-tags", metavar="TAG,TAG", help="Data source provenance tags (comma-separated)")
 
     # add-justification
     p = sub.add_parser("add-justification", help="Add a justification to an existing node")
@@ -927,15 +968,18 @@ def main():
     p.add_argument("node_id", help="Node to simulate")
 
     # status
-    sub.add_parser("status", help="Show all nodes with truth values")
+    p = sub.add_parser("status", help="Show all nodes with truth values")
+    p.add_argument("--visible-to", metavar="TAG,TAG", help="Only show nodes whose access_tags are a subset of these tags")
 
     # show
     p = sub.add_parser("show", help="Show node details")
     p.add_argument("node_id", help="Node to show")
+    p.add_argument("--visible-to", metavar="TAG,TAG", help="Only show if access_tags are a subset of these tags")
 
     # explain
     p = sub.add_parser("explain", help="Explain why a node is IN or OUT")
     p.add_argument("node_id", help="Node to explain")
+    p.add_argument("--visible-to", metavar="TAG,TAG", help="Only show if access_tags are a subset of these tags")
 
     # convert-to-premise
     p = sub.add_parser("convert-to-premise", help="Strip justifications, make a node a premise")
@@ -971,8 +1015,13 @@ def main():
     p.add_argument("node_ids", nargs="+", help="Node IDs that cannot all be IN")
 
     # trace
+    p = sub.add_parser("trace-access-tags", help="Trace all access tags in a node's dependency chain")
+    p.add_argument("node_id", help="Node to trace")
+    p.add_argument("--visible-to", metavar="TAG,TAG", help="Only allow if access_tags are a subset of these tags")
+
     p = sub.add_parser("trace", help="Trace backward to find premises a node rests on")
     p.add_argument("node_id", help="Node to trace")
+    p.add_argument("--visible-to", metavar="TAG,TAG", help="Only show premises whose access_tags are a subset of these tags")
 
     # propagate
     sub.add_parser("propagate", help="Recompute all truth values")
@@ -1053,11 +1102,13 @@ def main():
     p.add_argument("json_file", help="Path to JSON file")
 
     # export
-    sub.add_parser("export", help="Export network as JSON")
+    p = sub.add_parser("export", help="Export network as JSON")
+    p.add_argument("--visible-to", metavar="TAG,TAG", help="Only export nodes whose access_tags are a subset of these tags")
 
     # export-markdown
     p = sub.add_parser("export-markdown", help="Export network as beliefs.md-compatible markdown")
     p.add_argument("-o", "--output", help="Write to file instead of stdout")
+    p.add_argument("--visible-to", metavar="TAG,TAG", help="Only export nodes whose access_tags are a subset of these tags")
 
     # hash-sources
     p = sub.add_parser("hash-sources", help="Backfill source hashes for nodes without them")
@@ -1070,16 +1121,19 @@ def main():
     p = sub.add_parser("compact", help="Token-budgeted belief state summary")
     p.add_argument("--budget", type=int, default=500, help="Token budget (default: 500)")
     p.add_argument("--no-truncate", action="store_true", help="Show full node text")
+    p.add_argument("--visible-to", metavar="TAG,TAG", help="Only include nodes whose access_tags are a subset of these tags")
 
     # search
     p = sub.add_parser("search", help="Search nodes using full-text search with neighbor expansion")
     p.add_argument("query", help="Search terms (FTS5 all-terms matching)")
     p.add_argument("--format", choices=["markdown", "json", "minimal"], default="markdown",
                    help="Output format (default: markdown)")
+    p.add_argument("--visible-to", metavar="TAG,TAG", help="Only show nodes whose access_tags are a subset of these tags")
 
     # lookup
     p = sub.add_parser("lookup", help="Simple keyword search over beliefs (no neighbor expansion)")
     p.add_argument("query", help="Search terms (all must match, case-insensitive)")
+    p.add_argument("--visible-to", metavar="TAG,TAG", help="Only show nodes whose access_tags are a subset of these tags")
 
     # deduplicate
     p = sub.add_parser("deduplicate", help="Find and optionally retract duplicate IN beliefs")
@@ -1106,6 +1160,7 @@ def main():
                    help="Only show beliefs at this depth or deeper (0=premises)")
     p.add_argument("--max-depth", type=int, default=None,
                    help="Only show beliefs at this depth or shallower")
+    p.add_argument("--visible-to", metavar="TAG,TAG", help="Only show nodes whose access_tags are a subset of these tags")
 
     args = parser.parse_args()
     if not args.command:
@@ -1144,6 +1199,7 @@ def main():
         "challenge": cmd_challenge,
         "defend": cmd_defend,
         "trace": cmd_trace,
+        "trace-access-tags": cmd_trace_access_tags,
         "search": cmd_search,
         "lookup": cmd_lookup,
         "deduplicate": cmd_deduplicate,

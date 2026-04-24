@@ -18,6 +18,19 @@ from .storage import Storage
 DEFAULT_DB = "reasons.db"
 
 
+def _is_visible(node, visible_to: list[str]) -> bool:
+    """Check if a node is visible given the caller's access tags.
+
+    A node is visible if its access_tags are all contained in visible_to.
+    Nodes with no access_tags are always visible.
+    """
+    tags = node.metadata.get("access_tags", [])
+    if not tags:
+        return True
+    visible_set = set(visible_to)
+    return all(t in visible_set for t in tags)
+
+
 def _resolve_namespace(node_id: str, namespace: str | None) -> str:
     """Prefix node_id with namespace if provided and not already namespaced.
 
@@ -124,6 +137,7 @@ def add_node(
     source: str = "",
     namespace: str | None = None,
     any_mode: bool = False,
+    access_tags: list[str] | None = None,
     db_path: str = DEFAULT_DB,
 ) -> dict:
     """Add a node to the network.
@@ -138,6 +152,7 @@ def add_node(
         source: Provenance (repo:path)
         namespace: Optional namespace prefix (auto-creates ns:active premise)
         any_mode: If True, expand SL into one justification per antecedent (OR)
+        access_tags: Data source provenance tags for access control
         db_path: Path to RMS database
 
     Returns: {"node_id": str, "truth_value": str, "type": str, "premise_count": int}
@@ -192,11 +207,16 @@ def add_node(
                 j.antecedents = [_resolve_namespace(a, namespace) for a in j.antecedents]
                 j.outlist = [_resolve_namespace(o, namespace) for o in j.outlist]
 
+        metadata = {}
+        if access_tags:
+            metadata["access_tags"] = sorted(set(access_tags))
+
         node = net.add_node(
             id=node_id,
             text=text,
             justifications=justifications or None,
             source=source,
+            metadata=metadata or None,
         )
         jtype = justifications[0].type if justifications else "premise"
         max_premises = max((len(j.antecedents) for j in justifications), default=0)
@@ -453,7 +473,7 @@ def assert_node(node_id: str, db_path: str = DEFAULT_DB) -> dict:
         return {"changed": changed, "went_out": went_out, "went_in": went_in}
 
 
-def get_status(db_path: str = DEFAULT_DB) -> dict:
+def get_status(visible_to: list[str] | None = None, db_path: str = DEFAULT_DB) -> dict:
     """Get all nodes with truth values.
 
     Returns: {"nodes": list[dict], "in_count": int, "total": int}
@@ -461,6 +481,8 @@ def get_status(db_path: str = DEFAULT_DB) -> dict:
     with _with_network(db_path) as net:
         nodes = []
         for nid, node in sorted(net.nodes.items()):
+            if visible_to is not None and not _is_visible(node, visible_to):
+                continue
             nodes.append({
                 "id": nid,
                 "text": node.text,
@@ -471,15 +493,20 @@ def get_status(db_path: str = DEFAULT_DB) -> dict:
         return {"nodes": nodes, "in_count": in_count, "total": len(nodes)}
 
 
-def show_node(node_id: str, db_path: str = DEFAULT_DB) -> dict:
+def show_node(node_id: str, visible_to: list[str] | None = None, db_path: str = DEFAULT_DB) -> dict:
     """Get full details for a node.
 
     Returns: dict with id, text, truth_value, source, justifications, dependents
+    Raises PermissionError if node's access_tags are not a subset of visible_to.
     """
     with _with_network(db_path) as net:
         if node_id not in net.nodes:
             raise KeyError(f"Node '{node_id}' not found")
         node = net.nodes[node_id]
+        if visible_to is not None and not _is_visible(node, visible_to):
+            raise PermissionError(
+                f"Node '{node_id}' requires access tags not in {visible_to}"
+            )
         return {
             "id": node.id,
             "text": node.text,
@@ -495,24 +522,58 @@ def show_node(node_id: str, db_path: str = DEFAULT_DB) -> dict:
         }
 
 
-def explain_node(node_id: str, db_path: str = DEFAULT_DB) -> dict:
+def explain_node(node_id: str, visible_to: list[str] | None = None, db_path: str = DEFAULT_DB) -> dict:
     """Explain why a node is IN or OUT.
 
     Returns: {"steps": list[dict]}
+    Raises PermissionError if node's access_tags are not a subset of visible_to.
     """
     with _with_network(db_path) as net:
+        if node_id not in net.nodes:
+            raise KeyError(f"Node '{node_id}' not found")
+        if visible_to is not None and not _is_visible(net.nodes[node_id], visible_to):
+            raise PermissionError(
+                f"Node '{node_id}' requires access tags not in {visible_to}"
+            )
         steps = net.explain(node_id)
         return {"steps": steps}
 
 
-def trace_assumptions(node_id: str, db_path: str = DEFAULT_DB) -> dict:
+def trace_assumptions(node_id: str, visible_to: list[str] | None = None, db_path: str = DEFAULT_DB) -> dict:
     """Trace backward to find all premises a node rests on.
 
     Returns: {"node_id": str, "premises": list[str]}
+    Raises PermissionError if node's access_tags are not a subset of visible_to.
+    Filters returned premises by visible_to.
     """
     with _with_network(db_path) as net:
+        if node_id not in net.nodes:
+            raise KeyError(f"Node '{node_id}' not found")
+        if visible_to is not None and not _is_visible(net.nodes[node_id], visible_to):
+            raise PermissionError(
+                f"Node '{node_id}' requires access tags not in {visible_to}"
+            )
         premises = net.trace_assumptions(node_id)
+        if visible_to is not None:
+            premises = [p for p in premises if p in net.nodes and _is_visible(net.nodes[p], visible_to)]
         return {"node_id": node_id, "premises": premises}
+
+
+def trace_access_tags(node_id: str, visible_to: list[str] | None = None, db_path: str = DEFAULT_DB) -> dict:
+    """Trace backward through dependency chains and return union of all access_tags.
+
+    Returns: {"node_id": str, "access_tags": list[str]}
+    Raises PermissionError if node's access_tags are not a subset of visible_to.
+    """
+    with _with_network(db_path) as net:
+        if node_id not in net.nodes:
+            raise KeyError(f"Node '{node_id}' not found")
+        if visible_to is not None and not _is_visible(net.nodes[node_id], visible_to):
+            raise PermissionError(
+                f"Node '{node_id}' requires access tags not in {visible_to}"
+            )
+        tags = net.trace_access_tags(node_id)
+        return {"node_id": node_id, "access_tags": tags}
 
 
 def find_culprits(node_ids: list[str], db_path: str = DEFAULT_DB) -> dict:
@@ -629,7 +690,7 @@ def get_log(last: int | None = None, db_path: str = DEFAULT_DB) -> dict:
         return {"entries": entries}
 
 
-def export_network(db_path: str = DEFAULT_DB) -> dict:
+def export_network(visible_to: list[str] | None = None, db_path: str = DEFAULT_DB) -> dict:
     """Export the entire network as a dict.
 
     Returns: {"nodes": dict, "nogoods": list}
@@ -650,10 +711,12 @@ def export_network(db_path: str = DEFAULT_DB) -> dict:
                     "metadata": {k: v for k, v in n.metadata.items() if not k.startswith("_")},
                 }
                 for nid, n in sorted(net.nodes.items())
+                if visible_to is None or _is_visible(n, visible_to)
             },
             "nogoods": [
                 {"id": ng.id, "nodes": ng.nodes, "discovered": ng.discovered, "resolution": ng.resolution}
                 for ng in net.nogoods
+                if visible_to is None or all(n in net.nodes and _is_visible(net.nodes[n], visible_to) for n in ng.nodes)
             ],
             "repos": dict(net.repos),
         }
@@ -1000,7 +1063,7 @@ def list_repos(db_path: str = DEFAULT_DB) -> dict:
         return {"repos": dict(net.repos)}
 
 
-def export_markdown(db_path: str = DEFAULT_DB) -> str:
+def export_markdown(visible_to: list[str] | None = None, db_path: str = DEFAULT_DB) -> str:
     """Export the network as beliefs.md-compatible markdown.
 
     Returns: the markdown string
@@ -1008,6 +1071,15 @@ def export_markdown(db_path: str = DEFAULT_DB) -> str:
     from .export_markdown import export_markdown as _export
 
     with _with_network(db_path) as net:
+        if visible_to is not None:
+            from .network import Network
+            filtered = Network()
+            for nid, node in net.nodes.items():
+                if _is_visible(node, visible_to):
+                    filtered.nodes[nid] = node
+            filtered.nogoods = [ng for ng in net.nogoods if all(n in filtered.nodes for n in ng.nodes)]
+            filtered.repos = net.repos
+            return _export(filtered, repos=filtered.repos)
         return _export(net, repos=net.repos)
 
 
@@ -1060,7 +1132,7 @@ def hash_sources(
         return {"hashed": results, "count": len(results)}
 
 
-def compact(budget: int = 500, truncate: bool = True, db_path: str = DEFAULT_DB) -> str:
+def compact(budget: int = 500, truncate: bool = True, visible_to: list[str] | None = None, db_path: str = DEFAULT_DB) -> str:
     """Generate a token-budgeted belief state summary.
 
     Returns: the compact summary string
@@ -1068,16 +1140,25 @@ def compact(budget: int = 500, truncate: bool = True, db_path: str = DEFAULT_DB)
     from .compact import compact as _compact
 
     with _with_network(db_path) as net:
+        if visible_to is not None:
+            from .network import Network
+            filtered = Network()
+            for nid, node in net.nodes.items():
+                if _is_visible(node, visible_to):
+                    filtered.nodes[nid] = node
+            filtered.nogoods = [ng for ng in net.nogoods if all(n in filtered.nodes for n in ng.nodes)]
+            return _compact(filtered, budget=budget, truncate=truncate)
         return _compact(net, budget=budget, truncate=truncate)
 
 
-def lookup(query: str, db_path: str = DEFAULT_DB) -> str:
+def lookup(query: str, visible_to: list[str] | None = None, db_path: str = DEFAULT_DB) -> str:
     """Simple all-terms search over the full belief block — ID, text, source,
     dependencies, and metadata. Matches the same search corpus and output
     format as lookup_beliefs on a flat beliefs.md file.
 
     Args:
         query: search terms (all must appear, case-insensitive)
+        visible_to: only return nodes whose access_tags are a subset
         db_path: path to RMS database
 
     Returns: formatted string with matching beliefs (full blocks)
@@ -1086,6 +1167,8 @@ def lookup(query: str, db_path: str = DEFAULT_DB) -> str:
         query_terms = query.lower().split()
         matches = []
         for nid, node in sorted(net.nodes.items()):
+            if visible_to is not None and not _is_visible(node, visible_to):
+                continue
             # Build the full searchable block — same fields as beliefs.md
             block_parts = [nid, node.text]
             if node.source:
@@ -1125,7 +1208,7 @@ def lookup(query: str, db_path: str = DEFAULT_DB) -> str:
         return "\n".join(parts)
 
 
-def search(query: str, db_path: str = DEFAULT_DB, format: str = "markdown") -> str:
+def search(query: str, visible_to: list[str] | None = None, db_path: str = DEFAULT_DB, format: str = "markdown") -> str:
     """Search nodes using full-text search with neighbor expansion.
 
     Uses SQLite FTS5 for ranked all-terms matching. Returns matched nodes
@@ -1136,6 +1219,7 @@ def search(query: str, db_path: str = DEFAULT_DB, format: str = "markdown") -> s
 
     Args:
         query: search terms (FTS5 matches all terms in any order)
+        visible_to: only return nodes whose access_tags are a subset
         db_path: path to RMS database
         format: output format — "markdown" (default), "json", or "minimal"
 
@@ -1150,6 +1234,15 @@ def search(query: str, db_path: str = DEFAULT_DB, format: str = "markdown") -> s
 
         if not matched_ids:
             return "No results found."
+
+        # Apply access filtering
+        if visible_to is not None:
+            matched_ids = [
+                nid for nid in matched_ids
+                if nid in net.nodes and _is_visible(net.nodes[nid], visible_to)
+            ]
+            if not matched_ids:
+                return "No results found."
 
         # Expand to include neighbors (1-hop in dependency graph)
         neighbor_ids = set()
@@ -1168,6 +1261,13 @@ def search(query: str, db_path: str = DEFAULT_DB, format: str = "markdown") -> s
 
         # Remove already-matched nodes from neighbors
         neighbor_ids -= set(matched_ids)
+
+        # Apply access filtering to neighbors too
+        if visible_to is not None:
+            neighbor_ids = {
+                nid for nid in neighbor_ids
+                if nid in net.nodes and _is_visible(net.nodes[nid], visible_to)
+            }
 
         if format == "json":
             return _format_json(net, matched_ids, neighbor_ids)
@@ -1307,6 +1407,7 @@ def list_nodes(
     namespace: str | None = None,
     min_depth: int | None = None,
     max_depth: int | None = None,
+    visible_to: list[str] | None = None,
     db_path: str = DEFAULT_DB,
 ) -> dict:
     """List nodes with optional filters.
@@ -1326,6 +1427,8 @@ def list_nodes(
             if has_dependents and not node.dependents:
                 continue
             if challenged and not node.metadata.get("challenges"):
+                continue
+            if visible_to is not None and not _is_visible(node, visible_to):
                 continue
             if memo is not None:
                 d = _node_depth(nid, net, memo)
