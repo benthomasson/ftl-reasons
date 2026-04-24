@@ -62,31 +62,38 @@ def compact(
         return t
 
     footer_tokens = estimate_tokens(f"Token count: ~{budget} / {budget} budget")
+    # Track total chars to derive tokens in O(1) instead of rejoining
+    _char_count = sum(len(l) for l in lines) + len(lines) - 1  # +newlines
+
+    def _add_line(line):
+        nonlocal _char_count
+        lines.append(line)
+        _char_count += 1 + len(line)  # +1 for \n separator
 
     def _current_tokens():
-        return estimate_tokens("\n".join(lines))
+        return max(1, _char_count // 4)
 
     def _over_budget(line):
         return _current_tokens() + estimate_tokens(line) + footer_tokens > budget
 
     # Section 1: Nogoods (highest priority, but counted against budget)
     if network.nogoods and not _over_budget("## Nogoods"):
-        lines.append("## Nogoods")
+        _add_line("## Nogoods")
         added_nogoods = 0
         for ng in network.nogoods:
             res = f" — {ng.resolution}" if ng.resolution else ""
             line = f"- {ng.id}: {', '.join(ng.nodes)}{res}"
             if _over_budget(line):
                 remaining = len(network.nogoods) - added_nogoods
-                lines.append(f"  ... ({remaining} more nogoods omitted)")
+                _add_line(f"  ... ({remaining} more nogoods omitted)")
                 break
-            lines.append(line)
+            _add_line(line)
             added_nogoods += 1
-        lines.append("")
+        _add_line("")
 
     # Section 2: OUT nodes (budget-limited)
     if out_nodes and not _over_budget("## OUT (retracted)"):
-        lines.append("## OUT (retracted)")
+        _add_line("## OUT (retracted)")
         added_out = 0
         for node in out_nodes:
             reason = ""
@@ -98,11 +105,11 @@ def compact(
             line = f"- {node.id}: {_text(node)}{reason}"
             if _over_budget(line):
                 remaining = len(out_nodes) - added_out
-                lines.append(f"  ... ({remaining} more OUT nodes omitted)")
+                _add_line(f"  ... ({remaining} more OUT nodes omitted)")
                 break
-            lines.append(line)
+            _add_line(line)
             added_out += 1
-        lines.append("")
+        _add_line("")
 
     # Section 3: IN nodes (budget-limited)
     if in_nodes and not _over_budget("## IN (active)"):
@@ -125,7 +132,7 @@ def compact(
 
         hidden_count = len(in_nodes) - len(visible_nodes)
 
-        lines.append("## IN (active)")
+        _add_line("## IN (active)")
         added = 0
 
         for node in visible_nodes:
@@ -144,15 +151,15 @@ def compact(
 
             if _over_budget(line):
                 remaining = len(visible_nodes) - added
-                lines.append(f"  ... ({remaining} more IN nodes omitted)")
+                _add_line(f"  ... ({remaining} more IN nodes omitted)")
                 break
 
-            lines.append(line)
+            _add_line(line)
             added += 1
 
         if hidden_count:
-            lines.append(f"  ({hidden_count} nodes hidden by summaries)")
-        lines.append("")
+            _add_line(f"  ({hidden_count} nodes hidden by summaries)")
+        _add_line("")
 
     lines.append(f"Token count: ~{_current_tokens()} / {budget} budget")
 
