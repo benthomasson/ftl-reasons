@@ -107,6 +107,7 @@ class Network:
                     self.nodes[out_id].dependents.add(id)
 
         self.nodes[id] = node
+        self._inherit_access_tags(node)
 
         # Compute initial truth value
         if node.justifications:
@@ -166,6 +167,45 @@ class Network:
         # Propagate to dependents
         changed.extend(self._propagate(node_id))
         return changed
+
+    def _inherit_access_tags(self, node: "Node") -> None:
+        """Merge access_tags from all justification antecedents into this node."""
+        if not node.justifications:
+            return
+        inherited = set(node.metadata.get("access_tags", []))
+        for j in node.justifications:
+            for ant_id in j.antecedents:
+                if ant_id in self.nodes:
+                    inherited.update(
+                        self.nodes[ant_id].metadata.get("access_tags", [])
+                    )
+        if inherited:
+            node.metadata["access_tags"] = sorted(inherited)
+
+    def trace_access_tags(self, node_id: str) -> list[str]:
+        """Return the union of all access_tags in the dependency subgraph.
+
+        Traces backward through all justification chains, collecting
+        access_tags from every node visited (not just premises).
+        """
+        if node_id not in self.nodes:
+            raise KeyError(f"Node '{node_id}' not found")
+
+        all_tags: set[str] = set()
+        visited: set[str] = set()
+
+        def _walk(nid: str) -> None:
+            if nid in visited or nid not in self.nodes:
+                return
+            visited.add(nid)
+            node = self.nodes[nid]
+            all_tags.update(node.metadata.get("access_tags", []))
+            for j in node.justifications:
+                for ant_id in j.antecedents:
+                    _walk(ant_id)
+
+        _walk(node_id)
+        return sorted(all_tags)
 
     def trace_assumptions(self, node_id: str) -> list[str]:
         """Trace backward through justification chains to find all premises.
@@ -400,6 +440,7 @@ class Network:
                 self.nodes[out_id].dependents.add(node_id)
 
         node.justifications.append(justification)
+        self._inherit_access_tags(node)
 
         new_value = self._compute_truth(node)
         changed = []
