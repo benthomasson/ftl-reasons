@@ -182,6 +182,24 @@ class Network:
         if inherited:
             node.metadata["access_tags"] = sorted(inherited)
 
+    def _propagate_access_tags(self, changed_id: str) -> None:
+        """Push access_tags forward to dependents that derive from this node."""
+        queue = deque([changed_id])
+        visited = {changed_id}
+        while queue:
+            current_id = queue.popleft()
+            current = self.nodes[current_id]
+            for dep_id in current.dependents:
+                if dep_id in visited or dep_id not in self.nodes:
+                    continue
+                dep = self.nodes[dep_id]
+                old_tags = dep.metadata.get("access_tags", [])
+                self._inherit_access_tags(dep)
+                new_tags = dep.metadata.get("access_tags", [])
+                if old_tags != new_tags:
+                    visited.add(dep_id)
+                    queue.append(dep_id)
+
     def trace_access_tags(self, node_id: str) -> list[str]:
         """Return the union of all access_tags in the dependency subgraph.
 
@@ -441,6 +459,7 @@ class Network:
 
         node.justifications.append(justification)
         self._inherit_access_tags(node)
+        self._propagate_access_tags(node_id)
 
         new_value = self._compute_truth(node)
         changed = []

@@ -1217,6 +1217,13 @@ def search(query: str, visible_to: list[str] | None = None, db_path: str = DEFAU
         # Remove already-matched nodes from neighbors
         neighbor_ids -= set(matched_ids)
 
+        # Apply access filtering to neighbors too
+        if visible_to is not None:
+            neighbor_ids = {
+                nid for nid in neighbor_ids
+                if nid in net.nodes and _is_visible(net.nodes[nid], visible_to)
+            }
+
         if format == "json":
             return _format_json(net, matched_ids, neighbor_ids)
         elif format == "minimal":

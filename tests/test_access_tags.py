@@ -91,6 +91,26 @@ class TestInheritance:
 
         assert net.nodes["c"].metadata.get("access_tags") == ["finance", "hr"]
 
+    def test_add_justification_propagates_tags_to_dependents(self):
+        net = Network()
+        net.add_node("a", "A")
+        j1 = Justification(type="SL", antecedents=["a"], outlist=[], label="")
+        net.add_node("b", "B", justifications=[j1])
+        j2 = Justification(type="SL", antecedents=["b"], outlist=[], label="")
+        net.add_node("c", "C", justifications=[j2])
+
+        assert "access_tags" not in net.nodes["b"].metadata
+        assert "access_tags" not in net.nodes["c"].metadata
+
+        # Now give "a" access tags via a new justification from a tagged node
+        net.add_node("secret", "Secret", metadata={"access_tags": ["finance"]})
+        j3 = Justification(type="SL", antecedents=["secret"], outlist=[], label="")
+        net.add_justification("a", j3)
+
+        assert net.nodes["a"].metadata.get("access_tags") == ["finance"]
+        assert net.nodes["b"].metadata.get("access_tags") == ["finance"]
+        assert net.nodes["c"].metadata.get("access_tags") == ["finance"]
+
     def test_tags_persist_through_storage(self, db_path):
         api.add_node("a", "Premise A", access_tags=["finance"], db_path=db_path)
         api.add_node("b", "Derived B", sl="a", db_path=db_path)
@@ -177,6 +197,13 @@ class TestVisibleTo:
         assert "public-item" in result
         assert "secret-item" not in result
 
+    def test_search_neighbors_filtered(self, db_path):
+        api.add_node("secret", "Secret finance data", access_tags=["finance"], db_path=db_path)
+        api.add_node("public", "Public derived fact", sl="secret", db_path=db_path)
+
+        result = api.search("public", visible_to=["public"], db_path=db_path)
+        assert "secret" not in result
+
 
 class TestTraceAccessTags:
 
@@ -216,14 +243,11 @@ class TestTraceAccessTags:
         with pytest.raises(KeyError):
             net.trace_access_tags("nonexistent")
 
-    def test_api_trace_access_tags(self, db_path):
-        api.add_node("a", "Finance premise", access_tags=["finance"], db_path=db_path)
-        api.add_node("b", "Derived", sl="a", db_path=db_path)
+    def test_api_trace_access_tags(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        api.add_node("a", "Finance premise", access_tags=["finance"], db_path=db)
+        api.add_node("b", "Derived", sl="a", db_path=db)
 
-        result = api.trace_access_tags("b", db_path=db_path)
+        result = api.trace_access_tags("b", db_path=db)
         assert result["node_id"] == "b"
         assert result["access_tags"] == ["finance"]
-
-    @pytest.fixture
-    def db_path(self, tmp_path):
-        return str(tmp_path / "test.db")
