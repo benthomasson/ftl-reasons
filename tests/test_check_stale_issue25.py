@@ -14,7 +14,7 @@ from reasons_lib.check_stale import check_stale, hash_file
 
 
 def _hash(content: str) -> str:
-    return hashlib.sha256(content.encode()).hexdigest()[:16]
+    return hashlib.sha256(content.encode()).hexdigest()
 
 
 class TestSourceDeletedResult:
