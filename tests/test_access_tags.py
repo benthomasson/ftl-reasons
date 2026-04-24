@@ -204,6 +204,66 @@ class TestVisibleTo:
         result = api.search("public", visible_to=["public"], db_path=db_path)
         assert "secret" not in result
 
+    def test_status_respects_visible_to(self, db_path):
+        api.add_node("pub", "Public", db_path=db_path)
+        api.add_node("fin", "Finance", access_tags=["finance"], db_path=db_path)
+
+        result = api.get_status(visible_to=["public"], db_path=db_path)
+        ids = {n["id"] for n in result["nodes"]}
+        assert "pub" in ids
+        assert "fin" not in ids
+        assert result["total"] == 1
+
+    def test_explain_raises_on_forbidden(self, db_path):
+        api.add_node("fin", "Finance", access_tags=["finance"], db_path=db_path)
+
+        with pytest.raises(PermissionError):
+            api.explain_node("fin", visible_to=["hr"], db_path=db_path)
+
+    def test_trace_raises_on_forbidden(self, db_path):
+        api.add_node("fin", "Finance", access_tags=["finance"], db_path=db_path)
+        api.add_node("derived", "Derived", sl="fin", db_path=db_path)
+
+        with pytest.raises(PermissionError):
+            api.trace_assumptions("derived", visible_to=["public"], db_path=db_path)
+
+    def test_trace_filters_premises(self, db_path):
+        api.add_node("pub", "Public premise", db_path=db_path)
+        api.add_node("fin", "Finance premise", access_tags=["finance"], db_path=db_path)
+        api.add_node("derived", "Derived", sl="pub,fin", db_path=db_path)
+
+        result = api.trace_assumptions("derived", visible_to=["finance", "public"], db_path=db_path)
+        assert "pub" in result["premises"]
+        assert "fin" in result["premises"]
+
+        # derived inherits ["finance"] from fin, so visible_to=["public"] can't see it
+        with pytest.raises(PermissionError):
+            api.trace_assumptions("derived", visible_to=["public"], db_path=db_path)
+
+    def test_export_network_respects_visible_to(self, db_path):
+        api.add_node("pub", "Public", db_path=db_path)
+        api.add_node("fin", "Finance", access_tags=["finance"], db_path=db_path)
+
+        data = api.export_network(visible_to=["public"], db_path=db_path)
+        assert "pub" in data["nodes"]
+        assert "fin" not in data["nodes"]
+
+    def test_export_markdown_respects_visible_to(self, db_path):
+        api.add_node("pub", "Public", db_path=db_path)
+        api.add_node("fin", "Finance", access_tags=["finance"], db_path=db_path)
+
+        md = api.export_markdown(visible_to=["public"], db_path=db_path)
+        assert "pub" in md
+        assert "fin" not in md
+
+    def test_compact_respects_visible_to(self, db_path):
+        api.add_node("pub", "Public belief", db_path=db_path)
+        api.add_node("fin", "Finance belief", access_tags=["finance"], db_path=db_path)
+
+        result = api.compact(visible_to=["public"], db_path=db_path)
+        assert "pub" in result
+        assert "fin" not in result
+
 
 class TestTraceAccessTags:
 

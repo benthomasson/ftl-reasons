@@ -473,7 +473,7 @@ def assert_node(node_id: str, db_path: str = DEFAULT_DB) -> dict:
         return {"changed": changed, "went_out": went_out, "went_in": went_in}
 
 
-def get_status(db_path: str = DEFAULT_DB) -> dict:
+def get_status(visible_to: list[str] | None = None, db_path: str = DEFAULT_DB) -> dict:
     """Get all nodes with truth values.
 
     Returns: {"nodes": list[dict], "in_count": int, "total": int}
@@ -481,6 +481,8 @@ def get_status(db_path: str = DEFAULT_DB) -> dict:
     with _with_network(db_path) as net:
         nodes = []
         for nid, node in sorted(net.nodes.items()):
+            if visible_to is not None and not _is_visible(node, visible_to):
+                continue
             nodes.append({
                 "id": nid,
                 "text": node.text,
@@ -520,23 +522,40 @@ def show_node(node_id: str, visible_to: list[str] | None = None, db_path: str = 
         }
 
 
-def explain_node(node_id: str, db_path: str = DEFAULT_DB) -> dict:
+def explain_node(node_id: str, visible_to: list[str] | None = None, db_path: str = DEFAULT_DB) -> dict:
     """Explain why a node is IN or OUT.
 
     Returns: {"steps": list[dict]}
+    Raises PermissionError if node's access_tags are not a subset of visible_to.
     """
     with _with_network(db_path) as net:
+        if node_id not in net.nodes:
+            raise KeyError(f"Node '{node_id}' not found")
+        if visible_to is not None and not _is_visible(net.nodes[node_id], visible_to):
+            raise PermissionError(
+                f"Node '{node_id}' requires access tags not in {visible_to}"
+            )
         steps = net.explain(node_id)
         return {"steps": steps}
 
 
-def trace_assumptions(node_id: str, db_path: str = DEFAULT_DB) -> dict:
+def trace_assumptions(node_id: str, visible_to: list[str] | None = None, db_path: str = DEFAULT_DB) -> dict:
     """Trace backward to find all premises a node rests on.
 
     Returns: {"node_id": str, "premises": list[str]}
+    Raises PermissionError if node's access_tags are not a subset of visible_to.
+    Filters returned premises by visible_to.
     """
     with _with_network(db_path) as net:
+        if node_id not in net.nodes:
+            raise KeyError(f"Node '{node_id}' not found")
+        if visible_to is not None and not _is_visible(net.nodes[node_id], visible_to):
+            raise PermissionError(
+                f"Node '{node_id}' requires access tags not in {visible_to}"
+            )
         premises = net.trace_assumptions(node_id)
+        if visible_to is not None:
+            premises = [p for p in premises if p in net.nodes and _is_visible(net.nodes[p], visible_to)]
         return {"node_id": node_id, "premises": premises}
 
 
@@ -664,7 +683,7 @@ def get_log(last: int | None = None, db_path: str = DEFAULT_DB) -> dict:
         return {"entries": entries}
 
 
-def export_network(db_path: str = DEFAULT_DB) -> dict:
+def export_network(visible_to: list[str] | None = None, db_path: str = DEFAULT_DB) -> dict:
     """Export the entire network as a dict.
 
     Returns: {"nodes": dict, "nogoods": list}
@@ -685,6 +704,7 @@ def export_network(db_path: str = DEFAULT_DB) -> dict:
                     "metadata": {k: v for k, v in n.metadata.items() if not k.startswith("_")},
                 }
                 for nid, n in sorted(net.nodes.items())
+                if visible_to is None or _is_visible(n, visible_to)
             },
             "nogoods": [
                 {"id": ng.id, "nodes": ng.nodes, "discovered": ng.discovered, "resolution": ng.resolution}
@@ -1035,7 +1055,7 @@ def list_repos(db_path: str = DEFAULT_DB) -> dict:
         return {"repos": dict(net.repos)}
 
 
-def export_markdown(db_path: str = DEFAULT_DB) -> str:
+def export_markdown(visible_to: list[str] | None = None, db_path: str = DEFAULT_DB) -> str:
     """Export the network as beliefs.md-compatible markdown.
 
     Returns: the markdown string
@@ -1043,6 +1063,15 @@ def export_markdown(db_path: str = DEFAULT_DB) -> str:
     from .export_markdown import export_markdown as _export
 
     with _with_network(db_path) as net:
+        if visible_to is not None:
+            from .network import Network
+            filtered = Network()
+            for nid, node in net.nodes.items():
+                if _is_visible(node, visible_to):
+                    filtered.nodes[nid] = node
+            filtered.nogoods = net.nogoods
+            filtered.repos = net.repos
+            return _export(filtered, repos=filtered.repos)
         return _export(net, repos=net.repos)
 
 
@@ -1095,7 +1124,7 @@ def hash_sources(
         return {"hashed": results, "count": len(results)}
 
 
-def compact(budget: int = 500, truncate: bool = True, db_path: str = DEFAULT_DB) -> str:
+def compact(budget: int = 500, truncate: bool = True, visible_to: list[str] | None = None, db_path: str = DEFAULT_DB) -> str:
     """Generate a token-budgeted belief state summary.
 
     Returns: the compact summary string
@@ -1103,6 +1132,14 @@ def compact(budget: int = 500, truncate: bool = True, db_path: str = DEFAULT_DB)
     from .compact import compact as _compact
 
     with _with_network(db_path) as net:
+        if visible_to is not None:
+            from .network import Network
+            filtered = Network()
+            for nid, node in net.nodes.items():
+                if _is_visible(node, visible_to):
+                    filtered.nodes[nid] = node
+            filtered.nogoods = net.nogoods
+            return _compact(filtered, budget=budget, truncate=truncate)
         return _compact(net, budget=budget, truncate=truncate)
 
 
