@@ -716,6 +716,7 @@ def export_network(visible_to: list[str] | None = None, db_path: str = DEFAULT_D
             "nogoods": [
                 {"id": ng.id, "nodes": ng.nodes, "discovered": ng.discovered, "resolution": ng.resolution}
                 for ng in net.nogoods
+                if visible_to is None or all(n in net.nodes and _is_visible(net.nodes[n], visible_to) for n in ng.nodes)
             ],
             "repos": dict(net.repos),
         }
@@ -1076,7 +1077,7 @@ def export_markdown(visible_to: list[str] | None = None, db_path: str = DEFAULT_
             for nid, node in net.nodes.items():
                 if _is_visible(node, visible_to):
                     filtered.nodes[nid] = node
-            filtered.nogoods = net.nogoods
+            filtered.nogoods = [ng for ng in net.nogoods if all(n in filtered.nodes for n in ng.nodes)]
             filtered.repos = net.repos
             return _export(filtered, repos=filtered.repos)
         return _export(net, repos=net.repos)
@@ -1145,7 +1146,7 @@ def compact(budget: int = 500, truncate: bool = True, visible_to: list[str] | No
             for nid, node in net.nodes.items():
                 if _is_visible(node, visible_to):
                     filtered.nodes[nid] = node
-            filtered.nogoods = net.nogoods
+            filtered.nogoods = [ng for ng in net.nogoods if all(n in filtered.nodes for n in ng.nodes)]
             return _compact(filtered, budget=budget, truncate=truncate)
         return _compact(net, budget=budget, truncate=truncate)
 

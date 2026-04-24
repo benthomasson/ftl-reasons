@@ -267,6 +267,17 @@ class TestVisibleTo:
         assert "pub" in data["nodes"]
         assert "fin" not in data["nodes"]
 
+    def test_export_network_filters_nogoods(self, db_path):
+        api.add_node("pub", "Public", db_path=db_path)
+        api.add_node("fin", "Finance", access_tags=["finance"], db_path=db_path)
+        api.add_nogood(["pub", "fin"], db_path=db_path)
+
+        data = api.export_network(visible_to=["public"], db_path=db_path)
+        assert len(data["nogoods"]) == 0
+
+        data_all = api.export_network(visible_to=["finance", "public"], db_path=db_path)
+        assert len(data_all["nogoods"]) == 1
+
     def test_export_markdown_respects_visible_to(self, db_path):
         api.add_node("pub", "Public", db_path=db_path)
         api.add_node("fin", "Finance", access_tags=["finance"], db_path=db_path)
