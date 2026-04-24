@@ -20,6 +20,7 @@ class Network:
     def __init__(self):
         self.nodes: dict[str, Node] = {}
         self.nogoods: list[Nogood] = []
+        self._next_nogood_id: int = 1
         self.repos: dict[str, str] = {}  # name → path mapping
         self.log: list[dict] = []  # propagation audit trail
 
@@ -299,7 +300,8 @@ class Network:
             if nid not in self.nodes:
                 raise KeyError(f"Node '{nid}' not found")
 
-        nogood_id = f"nogood-{len(self.nogoods) + 1:03d}"
+        nogood_id = f"nogood-{self._next_nogood_id:03d}"
+        self._next_nogood_id += 1
         nogood = Nogood(
             id=nogood_id,
             nodes=list(node_ids),

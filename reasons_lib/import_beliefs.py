@@ -239,6 +239,11 @@ def import_into_network(
                     resolution=ng["resolution"],
                 )
                 network.nogoods.append(nogood)
+                m = re.fullmatch(r"nogood-(\d+)", nogood.id)
+                if m:
+                    network._next_nogood_id = max(
+                        network._next_nogood_id, int(m.group(1)) + 1
+                    )
                 nogoods_imported += 1
 
     return {

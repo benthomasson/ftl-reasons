@@ -52,6 +52,11 @@ CREATE TABLE IF NOT EXISTS propagation_log (
     value TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS network_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(id, text);
 """
 
@@ -80,6 +85,7 @@ class Storage:
             self.conn.execute("DELETE FROM nogoods")
             self.conn.execute("DELETE FROM repos")
             self.conn.execute("DELETE FROM propagation_log")
+            self.conn.execute("DELETE FROM network_meta")
 
             for node in network.nodes.values():
                 self.conn.execute(
@@ -112,6 +118,11 @@ class Storage:
                     "VALUES (?, ?, ?, ?)",
                     (nogood.id, json.dumps(nogood.nodes), nogood.discovered, nogood.resolution),
                 )
+
+            self.conn.execute(
+                "INSERT INTO network_meta (key, value) VALUES (?, ?)",
+                ("next_nogood_id", str(network._next_nogood_id)),
+            )
 
             for name, path in network.repos.items():
                 self.conn.execute(
@@ -179,6 +190,27 @@ class Storage:
                 discovered=discovered,
                 resolution=resolution,
             ))
+
+        # Load network metadata — persisted counter takes priority,
+        # otherwise derive from existing nogoods to avoid ID collisions
+        loaded_counter = False
+        try:
+            row = self.conn.execute(
+                "SELECT value FROM network_meta WHERE key = 'next_nogood_id'"
+            ).fetchone()
+            if row:
+                network._next_nogood_id = int(row[0])
+                loaded_counter = True
+        except Exception:
+            pass  # network_meta table may not exist in old databases
+        if not loaded_counter and network.nogoods:
+            import re
+            max_id = 0
+            for ng in network.nogoods:
+                m = re.fullmatch(r"nogood-(\d+)", ng.id)
+                if m:
+                    max_id = max(max_id, int(m.group(1)))
+            network._next_nogood_id = max_id + 1
 
         # Load repos
         try:
