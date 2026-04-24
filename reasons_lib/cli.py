@@ -360,9 +360,12 @@ def cmd_nogood(args):
 
 def cmd_trace_access_tags(args):
     try:
-        result = api.trace_access_tags(args.node_id, db_path=args.db)
+        result = api.trace_access_tags(args.node_id, visible_to=_parse_visible_to(args), db_path=args.db)
     except KeyError as e:
         print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    except PermissionError as e:
+        print(f"Access denied: {e}", file=sys.stderr)
         sys.exit(1)
 
     if not result["access_tags"]:
@@ -1014,6 +1017,7 @@ def main():
     # trace
     p = sub.add_parser("trace-access-tags", help="Trace all access tags in a node's dependency chain")
     p.add_argument("node_id", help="Node to trace")
+    p.add_argument("--visible-to", metavar="TAG,TAG", help="Only allow if access_tags are a subset of these tags")
 
     p = sub.add_parser("trace", help="Trace backward to find premises a node rests on")
     p.add_argument("node_id", help="Node to trace")

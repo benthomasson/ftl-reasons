@@ -559,12 +559,19 @@ def trace_assumptions(node_id: str, visible_to: list[str] | None = None, db_path
         return {"node_id": node_id, "premises": premises}
 
 
-def trace_access_tags(node_id: str, db_path: str = DEFAULT_DB) -> dict:
+def trace_access_tags(node_id: str, visible_to: list[str] | None = None, db_path: str = DEFAULT_DB) -> dict:
     """Trace backward through dependency chains and return union of all access_tags.
 
     Returns: {"node_id": str, "access_tags": list[str]}
+    Raises PermissionError if node's access_tags are not a subset of visible_to.
     """
     with _with_network(db_path) as net:
+        if node_id not in net.nodes:
+            raise KeyError(f"Node '{node_id}' not found")
+        if visible_to is not None and not _is_visible(net.nodes[node_id], visible_to):
+            raise PermissionError(
+                f"Node '{node_id}' requires access tags not in {visible_to}"
+            )
         tags = net.trace_access_tags(node_id)
         return {"node_id": node_id, "access_tags": tags}
 

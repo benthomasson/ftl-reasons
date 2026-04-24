@@ -311,3 +311,10 @@ class TestTraceAccessTags:
         result = api.trace_access_tags("b", db_path=db)
         assert result["node_id"] == "b"
         assert result["access_tags"] == ["finance"]
+
+    def test_api_trace_access_tags_raises_on_forbidden(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        api.add_node("a", "Finance premise", access_tags=["finance"], db_path=db)
+
+        with pytest.raises(PermissionError):
+            api.trace_access_tags("a", visible_to=["hr"], db_path=db)
