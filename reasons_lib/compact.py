@@ -22,8 +22,8 @@ def compact(
 ) -> str:
     """Generate a token-budgeted belief state summary.
 
-    Priority order:
-    1. Nogoods (never dropped — these are the most critical)
+    Priority order (all sections count against the budget):
+    1. Nogoods (highest priority)
     2. OUT nodes (need review)
     3. IN nodes by dependent count (most-depended-on first)
 
@@ -61,16 +61,16 @@ def compact(
             t = t[:77] + "..."
         return t
 
-    footer_reserve = 15
+    footer_tokens = estimate_tokens(f"Token count: ~{budget} / {budget} budget")
 
     def _current_tokens():
         return estimate_tokens("\n".join(lines))
 
     def _over_budget(line):
-        return _current_tokens() + estimate_tokens(line) + footer_reserve > budget
+        return _current_tokens() + estimate_tokens(line) + footer_tokens > budget
 
     # Section 1: Nogoods (highest priority, but counted against budget)
-    if network.nogoods:
+    if network.nogoods and not _over_budget("## Nogoods"):
         lines.append("## Nogoods")
         added_nogoods = 0
         for ng in network.nogoods:
@@ -85,7 +85,7 @@ def compact(
         lines.append("")
 
     # Section 2: OUT nodes (budget-limited)
-    if out_nodes:
+    if out_nodes and not _over_budget("## OUT (retracted)"):
         lines.append("## OUT (retracted)")
         added_out = 0
         for node in out_nodes:
@@ -105,7 +105,7 @@ def compact(
         lines.append("")
 
     # Section 3: IN nodes (budget-limited)
-    if in_nodes:
+    if in_nodes and not _over_budget("## IN (active)"):
         covered_by_summary: set[str] = set()
         summary_nodes = []
         regular_nodes = []
@@ -154,7 +154,6 @@ def compact(
             lines.append(f"  ({hidden_count} nodes hidden by summaries)")
         lines.append("")
 
-    token_count = _current_tokens()
-    lines.append(f"Token count: ~{token_count} / {budget} budget")
+    lines.append(f"Token count: ~{_current_tokens()} / {budget} budget")
 
     return "\n".join(lines)
