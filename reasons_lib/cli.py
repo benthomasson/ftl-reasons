@@ -210,9 +210,7 @@ def cmd_status(args):
 
 
 def cmd_show(args):
-    visible_to = None
-    if getattr(args, "visible_to", None):
-        visible_to = [t.strip() for t in args.visible_to.split(",") if t.strip()]
+    visible_to = _parse_visible_to(args)
     try:
         node = api.show_node(args.node_id, visible_to=visible_to, db_path=args.db)
     except KeyError as e:
@@ -593,8 +591,9 @@ def cmd_compact(args):
 
 
 def _parse_visible_to(args):
-    if getattr(args, "visible_to", None):
-        return [t.strip() for t in args.visible_to.split(",") if t.strip()]
+    val = getattr(args, "visible_to", None)
+    if val is not None:
+        return [t.strip() for t in val.split(",") if t.strip()]
     return None
 
 
