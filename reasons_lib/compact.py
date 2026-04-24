@@ -11,8 +11,8 @@ from .network import Network
 
 
 def estimate_tokens(text: str) -> int:
-    """Rough token estimate — word count."""
-    return len(text.split())
+    """Token estimate using chars/4 heuristic (standard BPE approximation)."""
+    return max(1, len(text) // 4)
 
 
 def compact(
@@ -22,14 +22,14 @@ def compact(
 ) -> str:
     """Generate a token-budgeted belief state summary.
 
-    Priority order:
-    1. Nogoods (never dropped — these are the most critical)
+    Priority order (all sections count against the budget):
+    1. Nogoods (highest priority)
     2. OUT nodes (need review)
     3. IN nodes by dependent count (most-depended-on first)
 
     Args:
         network: The RMS network
-        budget: Maximum token budget (word count)
+        budget: Maximum token budget (chars/4 BPE approximation)
         truncate: If True, truncate node text to 80 chars
     """
     in_nodes = []
@@ -61,17 +61,40 @@ def compact(
             t = t[:77] + "..."
         return t
 
-    # Section 1: Nogoods (never dropped)
-    if network.nogoods:
-        lines.append("## Nogoods")
+    footer_tokens = estimate_tokens(f"Token count: ~{budget} / {budget} budget")
+    # Track total chars to derive tokens in O(1) instead of rejoining
+    _char_count = sum(len(l) for l in lines) + len(lines) - 1  # +newlines
+
+    def _add_line(line):
+        nonlocal _char_count
+        lines.append(line)
+        _char_count += 1 + len(line)  # +1 for \n separator
+
+    def _current_tokens():
+        return max(1, _char_count // 4)
+
+    def _over_budget(line):
+        return _current_tokens() + estimate_tokens(line) + footer_tokens > budget
+
+    # Section 1: Nogoods (highest priority, but counted against budget)
+    if network.nogoods and not _over_budget("## Nogoods"):
+        _add_line("## Nogoods")
+        added_nogoods = 0
         for ng in network.nogoods:
             res = f" — {ng.resolution}" if ng.resolution else ""
-            lines.append(f"- {ng.id}: {', '.join(ng.nodes)}{res}")
-        lines.append("")
+            line = f"- {ng.id}: {', '.join(ng.nodes)}{res}"
+            if _over_budget(line):
+                remaining = len(network.nogoods) - added_nogoods
+                _add_line(f"  ... ({remaining} more nogoods omitted)")
+                break
+            _add_line(line)
+            added_nogoods += 1
+        _add_line("")
 
-    # Section 2: OUT nodes (need review)
-    if out_nodes:
-        lines.append("## OUT (retracted)")
+    # Section 2: OUT nodes (budget-limited)
+    if out_nodes and not _over_budget("## OUT (retracted)"):
+        _add_line("## OUT (retracted)")
+        added_out = 0
         for node in out_nodes:
             reason = ""
             retract_reason = node.metadata.get("retract_reason") or node.metadata.get("stale_reason")
@@ -79,13 +102,17 @@ def compact(
                 reason = f" (stale: {retract_reason[:60]})"
             elif node.metadata.get("superseded_by"):
                 reason = f" (superseded by: {node.metadata['superseded_by']})"
-            lines.append(f"- {node.id}: {_text(node)}{reason}")
-        lines.append("")
+            line = f"- {node.id}: {_text(node)}{reason}"
+            if _over_budget(line):
+                remaining = len(out_nodes) - added_out
+                _add_line(f"  ... ({remaining} more OUT nodes omitted)")
+                break
+            _add_line(line)
+            added_out += 1
+        _add_line("")
 
     # Section 3: IN nodes (budget-limited)
-    # Use summaries to replace covered nodes when available
-    if in_nodes:
-        # Find which nodes are covered by summaries
+    if in_nodes and not _over_budget("## IN (active)"):
         covered_by_summary: set[str] = set()
         summary_nodes = []
         regular_nodes = []
@@ -93,27 +120,22 @@ def compact(
             summarizes = node.metadata.get("summarizes")
             if summarizes:
                 summary_nodes.append(node)
-                # Only cover nodes if the summary is IN
                 for covered_id in summarizes:
                     covered_by_summary.add(covered_id)
             else:
                 regular_nodes.append(node)
 
-        # Filter out covered nodes, keep summaries and uncovered nodes
         visible_nodes = summary_nodes + [
             n for n in regular_nodes if n.id not in covered_by_summary
         ]
-        # Re-sort by dependent count
         visible_nodes.sort(key=lambda n: len(n.dependents), reverse=True)
 
         hidden_count = len(in_nodes) - len(visible_nodes)
 
-        lines.append("## IN (active)")
+        _add_line("## IN (active)")
         added = 0
-        current_tokens = estimate_tokens("\n".join(lines))
 
         for node in visible_nodes:
-            # Build the line
             is_summary = bool(node.metadata.get("summarizes"))
             prefix = "[summary] " if is_summary else ""
             deps = ""
@@ -127,21 +149,18 @@ def compact(
             sum_info = f" (covers {len(summarizes)} nodes)" if summarizes else ""
             line = f"- {prefix}{node.id}: {_text(node)}{deps}{dep_info}{sum_info}"
 
-            line_tokens = estimate_tokens(line)
-            if current_tokens + line_tokens > budget:
+            if _over_budget(line):
                 remaining = len(visible_nodes) - added
-                lines.append(f"  ... ({remaining} more IN nodes omitted)")
+                _add_line(f"  ... ({remaining} more IN nodes omitted)")
                 break
 
-            lines.append(line)
-            current_tokens += line_tokens
+            _add_line(line)
             added += 1
 
         if hidden_count:
-            lines.append(f"  ({hidden_count} nodes hidden by summaries)")
-        lines.append("")
+            _add_line(f"  ({hidden_count} nodes hidden by summaries)")
+        _add_line("")
 
-    token_count = estimate_tokens("\n".join(lines))
-    lines.append(f"Token count: ~{token_count} / {budget} budget")
+    lines.append(f"Token count: ~{_current_tokens()} / {budget} budget")
 
     return "\n".join(lines)
