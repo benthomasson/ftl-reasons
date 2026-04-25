@@ -588,3 +588,9 @@ class TestNoCommand:
     def test_no_command_prints_help(self):
         out, err, code = run_cli()
         assert code == 1
+
+    def test_version(self):
+        out, err, code = run_cli("--version")
+        assert code == 0
+        assert "reasons" in out
+        assert "0." in out or "1." in out

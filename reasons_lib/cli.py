@@ -9,6 +9,8 @@ import json
 import sys
 from pathlib import Path
 
+from importlib.metadata import version as _pkg_version
+
 from . import api
 
 
@@ -923,6 +925,7 @@ def main():
         prog="reasons",
         description="Reasons — automatic belief retraction and dependency-directed backtracking",
     )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {_pkg_version('ftl-reasons')}")
     parser.add_argument("--db", default=api.DEFAULT_DB, help="Path to database (default: reasons.db)")
     sub = parser.add_subparsers(dest="command")
 
