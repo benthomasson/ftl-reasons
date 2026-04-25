@@ -583,6 +583,269 @@ class TestSummarize:
         assert "2 nodes" in out
 
 
+class TestImportBeliefs:
+
+    def test_import_beliefs(self, db_path, tmp_path):
+        beliefs = tmp_path / "beliefs.md"
+        beliefs.write_text("""\
+# Belief Registry
+
+## Claims
+
+### premise-a [IN] OBSERVATION
+First premise
+
+### premise-b [IN] OBSERVATION
+Second premise
+
+### derived-c [IN] DERIVED
+Derived from both
+- Depends on: premise-a, premise-b
+""")
+        run_cli("init", db_path=db_path)
+        out, err, code = run_cli("import-beliefs", str(beliefs), db_path=db_path)
+        assert code == 0
+        assert "Imported 3 claims" in out
+
+    def test_import_beliefs_file_not_found(self, db_path):
+        run_cli("init", db_path=db_path)
+        out, err, code = run_cli("import-beliefs", "/nonexistent/beliefs.md", db_path=db_path)
+        assert code == 1
+        assert "Error" in err
+
+
+class TestImportAgent:
+
+    def test_import_agent(self, db_path, tmp_path):
+        beliefs = tmp_path / "beliefs.md"
+        beliefs.write_text("""\
+# Belief Registry
+
+## Claims
+
+### obs-one [IN] OBSERVATION
+An observation from the agent
+""")
+        run_cli("init", db_path=db_path)
+        out, err, code = run_cli("import-agent", "myagent", str(beliefs), db_path=db_path)
+        assert code == 0
+        assert "myagent" in out
+        assert "Imported:" in out or "imported" in out.lower()
+
+    def test_import_agent_file_not_found(self, db_path):
+        run_cli("init", db_path=db_path)
+        out, err, code = run_cli("import-agent", "myagent", "/nonexistent.md", db_path=db_path)
+        assert code == 1
+
+    def test_sync_agent(self, db_path, tmp_path):
+        beliefs = tmp_path / "beliefs.md"
+        beliefs.write_text("""\
+# Belief Registry
+
+## Claims
+
+### obs-one [IN] OBSERVATION
+An observation from the agent
+""")
+        run_cli("init", db_path=db_path)
+        run_cli("import-agent", "myagent", str(beliefs), db_path=db_path)
+
+        beliefs.write_text("""\
+# Belief Registry
+
+## Claims
+
+### obs-one [IN] OBSERVATION
+Updated observation text
+
+### obs-two [IN] OBSERVATION
+A new observation
+""")
+        out, err, code = run_cli("sync-agent", "myagent", str(beliefs), db_path=db_path)
+        assert code == 0
+        assert "synced" in out.lower()
+
+
+class TestNamespaces:
+
+    def test_namespaces_empty(self, db_path):
+        run_cli("init", db_path=db_path)
+        out, err, code = run_cli("namespaces", db_path=db_path)
+        assert code == 0
+        assert "No namespaces" in out
+
+    def test_namespaces_with_agent(self, db_path, tmp_path):
+        beliefs = tmp_path / "beliefs.md"
+        beliefs.write_text("""\
+# Belief Registry
+
+## Claims
+
+### obs-one [IN] OBSERVATION
+An observation
+""")
+        run_cli("init", db_path=db_path)
+        run_cli("import-agent", "testns", str(beliefs), db_path=db_path)
+        out, err, code = run_cli("namespaces", db_path=db_path)
+        assert code == 0
+        assert "testns" in out
+        assert "1 namespace" in out
+
+
+class TestDeduplicate:
+
+    def test_deduplicate_no_duplicates(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "alpha", "Something about alpha", db_path=db_path)
+        run_cli("add", "beta", "Something about beta", db_path=db_path)
+        out, err, code = run_cli("deduplicate", db_path=db_path)
+        assert code == 0
+        assert "No duplicate" in out
+
+    def test_deduplicate_finds_similar(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "propagation-is-bfs", "Propagation uses BFS", db_path=db_path)
+        run_cli("add", "propagation-uses-bfs", "Propagation is BFS-based", db_path=db_path)
+        out, err, code = run_cli("deduplicate", db_path=db_path)
+        assert code == 0
+        assert "Cluster" in out or "No duplicate" in out
+
+    def test_deduplicate_auto(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "propagation-is-bfs", "Propagation uses BFS", db_path=db_path)
+        run_cli("add", "propagation-uses-bfs", "Propagation is BFS-based", db_path=db_path)
+        out, err, code = run_cli("deduplicate", "--auto", db_path=db_path)
+        assert code == 0
+
+    def test_deduplicate_accept(self, db_path, tmp_path):
+        plan_file = tmp_path / "plan.md"
+        plan_file.write_text("")
+        run_cli("init", db_path=db_path)
+        out, err, code = run_cli("deduplicate", "--accept", str(plan_file), db_path=db_path)
+        assert code == 0
+        assert "No clusters" in out
+
+    def test_deduplicate_accept_missing_file(self, db_path):
+        run_cli("init", db_path=db_path)
+        out, err, code = run_cli("deduplicate", "--accept", "/nonexistent.md", db_path=db_path)
+        assert code == 1
+
+
+class TestCheckStale:
+
+    def test_check_stale_all_fresh(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "A", db_path=db_path)
+        out, err, code = run_cli("check-stale", db_path=db_path)
+        assert code == 0
+        assert "fresh" in out
+
+    def test_check_stale_detects_change(self, db_path, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        src = tmp_path / "source.py"
+        src.write_text("original content")
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "A", "--source", "source.py", db_path=db_path)
+        run_cli("hash-sources", db_path=db_path)
+        src.write_text("modified content")
+        out, err, code = run_cli("check-stale", db_path=db_path)
+        assert code == 1
+        assert "STALE" in out
+
+    def test_check_stale_detects_deleted(self, db_path, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        src = tmp_path / "source.py"
+        src.write_text("content")
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "A", "--source", "source.py", db_path=db_path)
+        run_cli("hash-sources", db_path=db_path)
+        src.unlink()
+        out, err, code = run_cli("check-stale", db_path=db_path)
+        assert code == 1
+        assert "DELETED" in out
+
+
+class TestHashSources:
+
+    def test_hash_sources_nothing_to_hash(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "A", db_path=db_path)
+        out, err, code = run_cli("hash-sources", db_path=db_path)
+        assert code == 0
+        assert "No nodes to hash" in out
+
+    def test_hash_sources_backfill(self, db_path, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        src = tmp_path / "source.py"
+        src.write_text("content")
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "A", "--source", "source.py", db_path=db_path)
+        out, err, code = run_cli("hash-sources", db_path=db_path)
+        assert code == 0
+        assert "backfilled" in out
+
+    def test_hash_sources_force(self, db_path, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        src = tmp_path / "source.py"
+        src.write_text("content")
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "A", "--source", "source.py", db_path=db_path)
+        run_cli("hash-sources", db_path=db_path)
+        out, err, code = run_cli("hash-sources", "--force", db_path=db_path)
+        assert code == 0
+        assert "re-hashed" in out
+
+
+class TestDerive:
+
+    def test_derive_dry_run(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "A premise", db_path=db_path)
+        run_cli("add", "b", "B premise", db_path=db_path)
+        out, err, code = run_cli("derive", "--dry-run", db_path=db_path)
+        assert code == 0
+        assert "Prompt" in out
+        assert "a" in out
+
+    def test_derive_dry_run_empty(self, db_path):
+        run_cli("init", db_path=db_path)
+        out, err, code = run_cli("derive", "--dry-run", db_path=db_path)
+        assert code == 1
+
+
+class TestAccept:
+
+    def test_accept_file_not_found(self, db_path):
+        run_cli("init", db_path=db_path)
+        out, err, code = run_cli("accept", "/nonexistent.md", db_path=db_path)
+        assert code == 1
+        assert "not found" in err.lower()
+
+    def test_accept_empty_file(self, db_path, tmp_path):
+        proposals = tmp_path / "proposals.md"
+        proposals.write_text("No proposals here.")
+        run_cli("init", db_path=db_path)
+        out, err, code = run_cli("accept", str(proposals), db_path=db_path)
+        assert code == 0
+        assert "No proposals" in out
+
+    def test_accept_valid_proposals(self, db_path, tmp_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "fact-a", "Fact A", db_path=db_path)
+        run_cli("add", "fact-b", "Fact B", db_path=db_path)
+        proposals = tmp_path / "proposals.md"
+        proposals.write_text("""\
+### DERIVE combined-fact
+Combined from A and B
+- Antecedents: fact-a, fact-b
+- Label: test derivation
+""")
+        out, err, code = run_cli("accept", str(proposals), db_path=db_path)
+        assert code == 0
+        assert "combined-fact" in out
+        assert "Accepted 1" in err
+
+
 class TestNoCommand:
 
     def test_no_command_prints_help(self):

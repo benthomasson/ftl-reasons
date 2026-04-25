@@ -12,7 +12,7 @@ requires-python = ">=3.10"
 dependencies = []
 
 [project.optional-dependencies]
-test = ["pytest"]
+test = ["pytest", "pytest-cov"]
 
 [project.scripts]
 reasons = "reasons_lib.cli:main"
