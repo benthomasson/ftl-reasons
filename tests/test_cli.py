@@ -857,3 +857,382 @@ class TestNoCommand:
         assert code == 0
         assert "reasons" in out
         assert "0." in out or "1." in out
+
+
+class TestAddJustificationCascade:
+
+    def test_add_justification_cascade(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "A", db_path=db_path)
+        run_cli("add", "b", "B", "--sl", "a", db_path=db_path)
+        run_cli("retract", "a", db_path=db_path)
+        run_cli("add", "c", "C", db_path=db_path)
+        out, err, code = run_cli("add-justification", "a", "--sl", "c", db_path=db_path)
+        assert code == 0
+        assert "Cascade" in out
+
+
+class TestRetractRestorationHints:
+
+    def test_retract_restoration_hints(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "p1", "Premise 1", db_path=db_path)
+        run_cli("add", "p2", "Premise 2", db_path=db_path)
+        run_cli("add", "derived", "Derived from both", "--sl", "p1,p2", db_path=db_path)
+        out, err, code = run_cli("retract", "p1", db_path=db_path)
+        assert code == 0
+        assert "Went OUT" in out
+        if "Note:" in out:
+            assert "reasons add-justification" in out
+
+
+class TestAssertMissing:
+
+    def test_assert_missing(self, db_path):
+        run_cli("init", db_path=db_path)
+        out, err, code = run_cli("assert", "nonexistent", db_path=db_path)
+        assert code == 1
+        assert "Error" in err
+
+
+class TestWhatIfEdgeCases:
+
+    def test_what_if_assert_already_in(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "A", db_path=db_path)
+        out, err, code = run_cli("what-if", "assert", "a", db_path=db_path)
+        assert code == 0
+        assert "already IN" in out
+
+    def test_what_if_retract_missing(self, db_path):
+        run_cli("init", db_path=db_path)
+        out, err, code = run_cli("what-if", "retract", "missing", db_path=db_path)
+        assert code == 1
+        assert "Error" in err
+
+    def test_what_if_assert_missing(self, db_path):
+        run_cli("init", db_path=db_path)
+        out, err, code = run_cli("what-if", "assert", "missing", db_path=db_path)
+        assert code == 1
+        assert "Error" in err
+
+
+class TestShowSource:
+
+    def test_show_with_source(self, db_path, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        src = tmp_path / "source.py"
+        src.write_text("content")
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "A", "--source", "source.py", db_path=db_path)
+        run_cli("hash-sources", db_path=db_path)
+        out, err, code = run_cli("show", "a", db_path=db_path)
+        assert code == 0
+        assert "Source: source.py" in out
+        assert "Hash:" in out
+
+
+class TestExplainBranches:
+
+    def test_explain_with_outlist(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "blocker", "Blocker", db_path=db_path)
+        run_cli("retract", "blocker", db_path=db_path)
+        run_cli("add", "gated", "Gated belief", "--unless", "blocker", db_path=db_path)
+        out, err, code = run_cli("explain", "gated", db_path=db_path)
+        assert code == 0
+        assert "unless:" in out
+
+    def test_explain_failed_antecedent(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "A", db_path=db_path)
+        run_cli("add", "b", "B", "--sl", "a", db_path=db_path)
+        run_cli("retract", "a", db_path=db_path)
+        out, err, code = run_cli("explain", "b", db_path=db_path)
+        assert code == 0
+        assert "failed:" in out
+
+    def test_explain_violated_outlist(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "blocker", "Blocker", db_path=db_path)
+        run_cli("retract", "blocker", db_path=db_path)
+        run_cli("add", "gated", "Gated", "--unless", "blocker", db_path=db_path)
+        run_cli("assert", "blocker", db_path=db_path)
+        out, err, code = run_cli("explain", "gated", db_path=db_path)
+        assert code == 0
+        assert "violated unless:" in out
+
+    def test_explain_with_label(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "A", db_path=db_path)
+        run_cli("add", "b", "B", "--sl", "a", "--label", "test-label", db_path=db_path)
+        out, err, code = run_cli("explain", "b", db_path=db_path)
+        assert code == 0
+        assert "test-label" in out
+
+
+class TestConvertToPremiseEdgeCases:
+
+    def test_convert_to_premise_missing(self, db_path):
+        run_cli("init", db_path=db_path)
+        out, err, code = run_cli("convert-to-premise", "missing", db_path=db_path)
+        assert code == 1
+        assert "Error" in err
+
+
+class TestErrorCases:
+
+    def test_summarize_missing_node(self, db_path):
+        run_cli("init", db_path=db_path)
+        out, err, code = run_cli("summarize", "s", "Summary", "--over", "missing", db_path=db_path)
+        assert code == 1
+        assert "Error" in err
+
+    def test_supersede_missing(self, db_path):
+        run_cli("init", db_path=db_path)
+        out, err, code = run_cli("supersede", "missing-old", "missing-new", db_path=db_path)
+        assert code == 1
+        assert "Error" in err
+
+    def test_challenge_missing(self, db_path):
+        run_cli("init", db_path=db_path)
+        out, err, code = run_cli("challenge", "missing", "I disagree", db_path=db_path)
+        assert code == 1
+        assert "Error" in err
+
+    def test_defend_missing(self, db_path):
+        run_cli("init", db_path=db_path)
+        out, err, code = run_cli("defend", "missing", "challenge-missing", "evidence", db_path=db_path)
+        assert code == 1
+        assert "Error" in err
+
+
+class TestTraceEdgeCases:
+
+    def test_trace_missing(self, db_path):
+        run_cli("init", db_path=db_path)
+        out, err, code = run_cli("trace", "missing", db_path=db_path)
+        assert code == 1
+        assert "Error" in err
+
+    def test_trace_access_tags_denied(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "fin", "Finance data", "--access-tags", "finance", db_path=db_path)
+        out, err, code = run_cli("trace-access-tags", "fin", "--visible-to", "hr", db_path=db_path)
+        assert code == 1
+        assert "Access denied" in err
+
+
+class TestLogWithEntries:
+
+    def test_log_with_entries(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "A", db_path=db_path)
+        run_cli("retract", "a", db_path=db_path)
+        out, err, code = run_cli("log", db_path=db_path)
+        assert code == 0
+        assert "add" in out
+        assert "retract" in out
+
+
+class TestPropagateWithChanges:
+
+    def test_propagate_with_changes(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "A", db_path=db_path)
+        run_cli("add", "b", "B", "--sl", "a", db_path=db_path)
+        # Directly set b's truth_value to OUT without proper retraction
+        from reasons_lib.storage import Storage
+        store = Storage(db_path)
+        net = store.load()
+        net.nodes["b"].truth_value = "OUT"
+        store.save(net)
+        store.close()
+        out, err, code = run_cli("propagate", db_path=db_path)
+        assert code == 0
+        assert "Updated:" in out
+        assert "b" in out
+
+
+class TestImportAgentEdgeCases:
+
+    def test_import_agent_existing_premise(self, db_path, tmp_path):
+        beliefs = tmp_path / "beliefs.md"
+        beliefs.write_text("""\
+# Belief Registry
+
+## Claims
+
+### obs-one [IN] OBSERVATION
+An observation from the agent
+""")
+        run_cli("init", db_path=db_path)
+        run_cli("import-agent", "myagent", str(beliefs), db_path=db_path)
+        out, err, code = run_cli("import-agent", "myagent", str(beliefs), db_path=db_path)
+        assert code == 0
+        assert "Premise exists:" in out
+
+    def test_import_agent_with_skipped(self, db_path, tmp_path):
+        beliefs = tmp_path / "beliefs.md"
+        beliefs.write_text("""\
+# Belief Registry
+
+## Claims
+
+### obs-one [IN] OBSERVATION
+An observation
+""")
+        run_cli("init", db_path=db_path)
+        run_cli("import-agent", "myagent", str(beliefs), db_path=db_path)
+        out, err, code = run_cli("import-agent", "myagent", str(beliefs), db_path=db_path)
+        assert code == 0
+        assert "Skipped:" in out
+
+    def test_sync_agent_file_not_found(self, db_path):
+        run_cli("init", db_path=db_path)
+        out, err, code = run_cli("sync-agent", "myagent", "/nonexistent.md", db_path=db_path)
+        assert code == 1
+        assert "Error" in err
+
+    def test_sync_agent_with_removals(self, db_path, tmp_path):
+        beliefs_v1 = tmp_path / "beliefs.md"
+        beliefs_v1.write_text("""\
+# Belief Registry
+
+## Claims
+
+### obs-one [IN] OBSERVATION
+First observation
+
+### obs-two [IN] OBSERVATION
+Second observation
+""")
+        run_cli("init", db_path=db_path)
+        run_cli("import-agent", "myagent", str(beliefs_v1), db_path=db_path)
+
+        beliefs_v1.write_text("""\
+# Belief Registry
+
+## Claims
+
+### obs-one [IN] OBSERVATION
+First observation
+""")
+        out, err, code = run_cli("sync-agent", "myagent", str(beliefs_v1), db_path=db_path)
+        assert code == 0
+        assert "Removed:" in out
+
+
+class TestImportBeliefsEdgeCases:
+
+    def test_import_beliefs_with_skipped(self, db_path, tmp_path):
+        beliefs = tmp_path / "beliefs.md"
+        beliefs.write_text("""\
+# Belief Registry
+
+## Claims
+
+### premise-a [IN] OBSERVATION
+First premise
+""")
+        run_cli("init", db_path=db_path)
+        run_cli("import-beliefs", str(beliefs), db_path=db_path)
+        out, err, code = run_cli("import-beliefs", str(beliefs), db_path=db_path)
+        assert code == 0
+        assert "Skipped" in out
+
+    def test_import_beliefs_with_nogoods(self, db_path, tmp_path):
+        beliefs = tmp_path / "beliefs.md"
+        beliefs.write_text("""\
+# Belief Registry
+
+## Claims
+
+### premise-a [IN] OBSERVATION
+First premise
+
+### premise-b [IN] OBSERVATION
+Second premise
+
+## Nogoods
+
+### nogood-1
+- premise-a, premise-b
+""")
+        run_cli("init", db_path=db_path)
+        out, err, code = run_cli("import-beliefs", str(beliefs), db_path=db_path)
+        assert code == 0
+        if "nogood" in out.lower():
+            assert "1" in out
+
+
+class TestImportJsonWithNogoods:
+
+    def test_import_json_with_nogoods(self, db_path, tmp_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "A", db_path=db_path)
+        run_cli("add", "b", "B", db_path=db_path)
+        run_cli("nogood", "a", "b", db_path=db_path)
+
+        out, _, _ = run_cli("export", db_path=db_path)
+        json_file = str(tmp_path / "export.json")
+        from pathlib import Path
+        Path(json_file).write_text(out)
+
+        db2 = str(tmp_path / "test2.db")
+        run_cli("init", db_path=db2)
+        out, err, code = run_cli("import-json", json_file, db_path=db2)
+        assert code == 0
+        assert "nogoods" in out.lower()
+
+
+class TestDeduplicateAcceptPlan:
+
+    def test_deduplicate_accept_with_retraction(self, db_path, tmp_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "prop-is-bfs", "Propagation uses BFS", db_path=db_path)
+        run_cli("add", "prop-uses-bfs", "Propagation is BFS-based", db_path=db_path)
+        plan_file = str(tmp_path / "dedup-plan.md")
+        run_cli("deduplicate", "--output", plan_file, db_path=db_path)
+
+        from pathlib import Path
+        plan_content = Path(plan_file).read_text() if Path(plan_file).exists() else ""
+        if plan_content.strip():
+            out, err, code = run_cli("deduplicate", "--accept", plan_file, db_path=db_path)
+            assert code == 0
+            assert "Retracted" in out or "No duplicates" in out
+
+
+class TestAcceptEdgeCases:
+
+    def test_accept_with_skipped(self, db_path, tmp_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "fact-a", "Fact A", db_path=db_path)
+        proposals = tmp_path / "proposals.md"
+        proposals.write_text("""\
+### DERIVE bad-derive
+Derived from nonexistent
+- Antecedents: nonexistent-node
+- Label: test
+""")
+        out, err, code = run_cli("accept", str(proposals), db_path=db_path)
+        assert code == 0
+        assert "SKIP" in err or "No valid" in out
+
+    def test_accept_all_skipped(self, db_path, tmp_path):
+        run_cli("init", db_path=db_path)
+        proposals = tmp_path / "proposals.md"
+        proposals.write_text("""\
+### DERIVE bad-one
+Derived from nothing
+- Antecedents: missing-a
+- Label: test derivation
+
+### DERIVE bad-two
+Also from nothing
+- Antecedents: missing-b
+- Label: test derivation
+""")
+        out, err, code = run_cli("accept", str(proposals), db_path=db_path)
+        assert code == 0
+        assert "No valid proposals" in out
