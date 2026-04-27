@@ -1,12 +1,13 @@
 """Tests for the ask module (FTS5 search + LLM synthesis)."""
 
+import subprocess
 import sys
 from io import StringIO
 from unittest.mock import patch
 
 import pytest
 
-from reasons_lib.ask import extract_tool_call, build_ask_prompt, ask
+from reasons_lib.ask import extract_tool_call, build_ask_prompt, ask, _invoke_claude
 from reasons_lib.cli import main
 
 
@@ -127,3 +128,81 @@ class TestCmdAskNoSynth:
         out, err, code = run_cli("ask", "nothing matches", "--no-synth", db_path=db_path)
         assert code == 0
         assert "No results" in out
+
+
+class TestInvokeClaude:
+
+    def test_claude_not_in_path(self):
+        with patch("shutil.which", return_value=None):
+            with pytest.raises(FileNotFoundError, match="claude"):
+                _invoke_claude("test prompt")
+
+
+class TestAskWithMockedLLM:
+
+    def test_direct_answer(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "Alpha belief", db_path=db_path)
+
+        with patch("reasons_lib.ask._invoke_claude", return_value="The answer is alpha."):
+            result = ask("what is alpha?", db_path=db_path)
+        assert result == "The answer is alpha."
+
+    def test_tool_call_then_answer(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "Alpha belief", db_path=db_path)
+        run_cli("add", "b", "Beta belief about retraction", db_path=db_path)
+
+        responses = [
+            '{"tool": "search_beliefs", "query": "retraction"}',
+            "Retraction cascades through dependents [b].",
+        ]
+        call_count = [0]
+
+        def mock_invoke(prompt, timeout=300):
+            idx = call_count[0]
+            call_count[0] += 1
+            return responses[idx]
+
+        with patch("reasons_lib.ask._invoke_claude", side_effect=mock_invoke):
+            result = ask("how does retraction work?", db_path=db_path)
+        assert "retraction" in result.lower() or "Retraction" in result
+        assert call_count[0] == 2
+
+    def test_max_iterations_forces_answer(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "Alpha", db_path=db_path)
+
+        def always_tool_call(prompt, timeout=300):
+            return '{"tool": "search_beliefs", "query": "more"}'
+
+        with patch("reasons_lib.ask._invoke_claude", side_effect=always_tool_call):
+            result = ask("question", db_path=db_path)
+        assert "search_beliefs" in result
+
+    def test_timeout_returns_search_results(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "Alpha belief", db_path=db_path)
+
+        with patch("reasons_lib.ask._invoke_claude",
+                    side_effect=subprocess.TimeoutExpired("claude", 300)):
+            result = ask("alpha", db_path=db_path)
+        assert "a" in result
+
+    def test_error_returns_search_results(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "Alpha belief", db_path=db_path)
+
+        with patch("reasons_lib.ask._invoke_claude",
+                    side_effect=RuntimeError("claude crashed")):
+            result = ask("alpha", db_path=db_path)
+        assert "a" in result
+
+    def test_unknown_tool_returns_response(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "Alpha", db_path=db_path)
+
+        with patch("reasons_lib.ask._invoke_claude",
+                    return_value='{"tool": "unknown_tool", "query": "x"}'):
+            result = ask("question", db_path=db_path)
+        assert "unknown_tool" in result

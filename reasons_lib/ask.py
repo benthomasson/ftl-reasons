@@ -5,10 +5,10 @@ an answer via `claude -p` with a tool loop that allows the LLM to
 request additional belief searches.
 """
 
-import asyncio
 import json
 import os
 import shutil
+import subprocess
 import sys
 
 from . import api
@@ -85,30 +85,29 @@ def build_ask_prompt(question, beliefs_context, tool_history=None):
 
 
 def _invoke_claude(prompt, timeout=300):
-    """Call `claude -p` with the given prompt. Returns response text."""
-    if not shutil.which("claude"):
-        print("Error: 'claude' CLI not found in PATH", file=sys.stderr)
-        sys.exit(1)
+    """Call `claude -p` with the given prompt. Returns response text.
 
+    Raises FileNotFoundError if claude is not in PATH.
+    Raises RuntimeError if claude exits non-zero.
+    Raises subprocess.TimeoutExpired on timeout.
+    """
+    if not shutil.which("claude"):
+        raise FileNotFoundError("'claude' CLI not found in PATH")
+
+    # Strip CLAUDECODE to avoid recursive invocation inside Claude Code
     env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
 
-    async def _run():
-        proc = await asyncio.create_subprocess_exec(
-            "claude", "-p",
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=env,
-        )
-        stdout, stderr = await asyncio.wait_for(
-            proc.communicate(prompt.encode()),
-            timeout=timeout,
-        )
-        if proc.returncode != 0:
-            raise RuntimeError(f"claude failed: {stderr.decode()}")
-        return stdout.decode()
-
-    return asyncio.run(_run())
+    result = subprocess.run(
+        ["claude", "-p"],
+        input=prompt,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        env=env,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"claude failed: {result.stderr}")
+    return result.stdout
 
 
 MAX_ITERATIONS = 3
@@ -137,7 +136,7 @@ def ask(question, db_path="reasons.db", timeout=300, no_synth=False):
 
         try:
             response = _invoke_claude(prompt, timeout=timeout)
-        except TimeoutError:
+        except subprocess.TimeoutExpired:
             print(f"LLM timed out after {timeout}s", file=sys.stderr)
             return beliefs_context
         except Exception as e:
