@@ -620,6 +620,17 @@ def cmd_lookup(args):
     print(result)
 
 
+def cmd_ask(args):
+    from .ask import ask
+    result = ask(
+        question=args.question,
+        db_path=args.db,
+        timeout=args.timeout,
+        no_synth=args.no_synth,
+    )
+    print(result)
+
+
 def cmd_deduplicate(args):
     if args.accept:
         accept_path = Path(args.accept)
@@ -1138,6 +1149,14 @@ def main():
     p.add_argument("query", help="Search terms (all must match, case-insensitive)")
     p.add_argument("--visible-to", metavar="TAG,TAG", help="Only show nodes whose access_tags are a subset of these tags")
 
+    # ask
+    p = sub.add_parser("ask", help="Ask a question about beliefs (FTS5 search + LLM synthesis)")
+    p.add_argument("question", help="Natural language question")
+    p.add_argument("--no-synth", action="store_true",
+                   help="Show belief matches only, no LLM synthesis")
+    p.add_argument("--timeout", type=int, default=300,
+                   help="LLM timeout in seconds (default: 300)")
+
     # deduplicate
     p = sub.add_parser("deduplicate", help="Find and optionally retract duplicate IN beliefs")
     p.add_argument("--threshold", type=float, default=0.5,
@@ -1205,6 +1224,7 @@ def main():
         "trace-access-tags": cmd_trace_access_tags,
         "search": cmd_search,
         "lookup": cmd_lookup,
+        "ask": cmd_ask,
         "deduplicate": cmd_deduplicate,
         "list": cmd_list,
         "namespaces": cmd_namespaces,
