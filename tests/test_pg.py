@@ -510,6 +510,12 @@ class TestChallenge:
         with pytest.raises(KeyError):
             pg_api.challenge("nonexistent", "reason")
 
+    def test_challenge_source(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        pg_api.challenge("a", "Alpha is wrong")
+        challenge = pg_api.show_node("challenge-a")
+        assert challenge["source"] == "challenge"
+
     def test_challenge_metadata(self, pg_api):
         pg_api.add_node("a", "Alpha")
         pg_api.challenge("a", "Alpha is wrong")
@@ -643,6 +649,19 @@ class TestCompact:
         result = pg_api.compact(budget=5000)
         assert "## Nogoods" in result
         assert "nogood-001" in result
+
+    def test_compact_nogoods_filtered_by_visible_to(self, pg_api):
+        pg_api.add_node("public", "Public belief")
+        pg_api.add_node("secret", "Secret belief", access_tags=["admin"])
+        pg_api.add_nogood(["public", "secret"])
+        # Nogood references a secret node — should be hidden from non-admin
+        result = pg_api.compact(budget=5000, visible_to=["user"])
+        assert "Nogoods" not in result
+        assert "nogood-001" not in result
+        # Admin can see the nogood
+        result_admin = pg_api.compact(budget=5000, visible_to=["admin"])
+        assert "## Nogoods" in result_admin
+        assert "nogood-001" in result_admin
 
     def test_compact_dependent_count_sorting(self, pg_api):
         pg_api.add_node("root", "Root node")

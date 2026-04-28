@@ -640,17 +640,20 @@ class PgApi:
                     "source": source, "metadata": meta,
                 })
 
-            # Fetch nogoods
+            # Fetch nogoods (filter by visible_to — hide nogoods referencing inaccessible nodes)
             cur.execute(
                 "SELECT id, nodes, resolution FROM rms_nogoods "
                 "WHERE project_id = %s ORDER BY id",
                 (pid,),
             )
+            visible_ids = {n["id"] for n in all_nodes}
             nogoods = []
             for row in cur.fetchall():
                 ng_id, nodes, resolution = row
                 if isinstance(nodes, str):
                     nodes = json.loads(nodes)
+                if visible_to is not None and not all(n in visible_ids for n in nodes):
+                    continue
                 nogoods.append({"id": ng_id, "nodes": nodes, "resolution": resolution or ""})
 
             # Fetch dependent counts per node
@@ -1111,8 +1114,8 @@ class PgApi:
         now = datetime.now().isoformat(timespec="seconds")
         challenge_meta = {"challenge_target": target_id}
         cur.execute(
-            "INSERT INTO rms_nodes (id, project_id, text, truth_value, date, metadata) "
-            "VALUES (%s, %s, %s, 'IN', %s, %s)",
+            "INSERT INTO rms_nodes (id, project_id, text, truth_value, source, date, metadata) "
+            "VALUES (%s, %s, %s, 'IN', 'challenge', %s, %s)",
             (challenge_id, pid, reason, now, json.dumps(challenge_meta)),
         )
         self._log(cur, "add", challenge_id, "IN")
