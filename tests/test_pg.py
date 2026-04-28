@@ -464,3 +464,152 @@ class TestMultiTenancy:
                     cur.execute(f"DELETE FROM {table} WHERE project_id = %s", (project2,))
             api2.conn.commit()
             api2.close()
+
+
+class TestChallenge:
+
+    def test_challenge_premise(self, pg_api):
+        pg_api.add_node("a", "Alpha premise")
+        result = pg_api.challenge("a", "Alpha is wrong")
+        assert result["challenge_id"] == "challenge-a"
+        assert result["target_id"] == "a"
+        assert "a" in result["changed"]
+        status = pg_api.show_node("a")
+        assert status["truth_value"] == "OUT"
+
+    def test_challenge_derived(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        pg_api.add_node("b", "Beta", sl="a")
+        result = pg_api.challenge("b", "Beta is wrong")
+        assert "b" in result["changed"]
+        status = pg_api.show_node("b")
+        assert status["truth_value"] == "OUT"
+
+    def test_challenge_already_out(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        pg_api.retract_node("a")
+        result = pg_api.challenge("a", "Alpha is wrong")
+        assert result["challenge_id"] == "challenge-a"
+        # Target was already OUT, no change
+        assert "a" not in result["changed"]
+
+    def test_challenge_custom_id(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        result = pg_api.challenge("a", "Alpha is wrong", challenge_id="my-challenge")
+        assert result["challenge_id"] == "my-challenge"
+        status = pg_api.show_node("my-challenge")
+        assert status["truth_value"] == "IN"
+
+    def test_challenge_auto_id_collision(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        pg_api.add_node("challenge-a", "Existing node")
+        result = pg_api.challenge("a", "Alpha is wrong")
+        assert result["challenge_id"] == "challenge-a-2"
+
+    def test_challenge_not_found(self, pg_api):
+        with pytest.raises(KeyError):
+            pg_api.challenge("nonexistent", "reason")
+
+    def test_challenge_metadata(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        pg_api.challenge("a", "Alpha is wrong")
+        # Challenge node has challenge_target metadata
+        challenge = pg_api.show_node("challenge-a")
+        assert challenge["metadata"]["challenge_target"] == "a"
+        # Target has challenges list in metadata
+        target = pg_api.show_node("a")
+        assert "challenge-a" in target["metadata"]["challenges"]
+
+    def test_challenge_cascade(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        pg_api.add_node("b", "Beta", sl="a")
+        pg_api.add_node("c", "Gamma", sl="b")
+        result = pg_api.challenge("a", "Alpha is wrong")
+        assert "a" in result["changed"]
+        assert "b" in result["changed"]
+        assert "c" in result["changed"]
+
+
+class TestDefend:
+
+    def test_defend_restores_target(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        pg_api.challenge("a", "Alpha is wrong")
+        assert pg_api.show_node("a")["truth_value"] == "OUT"
+        result = pg_api.defend("a", "challenge-a", "Alpha is right")
+        assert result["defense_id"] == "defense-challenge-a"
+        assert pg_api.show_node("challenge-a")["truth_value"] == "OUT"
+        assert pg_api.show_node("a")["truth_value"] == "IN"
+
+    def test_defend_cascade(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        pg_api.add_node("b", "Beta", sl="a")
+        pg_api.challenge("a", "Alpha is wrong")
+        assert pg_api.show_node("b")["truth_value"] == "OUT"
+        pg_api.defend("a", "challenge-a", "Alpha is right")
+        assert pg_api.show_node("a")["truth_value"] == "IN"
+        assert pg_api.show_node("b")["truth_value"] == "IN"
+
+    def test_defend_metadata(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        pg_api.challenge("a", "Alpha is wrong")
+        pg_api.defend("a", "challenge-a", "Alpha is right")
+        defense = pg_api.show_node("defense-challenge-a")
+        assert defense["metadata"]["defense_target"] == "challenge-a"
+        assert defense["metadata"]["defends"] == "a"
+
+    def test_defend_not_found(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        with pytest.raises(KeyError):
+            pg_api.defend("a", "nonexistent", "reason")
+        with pytest.raises(KeyError):
+            pg_api.defend("nonexistent", "a", "reason")
+
+    def test_defend_custom_id(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        pg_api.challenge("a", "Alpha is wrong")
+        result = pg_api.defend("a", "challenge-a", "Alpha is right", defense_id="my-defense")
+        assert result["defense_id"] == "my-defense"
+        assert pg_api.show_node("my-defense")["truth_value"] == "IN"
+
+
+class TestCompact:
+
+    def test_compact_empty(self, pg_api):
+        result = pg_api.compact()
+        assert "0 nodes tracked" in result
+        assert "Belief State Summary" in result
+        assert "Token count:" in result
+
+    def test_compact_in_nodes(self, pg_api):
+        pg_api.add_node("a", "Alpha premise")
+        pg_api.add_node("b", "Beta premise")
+        pg_api.add_node("c", "Gamma derived", sl="a")
+        result = pg_api.compact()
+        assert "3 nodes tracked" in result
+        assert "## IN (active)" in result
+        assert "a" in result
+        assert "b" in result
+        assert "c" in result
+
+    def test_compact_out_nodes(self, pg_api):
+        pg_api.add_node("a", "Alpha premise")
+        pg_api.retract_node("a", reason="obsolete")
+        result = pg_api.compact()
+        assert "## OUT (retracted)" in result
+        assert "obsolete" in result
+
+    def test_compact_budget(self, pg_api):
+        for i in range(20):
+            pg_api.add_node(f"node-{i:02d}", f"This is belief number {i} with some text")
+        result_small = pg_api.compact(budget=50)
+        result_large = pg_api.compact(budget=5000)
+        assert len(result_small) < len(result_large)
+        assert "omitted" in result_small or "Token count:" in result_small
+
+    def test_compact_visible_to(self, pg_api):
+        pg_api.add_node("public", "Public belief")
+        pg_api.add_node("secret", "Secret belief", access_tags=["admin"])
+        result = pg_api.compact(visible_to=["user"])
+        assert "public" in result
+        assert "secret" not in result

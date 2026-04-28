@@ -317,6 +317,72 @@ class PgApi:
         all_changed = [node_id] + went_out + went_in
         return {"changed": all_changed, "went_out": went_out, "went_in": [node_id] + went_in}
 
+    # ── Dialectical operations ─────────────────────────────────
+
+    def challenge(self, target_id, reason, challenge_id=None):
+        with self.conn.cursor() as cur:
+            result = self._challenge_internal(cur, target_id, reason, challenge_id)
+        self.conn.commit()
+        return result
+
+    def defend(self, target_id, challenge_id, reason, defense_id=None):
+        pid = self.project_id
+
+        with self.conn.cursor() as cur:
+            # Verify target and challenge exist
+            cur.execute(
+                "SELECT 1 FROM rms_nodes WHERE id = %s AND project_id = %s",
+                (target_id, pid),
+            )
+            if not cur.fetchone():
+                raise KeyError(f"Node '{target_id}' not found")
+            cur.execute(
+                "SELECT 1 FROM rms_nodes WHERE id = %s AND project_id = %s",
+                (challenge_id, pid),
+            )
+            if not cur.fetchone():
+                raise KeyError(f"Challenge '{challenge_id}' not found")
+
+            # Generate defense ID
+            if defense_id is None:
+                defense_id = f"defense-{challenge_id}"
+                suffix = 1
+                while True:
+                    cur.execute(
+                        "SELECT 1 FROM rms_nodes WHERE id = %s AND project_id = %s",
+                        (defense_id, pid),
+                    )
+                    if not cur.fetchone():
+                        break
+                    suffix += 1
+                    defense_id = f"defense-{challenge_id}-{suffix}"
+
+            # Challenge the challenge (defense = challenge against the challenge)
+            result = self._challenge_internal(cur, challenge_id, reason, defense_id)
+
+            # Update defense node metadata
+            cur.execute(
+                "SELECT metadata FROM rms_nodes WHERE id = %s AND project_id = %s",
+                (defense_id, pid),
+            )
+            meta = cur.fetchone()[0]
+            if isinstance(meta, str):
+                meta = json.loads(meta)
+            meta["defense_target"] = challenge_id
+            meta["defends"] = target_id
+            cur.execute(
+                "UPDATE rms_nodes SET metadata = %s WHERE id = %s AND project_id = %s",
+                (json.dumps(meta), defense_id, pid),
+            )
+
+        self.conn.commit()
+        return {
+            "defense_id": defense_id,
+            "challenge_id": challenge_id,
+            "target_id": target_id,
+            "changed": result["changed"],
+        }
+
     # ── Read operations ─────────────────────────────────────────
 
     def get_status(self, visible_to=None):
@@ -542,6 +608,204 @@ class PgApi:
                     for r in cur.fetchall()
                 ]
         return {"entries": entries}
+
+    def compact(self, budget=500, truncate=True, visible_to=None):
+        from datetime import date as _date
+
+        pid = self.project_id
+
+        with self.conn.cursor() as cur:
+            # Fetch all nodes
+            cur.execute(
+                "SELECT id, text, truth_value, source, metadata "
+                "FROM rms_nodes WHERE project_id = %s ORDER BY id",
+                (pid,),
+            )
+            all_nodes = []
+            for row in cur.fetchall():
+                nid, text, tv, source, meta = row
+                if isinstance(meta, str):
+                    meta = json.loads(meta)
+                if visible_to is not None and not self._is_visible(meta, visible_to):
+                    continue
+                all_nodes.append({
+                    "id": nid, "text": text, "truth_value": tv,
+                    "source": source, "metadata": meta,
+                })
+
+            # Fetch nogoods
+            cur.execute(
+                "SELECT id, nodes, resolution FROM rms_nogoods "
+                "WHERE project_id = %s ORDER BY id",
+                (pid,),
+            )
+            nogoods = []
+            for row in cur.fetchall():
+                ng_id, nodes, resolution = row
+                if isinstance(nodes, str):
+                    nodes = json.loads(nodes)
+                nogoods.append({"id": ng_id, "nodes": nodes, "resolution": resolution or ""})
+
+            # Fetch dependent counts per node
+            cur.execute(
+                "SELECT je.value AS referenced_id, COUNT(DISTINCT j.node_id) AS dep_count "
+                "FROM rms_justifications j, "
+                "jsonb_array_elements_text(j.antecedents) je(value) "
+                "WHERE j.project_id = %s GROUP BY je.value",
+                (pid,),
+            )
+            dep_counts = {r[0]: r[1] for r in cur.fetchall()}
+            cur.execute(
+                "SELECT je.value AS referenced_id, COUNT(DISTINCT j.node_id) AS dep_count "
+                "FROM rms_justifications j, "
+                "jsonb_array_elements_text(j.outlist) je(value) "
+                "WHERE j.project_id = %s GROUP BY je.value",
+                (pid,),
+            )
+            for row in cur.fetchall():
+                dep_counts[row[0]] = dep_counts.get(row[0], 0) + row[1]
+
+            # Fetch first justification antecedents per node (for IN display)
+            cur.execute(
+                "SELECT DISTINCT ON (node_id) node_id, antecedents, label "
+                "FROM rms_justifications "
+                "WHERE project_id = %s ORDER BY node_id, id",
+                (pid,),
+            )
+            first_just = {}
+            for row in cur.fetchall():
+                nid, ants, label = row
+                if isinstance(ants, str):
+                    ants = json.loads(ants)
+                first_just[nid] = {"antecedents": ants, "label": label}
+
+        # Split nodes
+        in_nodes = [n for n in all_nodes if n["truth_value"] == "IN"]
+        out_nodes = [n for n in all_nodes if n["truth_value"] == "OUT"]
+
+        in_nodes.sort(key=lambda n: dep_counts.get(n["id"], 0), reverse=True)
+
+        today = _date.today().isoformat()
+        in_count = len(in_nodes)
+        out_count = len(out_nodes)
+        total = in_count + out_count
+        nogood_count = len(nogoods)
+
+        lines = [
+            f"# Belief State Summary ({today})",
+            f"# {total} nodes tracked | {nogood_count} nogoods | {in_count} IN | {out_count} OUT",
+            "",
+        ]
+
+        def _text(text):
+            if truncate and len(text) > 80:
+                return text[:77] + "..."
+            return text
+
+        def _estimate_tokens(text):
+            return max(1, len(text) // 4)
+
+        footer_tokens = _estimate_tokens(f"Token count: ~{budget} / {budget} budget")
+        _char_count = sum(len(l) for l in lines) + len(lines) - 1
+
+        def _add_line(line):
+            nonlocal _char_count
+            lines.append(line)
+            _char_count += 1 + len(line)
+
+        def _current_tokens():
+            return max(1, _char_count // 4)
+
+        def _over_budget(line):
+            return _current_tokens() + _estimate_tokens(line) + footer_tokens > budget
+
+        # Section 1: Nogoods
+        if nogoods and not _over_budget("## Nogoods"):
+            _add_line("## Nogoods")
+            added_nogoods = 0
+            for ng in nogoods:
+                res = f" — {ng['resolution']}" if ng["resolution"] else ""
+                line = f"- {ng['id']}: {', '.join(ng['nodes'])}{res}"
+                if _over_budget(line):
+                    remaining = len(nogoods) - added_nogoods
+                    _add_line(f"  ... ({remaining} more nogoods omitted)")
+                    break
+                _add_line(line)
+                added_nogoods += 1
+            _add_line("")
+
+        # Section 2: OUT nodes
+        if out_nodes and not _over_budget("## OUT (retracted)"):
+            _add_line("## OUT (retracted)")
+            added_out = 0
+            for node in out_nodes:
+                reason = ""
+                retract_reason = node["metadata"].get("retract_reason") or node["metadata"].get("stale_reason")
+                if retract_reason:
+                    reason = f" (stale: {retract_reason[:60]})"
+                elif node["metadata"].get("superseded_by"):
+                    reason = f" (superseded by: {node['metadata']['superseded_by']})"
+                line = f"- {node['id']}: {_text(node['text'])}{reason}"
+                if _over_budget(line):
+                    remaining = len(out_nodes) - added_out
+                    _add_line(f"  ... ({remaining} more OUT nodes omitted)")
+                    break
+                _add_line(line)
+                added_out += 1
+            _add_line("")
+
+        # Section 3: IN nodes
+        if in_nodes and not _over_budget("## IN (active)"):
+            covered_by_summary = set()
+            summary_nodes = []
+            regular_nodes = []
+            for node in in_nodes:
+                summarizes = node["metadata"].get("summarizes")
+                if summarizes:
+                    summary_nodes.append(node)
+                    for covered_id in summarizes:
+                        covered_by_summary.add(covered_id)
+                else:
+                    regular_nodes.append(node)
+
+            visible_nodes = summary_nodes + [
+                n for n in regular_nodes if n["id"] not in covered_by_summary
+            ]
+            visible_nodes.sort(key=lambda n: dep_counts.get(n["id"], 0), reverse=True)
+
+            hidden_count = len(in_nodes) - len(visible_nodes)
+
+            _add_line("## IN (active)")
+            added = 0
+
+            for node in visible_nodes:
+                is_summary = bool(node["metadata"].get("summarizes"))
+                prefix = "[summary] " if is_summary else ""
+                deps = ""
+                j = first_just.get(node["id"])
+                if j and j["antecedents"] and j["label"] != "summarizes":
+                    deps = f" <- {', '.join(j['antecedents'])}"
+                dep_count = dep_counts.get(node["id"], 0)
+                dep_info = f" ({dep_count} dependents)" if dep_count else ""
+                summarizes = node["metadata"].get("summarizes", [])
+                sum_info = f" (covers {len(summarizes)} nodes)" if summarizes else ""
+                line = f"- {prefix}{node['id']}: {_text(node['text'])}{deps}{dep_info}{sum_info}"
+
+                if _over_budget(line):
+                    remaining = len(visible_nodes) - added
+                    _add_line(f"  ... ({remaining} more IN nodes omitted)")
+                    break
+
+                _add_line(line)
+                added += 1
+
+            if hidden_count:
+                _add_line(f"  ({hidden_count} nodes hidden by summaries)")
+            _add_line("")
+
+        lines.append(f"Token count: ~{_current_tokens()} / {budget} budget")
+
+        return "\n".join(lines)
 
     # ── Nogoods + explain ───────────────────────────────────────
 
@@ -798,6 +1062,101 @@ class PgApi:
             if inlist_ok and outlist_ok:
                 return "IN"
         return "OUT"
+
+    def _challenge_internal(self, cur, target_id, reason, challenge_id):
+        pid = self.project_id
+
+        # Verify target exists
+        cur.execute(
+            "SELECT truth_value, metadata FROM rms_nodes WHERE id = %s AND project_id = %s",
+            (target_id, pid),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise KeyError(f"Node '{target_id}' not found")
+        old_value = row[0]
+        target_meta = row[1]
+        if isinstance(target_meta, str):
+            target_meta = json.loads(target_meta)
+
+        # Generate challenge ID
+        if challenge_id is None:
+            challenge_id = f"challenge-{target_id}"
+            suffix = 1
+            while True:
+                cur.execute(
+                    "SELECT 1 FROM rms_nodes WHERE id = %s AND project_id = %s",
+                    (challenge_id, pid),
+                )
+                if not cur.fetchone():
+                    break
+                suffix += 1
+                challenge_id = f"challenge-{target_id}-{suffix}"
+        else:
+            cur.execute(
+                "SELECT 1 FROM rms_nodes WHERE id = %s AND project_id = %s",
+                (challenge_id, pid),
+            )
+            if cur.fetchone():
+                raise ValueError(f"Challenge node '{challenge_id}' already exists")
+
+        # Create challenge node as premise
+        now = datetime.now().isoformat(timespec="seconds")
+        challenge_meta = {"challenge_target": target_id}
+        cur.execute(
+            "INSERT INTO rms_nodes (id, project_id, text, truth_value, date, metadata) "
+            "VALUES (%s, %s, %s, 'IN', %s, %s)",
+            (challenge_id, pid, reason, now, json.dumps(challenge_meta)),
+        )
+        self._log(cur, "add", challenge_id, "IN")
+
+        # Add challenge to target's outlist
+        cur.execute(
+            "SELECT COUNT(*) FROM rms_justifications WHERE node_id = %s AND project_id = %s",
+            (target_id, pid),
+        )
+        has_justifications = cur.fetchone()[0] > 0
+
+        if has_justifications:
+            cur.execute(
+                "UPDATE rms_justifications SET outlist = outlist || %s::jsonb "
+                "WHERE node_id = %s AND project_id = %s",
+                (json.dumps([challenge_id]), target_id, pid),
+            )
+        else:
+            cur.execute(
+                "INSERT INTO rms_justifications (node_id, project_id, type, antecedents, outlist, label) "
+                "VALUES (%s, %s, 'SL', '[]', %s, '')",
+                (target_id, pid, json.dumps([challenge_id])),
+            )
+
+        # Update target metadata with challenges list
+        challenges = target_meta.get("challenges", [])
+        challenges.append(challenge_id)
+        target_meta["challenges"] = challenges
+        cur.execute(
+            "UPDATE rms_nodes SET metadata = %s WHERE id = %s AND project_id = %s",
+            (json.dumps(target_meta), target_id, pid),
+        )
+
+        # Recompute target truth and propagate
+        new_value = self._compute_truth(cur, target_id)
+        changed = []
+
+        if old_value != new_value:
+            cur.execute(
+                "UPDATE rms_nodes SET truth_value = %s WHERE id = %s AND project_id = %s",
+                (new_value, target_id, pid),
+            )
+            changed.append(target_id)
+            self._log(cur, "challenge", target_id, new_value)
+            went_out, went_in = self._propagate(cur, target_id)
+            changed.extend(went_out)
+            changed.extend(went_in)
+        else:
+            self._log(cur, "challenge", target_id, f"unchanged ({old_value})")
+
+        return {"challenge_id": challenge_id, "target_id": target_id, "changed": changed}
 
     def _find_dependents(self, cur, node_ids):
         """Find nodes that have any of node_ids in their antecedents or outlist."""
