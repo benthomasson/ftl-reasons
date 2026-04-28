@@ -572,6 +572,28 @@ class TestDefend:
         assert result["defense_id"] == "my-defense"
         assert pg_api.show_node("my-defense")["truth_value"] == "IN"
 
+    def test_defend_duplicate_id_raises(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        pg_api.add_node("existing", "Existing node")
+        pg_api.challenge("a", "Alpha is wrong")
+        with pytest.raises(ValueError, match="Defense node"):
+            pg_api.defend("a", "challenge-a", "reason", defense_id="existing")
+
+    def test_defend_multiple_challenges(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        pg_api.challenge("a", "First challenge")
+        pg_api.challenge("a", "Second challenge")
+        assert pg_api.show_node("a")["truth_value"] == "OUT"
+        # Defend against only the first challenge
+        pg_api.defend("a", "challenge-a", "First defense")
+        # Target should stay OUT because second challenge remains
+        assert pg_api.show_node("challenge-a")["truth_value"] == "OUT"
+        assert pg_api.show_node("challenge-a-2")["truth_value"] == "IN"
+        assert pg_api.show_node("a")["truth_value"] == "OUT"
+        # Defend against the second challenge too
+        pg_api.defend("a", "challenge-a-2", "Second defense")
+        assert pg_api.show_node("a")["truth_value"] == "IN"
+
 
 class TestCompact:
 
@@ -613,3 +635,39 @@ class TestCompact:
         result = pg_api.compact(visible_to=["user"])
         assert "public" in result
         assert "secret" not in result
+
+    def test_compact_nogoods(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        pg_api.add_node("b", "Beta")
+        pg_api.add_nogood(["a", "b"])
+        result = pg_api.compact(budget=5000)
+        assert "## Nogoods" in result
+        assert "nogood-001" in result
+
+    def test_compact_dependent_count_sorting(self, pg_api):
+        pg_api.add_node("root", "Root node")
+        pg_api.add_node("d1", "Dep 1", sl="root")
+        pg_api.add_node("d2", "Dep 2", sl="root")
+        pg_api.add_node("d3", "Dep 3", sl="root")
+        pg_api.add_node("leaf", "Leaf node")
+        result = pg_api.compact(budget=5000)
+        # root has 3 dependents, should appear before leaf (0 dependents)
+        root_pos = result.index("root")
+        leaf_pos = result.index("leaf")
+        assert root_pos < leaf_pos
+
+    def test_compact_summary_nodes(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        pg_api.add_node("b", "Beta")
+        # Create a summary node that covers a and b
+        pg_api.add_node("summary", "Summary of a and b", sl="a,b")
+        # Manually set summarizes metadata
+        with pg_api.conn.cursor() as cur:
+            cur.execute(
+                "UPDATE rms_nodes SET metadata = %s WHERE id = %s AND project_id = %s",
+                (json.dumps({"summarizes": ["a", "b"]}), "summary", pg_api.project_id),
+            )
+        pg_api.conn.commit()
+        result = pg_api.compact(budget=5000)
+        assert "[summary]" in result
+        assert "hidden by summaries" in result

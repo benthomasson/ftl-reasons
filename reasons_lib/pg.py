@@ -356,6 +356,13 @@ class PgApi:
                         break
                     suffix += 1
                     defense_id = f"defense-{challenge_id}-{suffix}"
+            else:
+                cur.execute(
+                    "SELECT 1 FROM rms_nodes WHERE id = %s AND project_id = %s",
+                    (defense_id, pid),
+                )
+                if cur.fetchone():
+                    raise ValueError(f"Defense node '{defense_id}' already exists")
 
             # Challenge the challenge (defense = challenge against the challenge)
             result = self._challenge_internal(cur, challenge_id, reason, defense_id)
