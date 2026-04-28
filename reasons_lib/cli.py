@@ -627,6 +627,7 @@ def cmd_ask(args):
         db_path=args.db,
         timeout=args.timeout,
         no_synth=args.no_synth,
+        format=getattr(args, "format", None),
     )
     print(result)
 
@@ -1154,6 +1155,9 @@ def main():
     p.add_argument("question", help="Natural language question")
     p.add_argument("--no-synth", action="store_true",
                    help="Show belief matches only, no LLM synthesis")
+    p.add_argument("--format", choices=["compact", "markdown", "json", "minimal"],
+                   default=None,
+                   help="Output format for --no-synth (default: compact)")
     p.add_argument("--timeout", type=int, default=300,
                    help="LLM timeout in seconds (default: 300)")
 

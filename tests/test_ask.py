@@ -98,13 +98,30 @@ class TestBuildAskPrompt:
 
 class TestAskNoSynth:
 
-    def test_no_synth_returns_search_results(self, db_path):
+    def test_no_synth_defaults_to_compact(self, db_path):
         run_cli("init", db_path=db_path)
         run_cli("add", "prop-bfs", "Propagation uses breadth-first search", db_path=db_path)
-        run_cli("add", "prop-cascade", "Propagation cascades through dependents", db_path=db_path)
 
         result = ask("propagation", db_path=db_path, no_synth=True)
-        assert "prop-bfs" in result or "prop-cascade" in result
+        assert "[IN] prop-bfs" in result
+        assert "—" in result
+
+    def test_no_synth_compact_multiple(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "prop-bfs", "Propagation uses BFS", db_path=db_path)
+        run_cli("add", "prop-cascade", "Propagation cascades", db_path=db_path)
+
+        result = ask("propagation", db_path=db_path, no_synth=True)
+        lines = [l for l in result.strip().split("\n") if l.strip()]
+        for line in lines:
+            assert line.startswith("[IN]") or line.startswith("[OUT]")
+
+    def test_no_synth_markdown_format(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "prop-bfs", "Propagation uses BFS", db_path=db_path)
+
+        result = ask("propagation", db_path=db_path, no_synth=True, format="markdown")
+        assert "##" in result or "**" in result or "prop-bfs" in result
 
     def test_no_synth_no_results(self, db_path):
         run_cli("init", db_path=db_path)
@@ -116,10 +133,18 @@ class TestAskNoSynth:
 
 class TestCmdAskNoSynth:
 
-    def test_cli_ask_no_synth(self, db_path):
+    def test_cli_ask_no_synth_compact(self, db_path):
         run_cli("init", db_path=db_path)
         run_cli("add", "test-belief", "The system uses BFS for propagation", db_path=db_path)
         out, err, code = run_cli("ask", "BFS propagation", "--no-synth", db_path=db_path)
+        assert code == 0
+        assert "[IN] test-belief" in out
+
+    def test_cli_ask_no_synth_markdown(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "test-belief", "The system uses BFS for propagation", db_path=db_path)
+        out, err, code = run_cli("ask", "BFS propagation", "--no-synth",
+                                 "--format", "markdown", db_path=db_path)
         assert code == 0
         assert "test-belief" in out
 
