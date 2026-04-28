@@ -279,6 +279,21 @@ class TestSearch:
         assert "b" in result
         assert "a" in result
 
+    def test_search_dict_format(self, pg_api):
+        pg_api.add_node("a", "Alpha belief")
+        pg_api.add_node("b", "Beta derived", sl="a")
+        result = pg_api.search("alpha", format="dict")
+        assert isinstance(result, dict)
+        assert result["count"] == 1
+        assert result["results"][0]["id"] == "a"
+        assert result["results"][0]["truth_value"] == "IN"
+        assert len(result["neighbors"]) >= 1
+
+    def test_search_dict_no_results(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        result = pg_api.search("zzzznonexistent", format="dict")
+        assert result == {"results": [], "count": 0}
+
 
 class TestListNodes:
 

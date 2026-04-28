@@ -495,6 +495,8 @@ class PgApi:
             matched_rows = cur.fetchall()
 
         if not matched_rows:
+            if format == "dict":
+                return {"results": [], "count": 0}
             return "No results found."
 
         # Apply visibility filter
@@ -511,6 +513,8 @@ class PgApi:
             })
 
         if not matched:
+            if format == "dict":
+                return {"results": [], "count": 0}
             return "No results found."
 
         matched_ids = [m["id"] for m in matched]
@@ -518,6 +522,9 @@ class PgApi:
         # Neighbor expansion
         with self.conn.cursor() as cur:
             neighbors = self._expand_neighbors(cur, matched_ids, visible_to)
+
+        if format == "dict":
+            return {"results": matched, "neighbors": neighbors, "count": len(matched)}
 
         return self._format_results(matched, neighbors, format)
 
