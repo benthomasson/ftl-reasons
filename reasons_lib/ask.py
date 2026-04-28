@@ -113,15 +113,16 @@ def _invoke_claude(prompt, timeout=300):
 MAX_ITERATIONS = 3
 
 
-def ask(question, db_path="reasons.db", timeout=300, no_synth=False):
+def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None):
     """Answer a question using FTS5 belief search and optional LLM synthesis.
 
     Returns the answer text.
     """
-    beliefs_context = api.search(question, db_path=db_path, format="markdown")
-
     if no_synth:
-        return beliefs_context
+        fmt = format or "compact"
+        return api.search(question, db_path=db_path, format=fmt)
+
+    beliefs_context = api.search(question, db_path=db_path, format="markdown")
 
     tool_history = []
 

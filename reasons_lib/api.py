@@ -1273,6 +1273,8 @@ def search(query: str, visible_to: list[str] | None = None, db_path: str = DEFAU
             return _format_json(net, matched_ids, neighbor_ids)
         elif format == "minimal":
             return _format_minimal(net, matched_ids, neighbor_ids)
+        elif format == "compact":
+            return _format_compact(net, matched_ids, neighbor_ids)
         else:
             return _format_markdown(net, matched_ids, neighbor_ids)
 
@@ -1378,6 +1380,18 @@ def _format_minimal(net, matched_ids: list[str], neighbor_ids: set[str]) -> str:
         for nid in sorted(neighbor_ids):
             parts.append(net.nodes[nid].text)
     return "\n".join(parts)
+
+
+def _format_compact(net, matched_ids: list[str], neighbor_ids: set[str]) -> str:
+    """Format results as one line per belief: [STATUS] id — text."""
+    lines = []
+    for nid in matched_ids:
+        node = net.nodes[nid]
+        lines.append(f"[{node.truth_value}] {nid} — {node.text}")
+    for nid in sorted(neighbor_ids):
+        node = net.nodes[nid]
+        lines.append(f"[{node.truth_value}] {nid} — {node.text}")
+    return "\n".join(lines) if lines else "No results found."
 
 
 def _node_depth(nid, net, memo=None):
