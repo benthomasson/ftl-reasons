@@ -111,7 +111,9 @@ class PgApi:
     def __enter__(self):
         return self
 
-    def __exit__(self, *exc):
+    def __exit__(self, exc_type, *exc):
+        if exc_type is not None:
+            self.conn.rollback()
         self.close()
 
     # ── Schema ──────────────────────────────────────────────────
@@ -397,21 +399,18 @@ class PgApi:
         pid = self.project_id
 
         with self.conn.cursor() as cur:
-            # tsvector search + id ILIKE fallback
-            terms = query.strip().split()
-            ts_query = " & ".join(f"'{t}'" for t in terms if t)
-
-            if ts_query:
+            # plainto_tsquery handles arbitrary user input safely
+            if query.strip():
                 cur.execute(
                     "SELECT id, text, truth_value, source, metadata "
                     "FROM rms_nodes "
                     "WHERE project_id = %s "
-                    "AND (to_tsvector('english', text) @@ to_tsquery('english', %s) "
+                    "AND (to_tsvector('english', text) @@ plainto_tsquery('english', %s) "
                     "     OR id ILIKE %s) "
                     "ORDER BY ts_rank(to_tsvector('english', text), "
-                    "         to_tsquery('english', %s)) DESC "
+                    "         plainto_tsquery('english', %s)) DESC "
                     "LIMIT 20",
-                    (pid, ts_query, f"%{query}%", ts_query),
+                    (pid, query, f"%{query}%", query),
                 )
             else:
                 cur.execute(
