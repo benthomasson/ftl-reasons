@@ -353,6 +353,12 @@ class TestListNegative:
             assert result["count"] == 1
             assert result["negative"][0]["id"] == "a"
 
+    def test_claude_not_found_propagates(self, db_path):
+        api.add_node("a", "There is a critical bug here", db_path=db_path)
+        with patch("reasons_lib.ask._invoke_claude", side_effect=FileNotFoundError("'claude' CLI not found in PATH")):
+            with pytest.raises(FileNotFoundError):
+                api.list_negative(db_path=db_path)
+
     def test_visible_to(self, db_path):
         api.add_node("a", "Auth has a critical bug", access_tags=["internal"], db_path=db_path)
         api.add_node("b", "API has a missing validation", db_path=db_path)
