@@ -940,6 +940,23 @@ def cmd_list_gated(args):
     print(f"{result['blocker_count']} blocker(s) gating {result['gated_count']} belief(s)")
 
 
+def cmd_list_negative(args):
+    result = api.list_negative(
+        visible_to=_parse_visible_to(args),
+        db_path=args.db,
+    )
+
+    if not result["negative"]:
+        print("No negative beliefs found.")
+        return
+
+    for item in result["negative"]:
+        print(f"  [-] {item['id']}: {item['text']}")
+
+    print(f"\n{result['count']} negative belief(s) "
+          f"({result['candidates']} candidates from {result['total']} IN nodes)")
+
+
 def cmd_namespaces(args):
     result = api.list_namespaces(db_path=args.db)
     if not result["namespaces"]:
@@ -1195,6 +1212,9 @@ def main():
     p = sub.add_parser("list-gated", help="List OUT nodes blocked by IN outlist nodes")
     p.add_argument("--visible-to", metavar="TAG,TAG", help="Only show nodes whose access_tags are a subset of these tags")
 
+    p = sub.add_parser("list-negative", help="Find IN beliefs describing problems/defects/risks (LLM-classified)")
+    p.add_argument("--visible-to", metavar="TAG,TAG", help="Only show nodes whose access_tags are a subset of these tags")
+
     sub.add_parser("namespaces", help="List all agent namespaces in the database")
 
     # list
@@ -1254,6 +1274,7 @@ def main():
         "deduplicate": cmd_deduplicate,
         "list": cmd_list,
         "list-gated": cmd_list_gated,
+        "list-negative": cmd_list_negative,
         "namespaces": cmd_namespaces,
     }
     commands[args.command](args)
