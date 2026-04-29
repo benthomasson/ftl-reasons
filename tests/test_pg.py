@@ -334,6 +334,49 @@ class TestListNodes:
         assert result["nodes"][0]["id"] == "ns1:a"
 
 
+class TestListGated:
+
+    def test_no_gates(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        result = pg_api.list_gated()
+        assert result["blockers"] == {}
+        assert result["gated_count"] == 0
+
+    def test_active_gate(self, pg_api):
+        pg_api.add_node("premise", "Supporting premise")
+        pg_api.add_node("blocker", "Defect premise")
+        pg_api.add_node("gated", "Conclusion unless blocker", sl="premise", unless="blocker")
+        result = pg_api.list_gated()
+        assert result["blocker_count"] == 1
+        assert result["gated_count"] == 1
+        assert "blocker" in result["blockers"]
+        assert result["blockers"]["blocker"]["gated"][0]["id"] == "gated"
+
+    def test_satisfied_gate(self, pg_api):
+        pg_api.add_node("premise", "Supporting premise")
+        pg_api.add_node("blocker", "Defect premise")
+        pg_api.add_node("gated", "Conclusion unless blocker", sl="premise", unless="blocker")
+        pg_api.retract_node("blocker")
+        result = pg_api.list_gated()
+        assert result["blockers"] == {}
+
+    def test_multiple_gated_per_blocker(self, pg_api):
+        pg_api.add_node("premise", "Supporting premise")
+        pg_api.add_node("blocker", "Defect")
+        pg_api.add_node("g1", "Gated 1", sl="premise", unless="blocker")
+        pg_api.add_node("g2", "Gated 2", sl="premise", unless="blocker")
+        result = pg_api.list_gated()
+        assert result["blocker_count"] == 1
+        assert result["gated_count"] == 2
+
+    def test_blocker_text_included(self, pg_api):
+        pg_api.add_node("premise", "Supporting premise")
+        pg_api.add_node("bug-123", "Null check missing")
+        pg_api.add_node("gated", "X is safe", sl="premise", unless="bug-123")
+        result = pg_api.list_gated()
+        assert result["blockers"]["bug-123"]["text"] == "Null check missing"
+
+
 class TestGetLog:
 
     def test_log_after_add(self, pg_api):

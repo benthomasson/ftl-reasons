@@ -235,3 +235,58 @@ class TestListNodesDepth:
         result = api.list_nodes(min_depth=1, max_depth=1, db_path=db_path)
         ids = [n["id"] for n in result["nodes"]]
         assert ids == ["mid"]
+
+
+class TestListGated:
+
+    def test_no_gates(self, db_path):
+        api.add_node("a", "Alpha", db_path=db_path)
+        result = api.list_gated(db_path=db_path)
+        assert result["blockers"] == {}
+        assert result["gated_count"] == 0
+
+    def test_active_gate(self, db_path):
+        api.add_node("premise", "Supporting premise", db_path=db_path)
+        api.add_node("blocker", "Defect premise", db_path=db_path)
+        api.add_node("gated", "Conclusion unless blocker", sl="premise", unless="blocker", db_path=db_path)
+        result = api.list_gated(db_path=db_path)
+        assert result["blocker_count"] == 1
+        assert result["gated_count"] == 1
+        assert "blocker" in result["blockers"]
+        assert result["blockers"]["blocker"]["gated"][0]["id"] == "gated"
+
+    def test_satisfied_gate(self, db_path):
+        api.add_node("premise", "Supporting premise", db_path=db_path)
+        api.add_node("blocker", "Defect premise", db_path=db_path)
+        api.add_node("gated", "Conclusion unless blocker", sl="premise", unless="blocker", db_path=db_path)
+        api.retract_node("blocker", db_path=db_path)
+        result = api.list_gated(db_path=db_path)
+        assert result["blockers"] == {}
+
+    def test_multiple_gated_per_blocker(self, db_path):
+        api.add_node("premise", "Supporting premise", db_path=db_path)
+        api.add_node("blocker", "Defect", db_path=db_path)
+        api.add_node("g1", "Gated 1", sl="premise", unless="blocker", db_path=db_path)
+        api.add_node("g2", "Gated 2", sl="premise", unless="blocker", db_path=db_path)
+        result = api.list_gated(db_path=db_path)
+        assert result["blocker_count"] == 1
+        assert result["gated_count"] == 2
+        gated_ids = [g["id"] for g in result["blockers"]["blocker"]["gated"]]
+        assert "g1" in gated_ids
+        assert "g2" in gated_ids
+
+    def test_superseded_excluded(self, db_path):
+        api.add_node("premise", "Supporting premise", db_path=db_path)
+        api.add_node("blocker", "Defect", db_path=db_path)
+        api.add_node("old", "Old conclusion", sl="premise", unless="blocker", db_path=db_path)
+        api.add_node("new", "New conclusion", sl="premise", db_path=db_path)
+        api.supersede("old", "new", db_path=db_path)
+        result = api.list_gated(db_path=db_path)
+        assert result["gated_count"] == 0
+
+    def test_blocker_text_included(self, db_path):
+        api.add_node("premise", "Supporting premise", db_path=db_path)
+        api.add_node("bug-123", "File X has a null check missing", db_path=db_path)
+        api.add_node("gated", "X is safe", sl="premise", unless="bug-123", db_path=db_path)
+        result = api.list_gated(db_path=db_path)
+        assert result["blockers"]["bug-123"]["text"] == "File X has a null check missing"
