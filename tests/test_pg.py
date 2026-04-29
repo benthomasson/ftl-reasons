@@ -524,6 +524,91 @@ class TestMultiTenancy:
             api2.close()
 
 
+class TestWhatIf:
+
+    def test_what_if_retract_cascade(self, pg_api):
+        pg_api.add_node("a", "Premise A")
+        pg_api.add_node("b", "Derived B", sl="a")
+        pg_api.add_node("c", "Derived C", sl="b")
+        result = pg_api.what_if_retract("a")
+        assert result["already_out"] is False
+        assert result["total_affected"] == 2
+        ids = [r["id"] for r in result["retracted"]]
+        assert "b" in ids
+        assert "c" in ids
+        assert result["retracted"][0]["depth"] == 1  # b
+        assert result["retracted"][1]["depth"] == 2  # c
+
+    def test_what_if_retract_already_out(self, pg_api):
+        pg_api.add_node("a", "Premise A")
+        pg_api.retract_node("a")
+        result = pg_api.what_if_retract("a")
+        assert result["already_out"] is True
+        assert result["total_affected"] == 0
+
+    def test_what_if_retract_not_found(self, pg_api):
+        with pytest.raises(KeyError):
+            pg_api.what_if_retract("missing")
+
+    def test_what_if_retract_no_mutation(self, pg_api):
+        pg_api.add_node("a", "Premise A")
+        pg_api.add_node("b", "Derived B", sl="a")
+        pg_api.what_if_retract("a")
+        status = pg_api.get_status()
+        assert status["in_count"] == 2
+
+    def test_what_if_assert_restores(self, pg_api):
+        pg_api.add_node("a", "Premise A")
+        pg_api.add_node("b", "Derived B", sl="a")
+        pg_api.retract_node("a")
+        result = pg_api.what_if_assert("a")
+        assert result["already_in"] is False
+        assert result["total_affected"] == 1
+        assert result["restored"][0]["id"] == "b"
+        assert result["restored"][0]["depth"] == 1
+
+    def test_what_if_assert_already_in(self, pg_api):
+        pg_api.add_node("a", "Premise A")
+        result = pg_api.what_if_assert("a")
+        assert result["already_in"] is True
+        assert result["total_affected"] == 0
+
+    def test_what_if_assert_not_found(self, pg_api):
+        with pytest.raises(KeyError):
+            pg_api.what_if_assert("missing")
+
+    def test_what_if_assert_no_mutation(self, pg_api):
+        pg_api.add_node("a", "Premise A")
+        pg_api.add_node("b", "Derived B", sl="a")
+        pg_api.retract_node("a")
+        pg_api.what_if_assert("a")
+        status = pg_api.get_status()
+        assert status["in_count"] == 0
+
+    def test_what_if_retract_dependents_field(self, pg_api):
+        pg_api.add_node("a", "Premise A")
+        pg_api.add_node("b", "Derived B", sl="a")
+        pg_api.add_node("c", "Derived C", sl="b")
+        result = pg_api.what_if_retract("a")
+        b_info = next(r for r in result["retracted"] if r["id"] == "b")
+        assert b_info["dependents"] == 1  # c depends on b
+
+    def test_what_if_retract_with_outlist_restoration(self, pg_api):
+        pg_api.add_node("premise", "Supporting premise")
+        pg_api.add_node("blocker", "Blocker node")
+        pg_api.add_node("gated", "Gated belief", sl="premise", unless="blocker")
+        # gated is OUT because blocker is IN
+        status = pg_api.show_node("gated")
+        assert status["truth_value"] == "OUT"
+        result = pg_api.what_if_retract("blocker")
+        assert len(result["restored"]) == 1
+        assert result["restored"][0]["id"] == "gated"
+        assert result["restored"][0]["depth"] == 1
+        # Verify no mutation
+        status = pg_api.show_node("gated")
+        assert status["truth_value"] == "OUT"
+
+
 class TestChallenge:
 
     def test_challenge_premise(self, pg_api):
