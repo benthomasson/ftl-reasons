@@ -603,6 +603,7 @@ class TestWhatIf:
         result = pg_api.what_if_retract("blocker")
         assert len(result["restored"]) == 1
         assert result["restored"][0]["id"] == "gated"
+        assert result["restored"][0]["depth"] == 1
         # Verify no mutation
         status = pg_api.show_node("gated")
         assert status["truth_value"] == "OUT"
