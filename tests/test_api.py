@@ -346,6 +346,13 @@ class TestListNegative:
             result = api.list_negative(db_path=db_path)
             assert result["count"] == 0
 
+    def test_llm_returns_unknown_ids(self, db_path):
+        api.add_node("a", "There is a critical bug here", db_path=db_path)
+        with patch("reasons_lib.ask._invoke_claude", return_value='["a", "nonexistent", "also-fake"]'):
+            result = api.list_negative(db_path=db_path)
+            assert result["count"] == 1
+            assert result["negative"][0]["id"] == "a"
+
     def test_visible_to(self, db_path):
         api.add_node("a", "Auth has a critical bug", access_tags=["internal"], db_path=db_path)
         api.add_node("b", "API has a missing validation", db_path=db_path)
