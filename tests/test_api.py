@@ -89,6 +89,30 @@ class TestAssertNode:
         assert result["changed"] == []
 
 
+class TestPropagate:
+
+    def test_no_changes(self, db_path):
+        api.add_node("a", "Premise A", db_path=db_path)
+        result = api.propagate(db_path=db_path)
+        assert result["changed"] == []
+
+    def test_with_changes(self, db_path):
+        api.add_node("a", "Premise A", db_path=db_path)
+        api.add_node("b", "Derived B", sl="a", db_path=db_path)
+        assert api.show_node("b", db_path=db_path)["truth_value"] == "IN"
+        api.retract_node("a", reason="test", db_path=db_path)
+        api.assert_node("a", db_path=db_path)
+        from reasons_lib.storage import Storage
+        store = Storage(db_path)
+        net = store.load()
+        net.nodes["b"].truth_value = "OUT"
+        store.save(net)
+        store.close()
+        result = api.propagate(db_path=db_path)
+        assert "b" in result["changed"]
+        assert api.show_node("b", db_path=db_path)["truth_value"] == "IN"
+
+
 class TestGetStatus:
 
     def test_empty(self, db_path):

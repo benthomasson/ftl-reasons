@@ -400,15 +400,8 @@ def cmd_trace(args):
 
 
 def cmd_propagate(args):
-    from .storage import Storage
-    store = Storage(args.db)
-    net = store.load()
-
-    changed = net.recompute_all()
-
-    store.save(net)
-    store.close()
-
+    result = api.propagate(db_path=args.db)
+    changed = result["changed"]
     if changed:
         print(f"Updated: {', '.join(changed)}")
     else:
