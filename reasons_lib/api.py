@@ -1569,7 +1569,7 @@ def list_negative(
         if not candidates:
             return empty
 
-        lines = [f"- [{nid}] {text}" for nid, text in candidates]
+        lines = [f"- [{nid}] `{text}`" for nid, text in candidates]
         prompt = NEGATIVE_CLASSIFY_PROMPT.format(candidates="\n".join(lines))
 
         response = ask._invoke_claude(prompt)
