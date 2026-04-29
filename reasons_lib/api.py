@@ -1575,14 +1575,14 @@ def list_negative(
         response = ask._invoke_claude(prompt)
 
         negative_ids = set()
-        match = re.search(r"\[.*?\]", response, re.DOTALL)
-        if match:
+        for match in re.finditer(r"\[.*?\]", response, re.DOTALL):
             try:
                 ids = json.loads(match.group())
                 if isinstance(ids, list):
                     negative_ids = set(ids)
+                    break
             except json.JSONDecodeError:
-                pass
+                continue
 
         candidate_map = {nid: text for nid, text in candidates}
         negative = [
