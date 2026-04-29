@@ -317,6 +317,143 @@ class PgApi:
         all_changed = [node_id] + went_out + went_in
         return {"changed": all_changed, "went_out": went_out, "went_in": [node_id] + went_in}
 
+    # ── What-if simulation ──────────────────────────────────────
+
+    def what_if_retract(self, node_id):
+        pid = self.project_id
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT truth_value FROM rms_nodes WHERE id = %s AND project_id = %s",
+                (node_id, pid),
+            )
+            row = cur.fetchone()
+            if not row:
+                self.conn.rollback()
+                raise KeyError(f"Node '{node_id}' not found")
+            if row[0] == "OUT":
+                self.conn.rollback()
+                return {
+                    "node_id": node_id, "already_out": True,
+                    "retracted": [], "restored": [], "total_affected": 0,
+                }
+
+            cur.execute(
+                "SELECT id, truth_value FROM rms_nodes WHERE project_id = %s",
+                (pid,),
+            )
+            before = {r[0]: r[1] for r in cur.fetchall()}
+
+            cur.execute(
+                "UPDATE rms_nodes SET truth_value = 'OUT' "
+                "WHERE id = %s AND project_id = %s",
+                (node_id, pid),
+            )
+            went_out, went_in = self._propagate(cur, node_id)
+
+            changed = went_out + went_in
+            retracted, restored = self._collect_what_if_results(
+                cur, changed, before, node_id,
+            )
+
+        self.conn.rollback()
+        retracted.sort(key=lambda c: (c["depth"], c["id"]))
+        restored.sort(key=lambda c: (c["depth"], c["id"]))
+        return {
+            "node_id": node_id, "already_out": False,
+            "retracted": retracted, "restored": restored,
+            "total_affected": len(retracted) + len(restored),
+        }
+
+    def what_if_assert(self, node_id):
+        pid = self.project_id
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT truth_value FROM rms_nodes WHERE id = %s AND project_id = %s",
+                (node_id, pid),
+            )
+            row = cur.fetchone()
+            if not row:
+                self.conn.rollback()
+                raise KeyError(f"Node '{node_id}' not found")
+            if row[0] == "IN":
+                self.conn.rollback()
+                return {
+                    "node_id": node_id, "already_in": True,
+                    "retracted": [], "restored": [], "total_affected": 0,
+                }
+
+            cur.execute(
+                "SELECT id, truth_value FROM rms_nodes WHERE project_id = %s",
+                (pid,),
+            )
+            before = {r[0]: r[1] for r in cur.fetchall()}
+
+            cur.execute(
+                "UPDATE rms_nodes SET truth_value = 'IN' "
+                "WHERE id = %s AND project_id = %s",
+                (node_id, pid),
+            )
+            went_out, went_in = self._propagate(cur, node_id)
+
+            changed = went_out + went_in
+            retracted, restored = self._collect_what_if_results(
+                cur, changed, before, node_id,
+            )
+
+        self.conn.rollback()
+        retracted.sort(key=lambda c: (c["depth"], c["id"]))
+        restored.sort(key=lambda c: (c["depth"], c["id"]))
+        return {
+            "node_id": node_id, "already_in": False,
+            "retracted": retracted, "restored": restored,
+            "total_affected": len(retracted) + len(restored),
+        }
+
+    def _collect_what_if_results(self, cur, changed, before, source_id):
+        pid = self.project_id
+        retracted = []
+        restored = []
+        if not changed:
+            return retracted, restored
+
+        cur.execute(
+            "SELECT id, text, truth_value FROM rms_nodes "
+            "WHERE project_id = %s AND id = ANY(%s)",
+            (pid, list(changed)),
+        )
+        after_states = {r[0]: (r[1], r[2]) for r in cur.fetchall()}
+
+        for nid in changed:
+            if nid not in after_states:
+                continue
+            text, new_tv = after_states[nid]
+            old_tv = before.get(nid)
+            if old_tv == new_tv:
+                continue
+            depth = self._cascade_depth_pg(cur, nid, source_id)
+            dep_count = len(self._find_dependents(cur, [nid]))
+            info = {"id": nid, "text": text, "depth": depth, "dependents": dep_count}
+            if old_tv == "IN" and new_tv == "OUT":
+                retracted.append(info)
+            elif old_tv == "OUT" and new_tv == "IN":
+                restored.append(info)
+        return retracted, restored
+
+    def _cascade_depth_pg(self, cur, target_id, source_id):
+        visited = {source_id}
+        queue = deque([(source_id, 0)])
+        while queue:
+            current_id, depth = queue.popleft()
+            deps = self._find_dependents(cur, [current_id])
+            for dep_id in deps:
+                if dep_id in visited:
+                    continue
+                if dep_id == target_id:
+                    return depth + 1
+                visited.add(dep_id)
+                queue.append((dep_id, depth + 1))
+        return 0
+
     # ── Dialectical operations ─────────────────────────────────
 
     def challenge(self, target_id, reason, challenge_id=None):
