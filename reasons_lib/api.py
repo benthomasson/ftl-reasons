@@ -7,6 +7,7 @@ or argparse. Each function opens the database, operates, saves, and closes.
 All functions return dicts suitable for JSON serialization.
 """
 
+import json
 import re
 from pathlib import Path
 
@@ -1498,6 +1499,105 @@ def list_gated(
                         })
         gated_count = sum(len(b["gated"]) for b in blockers.values())
         return {"blockers": blockers, "gated_count": gated_count, "blocker_count": len(blockers)}
+
+
+NEGATIVE_TERMS = [
+    'bug', 'defect', 'missing', 'fail', 'error', 'broken', 'incorrect',
+    'wrong', 'risk', 'gap', 'lack', 'vulnerable', 'insecure', 'stale',
+    'outdated', 'deprecated', 'fragile', 'brittle', 'hack', 'workaround',
+    'technical debt', 'tech debt', 'not implemented', 'unimplemented',
+    'incomplete', 'inconsistent', 'unclear', 'confusing', 'problem',
+    'issue', 'concern', 'warning', 'danger', 'threat', 'weakness',
+    'limitation', 'constraint', 'bottleneck', 'blocker', 'obstacle',
+    'undermines', 'concentrated', 'single point of failure', 'no tests',
+    'untested', 'not tested', 'hard-coded', 'hardcoded', 'tight coupling',
+    'tightly coupled', 'monolithic', 'legacy', 'unmaintained',
+]
+
+NEGATIVE_CLASSIFY_PROMPT = """\
+You are classifying beliefs from a Truth Maintenance System.
+Each belief below passed a keyword filter for negative terms.
+Identify which are GENUINELY NEGATIVE — they assert something is
+a problem, defect, risk, gap, limitation, or concern.
+
+EXCLUDE beliefs that merely DESCRIBE error handling, failure modes,
+or warning mechanisms as part of normal system behavior.
+
+Return ONLY a JSON array of the IDs of genuinely negative beliefs.
+Example: ["belief-1", "belief-3"]
+If none are genuinely negative, return: []
+
+## Candidates
+
+{candidates}"""
+
+
+def list_negative(
+    visible_to: list[str] | None = None,
+    db_path: str = DEFAULT_DB,
+) -> dict:
+    """Find IN beliefs that describe problems, defects, or risks.
+
+    Uses keyword pre-filtering then LLM classification via claude -p.
+
+    Returns: {"negative": [{"id": str, "text": str}, ...],
+              "count": int, "candidates": int, "total": int}
+    """
+    from . import ask
+
+    with _with_network(db_path) as net:
+        in_nodes = []
+        for nid, node in sorted(net.nodes.items()):
+            if node.truth_value != "IN":
+                continue
+            if visible_to is not None and not _is_visible(node, visible_to):
+                continue
+            in_nodes.append((nid, node.text))
+
+        total = len(in_nodes)
+        empty = {"negative": [], "count": 0, "candidates": 0, "total": total}
+
+        if not in_nodes:
+            return empty
+
+        candidates = []
+        for nid, text in in_nodes:
+            text_lower = text.lower()
+            if any(term in text_lower for term in NEGATIVE_TERMS):
+                candidates.append((nid, text))
+
+        if not candidates:
+            return empty
+
+        lines = [f"- [{nid}] `{text}`" for nid, text in candidates]
+        prompt = NEGATIVE_CLASSIFY_PROMPT.format(candidates="\n".join(lines))
+
+        response = ask._invoke_claude(prompt)
+
+        negative_ids = set()
+        for match in re.finditer(r"\[.*?\]", response, re.DOTALL):
+            try:
+                ids = json.loads(match.group())
+                if isinstance(ids, list):
+                    negative_ids = set(ids)
+                    break
+            except json.JSONDecodeError:
+                continue
+
+        candidate_map = {nid: text for nid, text in candidates}
+        negative = [
+            {"id": nid, "text": candidate_map[nid]}
+            for nid in negative_ids
+            if nid in candidate_map
+        ]
+        negative.sort(key=lambda x: x["id"])
+
+        return {
+            "negative": negative,
+            "count": len(negative),
+            "candidates": len(candidates),
+            "total": total,
+        }
 
 
 def _rewrite_dependents(net, old_id: str, new_id: str):

@@ -1,5 +1,7 @@
 """Tests for the functional Python API."""
 
+from unittest.mock import patch
+
 import pytest
 
 from reasons_lib import api
@@ -290,3 +292,88 @@ class TestListGated:
         api.add_node("gated", "X is safe", sl="premise", unless="bug-123", db_path=db_path)
         result = api.list_gated(db_path=db_path)
         assert result["blockers"]["bug-123"]["text"] == "File X has a null check missing"
+
+
+class TestListNegative:
+
+    def test_empty_db(self, db_path):
+        with patch("reasons_lib.ask._invoke_claude") as mock_claude:
+            result = api.list_negative(db_path=db_path)
+            assert result == {"negative": [], "count": 0, "candidates": 0, "total": 0}
+            mock_claude.assert_not_called()
+
+    def test_no_keyword_matches(self, db_path):
+        api.add_node("a", "The sky is blue", db_path=db_path)
+        api.add_node("b", "Water flows downhill", db_path=db_path)
+        with patch("reasons_lib.ask._invoke_claude") as mock_claude:
+            result = api.list_negative(db_path=db_path)
+            assert result["count"] == 0
+            assert result["candidates"] == 0
+            assert result["total"] == 2
+            mock_claude.assert_not_called()
+
+    def test_classifies_negatives(self, db_path):
+        api.add_node("a", "The auth module has a bug in token refresh", db_path=db_path)
+        api.add_node("b", "Error handling logs all failures", db_path=db_path)
+        api.add_node("c", "The sky is blue", db_path=db_path)
+        with patch("reasons_lib.ask._invoke_claude", return_value='["a"]'):
+            result = api.list_negative(db_path=db_path)
+            assert result["count"] == 1
+            assert result["candidates"] == 2
+            assert result["total"] == 3
+            assert result["negative"][0]["id"] == "a"
+
+    def test_llm_filters_all(self, db_path):
+        api.add_node("a", "Error handling is comprehensive", db_path=db_path)
+        api.add_node("b", "Failure modes are well documented", db_path=db_path)
+        with patch("reasons_lib.ask._invoke_claude", return_value='[]'):
+            result = api.list_negative(db_path=db_path)
+            assert result["count"] == 0
+            assert result["candidates"] == 2
+            assert result["total"] == 2
+
+    def test_multiline_json_response(self, db_path):
+        api.add_node("a", "There is a critical bug here", db_path=db_path)
+        api.add_node("b", "This has a missing check", db_path=db_path)
+        multiline = '[\n  "a",\n  "b"\n]'
+        with patch("reasons_lib.ask._invoke_claude", return_value=multiline):
+            result = api.list_negative(db_path=db_path)
+            assert result["count"] == 2
+
+    def test_malformed_llm_response(self, db_path):
+        api.add_node("a", "There is a critical bug here", db_path=db_path)
+        with patch("reasons_lib.ask._invoke_claude", return_value="Sorry, I cannot do that."):
+            result = api.list_negative(db_path=db_path)
+            assert result["count"] == 0
+
+    def test_llm_returns_unknown_ids(self, db_path):
+        api.add_node("a", "There is a critical bug here", db_path=db_path)
+        with patch("reasons_lib.ask._invoke_claude", return_value='["a", "nonexistent", "also-fake"]'):
+            result = api.list_negative(db_path=db_path)
+            assert result["count"] == 1
+            assert result["negative"][0]["id"] == "a"
+
+    def test_prose_with_brackets_before_json(self, db_path):
+        api.add_node("a", "There is a critical bug here", db_path=db_path)
+        response = 'Based on [the analysis], here are the negative beliefs: ["a"]'
+        with patch("reasons_lib.ask._invoke_claude", return_value=response):
+            result = api.list_negative(db_path=db_path)
+            assert result["count"] == 1
+            assert result["negative"][0]["id"] == "a"
+
+    def test_claude_not_found_propagates(self, db_path):
+        api.add_node("a", "There is a critical bug here", db_path=db_path)
+        with patch("reasons_lib.ask._invoke_claude", side_effect=FileNotFoundError("'claude' CLI not found in PATH")):
+            with pytest.raises(FileNotFoundError):
+                api.list_negative(db_path=db_path)
+
+    def test_visible_to(self, db_path):
+        api.add_node("a", "Auth has a critical bug", access_tags=["internal"], db_path=db_path)
+        api.add_node("b", "API has a missing validation", db_path=db_path)
+        with patch("reasons_lib.ask._invoke_claude", return_value='["b"]') as mock_claude:
+            result = api.list_negative(visible_to=["public"], db_path=db_path)
+            assert result["count"] == 1
+            assert result["total"] == 1
+            assert result["negative"][0]["id"] == "b"
+            prompt = mock_claude.call_args[0][0]
+            assert "critical bug" not in prompt
