@@ -573,6 +573,26 @@ class TestWhatIf:
         assert result["already_in"] is True
         assert result["total_affected"] == 0
 
+    def test_what_if_assert_not_found(self, pg_api):
+        with pytest.raises(KeyError):
+            pg_api.what_if_assert("missing")
+
+    def test_what_if_assert_no_mutation(self, pg_api):
+        pg_api.add_node("a", "Premise A")
+        pg_api.add_node("b", "Derived B", sl="a")
+        pg_api.retract_node("a")
+        pg_api.what_if_assert("a")
+        status = pg_api.get_status()
+        assert status["in_count"] == 0
+
+    def test_what_if_retract_dependents_field(self, pg_api):
+        pg_api.add_node("a", "Premise A")
+        pg_api.add_node("b", "Derived B", sl="a")
+        pg_api.add_node("c", "Derived C", sl="b")
+        result = pg_api.what_if_retract("a")
+        b_info = next(r for r in result["retracted"] if r["id"] == "b")
+        assert b_info["dependents"] == 1  # c depends on b
+
     def test_what_if_retract_with_outlist_restoration(self, pg_api):
         pg_api.add_node("premise", "Supporting premise")
         pg_api.add_node("blocker", "Blocker node")

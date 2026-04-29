@@ -321,41 +321,41 @@ class PgApi:
 
     def what_if_retract(self, node_id):
         pid = self.project_id
-        with self.conn.cursor() as cur:
-            cur.execute(
-                "SELECT truth_value FROM rms_nodes WHERE id = %s AND project_id = %s",
-                (node_id, pid),
-            )
-            row = cur.fetchone()
-            if not row:
-                self.conn.rollback()
-                raise KeyError(f"Node '{node_id}' not found")
-            if row[0] == "OUT":
-                self.conn.rollback()
-                return {
-                    "node_id": node_id, "already_out": True,
-                    "retracted": [], "restored": [], "total_affected": 0,
-                }
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute(
+                    "SELECT truth_value FROM rms_nodes WHERE id = %s AND project_id = %s",
+                    (node_id, pid),
+                )
+                row = cur.fetchone()
+                if not row:
+                    raise KeyError(f"Node '{node_id}' not found")
+                if row[0] == "OUT":
+                    return {
+                        "node_id": node_id, "already_out": True,
+                        "retracted": [], "restored": [], "total_affected": 0,
+                    }
 
-            cur.execute(
-                "SELECT id, truth_value FROM rms_nodes WHERE project_id = %s",
-                (pid,),
-            )
-            before = {r[0]: r[1] for r in cur.fetchall()}
+                cur.execute(
+                    "SELECT id, truth_value FROM rms_nodes WHERE project_id = %s",
+                    (pid,),
+                )
+                before = {r[0]: r[1] for r in cur.fetchall()}
 
-            cur.execute(
-                "UPDATE rms_nodes SET truth_value = 'OUT' "
-                "WHERE id = %s AND project_id = %s",
-                (node_id, pid),
-            )
-            went_out, went_in = self._propagate(cur, node_id)
+                cur.execute(
+                    "UPDATE rms_nodes SET truth_value = 'OUT' "
+                    "WHERE id = %s AND project_id = %s",
+                    (node_id, pid),
+                )
+                went_out, went_in = self._propagate(cur, node_id)
 
-            changed = went_out + went_in
-            retracted, restored = self._collect_what_if_results(
-                cur, changed, before, node_id,
-            )
+                changed = went_out + went_in
+                retracted, restored = self._collect_what_if_results(
+                    cur, changed, before, node_id,
+                )
+        finally:
+            self.conn.rollback()
 
-        self.conn.rollback()
         retracted.sort(key=lambda c: (c["depth"], c["id"]))
         restored.sort(key=lambda c: (c["depth"], c["id"]))
         return {
@@ -366,41 +366,41 @@ class PgApi:
 
     def what_if_assert(self, node_id):
         pid = self.project_id
-        with self.conn.cursor() as cur:
-            cur.execute(
-                "SELECT truth_value FROM rms_nodes WHERE id = %s AND project_id = %s",
-                (node_id, pid),
-            )
-            row = cur.fetchone()
-            if not row:
-                self.conn.rollback()
-                raise KeyError(f"Node '{node_id}' not found")
-            if row[0] == "IN":
-                self.conn.rollback()
-                return {
-                    "node_id": node_id, "already_in": True,
-                    "retracted": [], "restored": [], "total_affected": 0,
-                }
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute(
+                    "SELECT truth_value FROM rms_nodes WHERE id = %s AND project_id = %s",
+                    (node_id, pid),
+                )
+                row = cur.fetchone()
+                if not row:
+                    raise KeyError(f"Node '{node_id}' not found")
+                if row[0] == "IN":
+                    return {
+                        "node_id": node_id, "already_in": True,
+                        "retracted": [], "restored": [], "total_affected": 0,
+                    }
 
-            cur.execute(
-                "SELECT id, truth_value FROM rms_nodes WHERE project_id = %s",
-                (pid,),
-            )
-            before = {r[0]: r[1] for r in cur.fetchall()}
+                cur.execute(
+                    "SELECT id, truth_value FROM rms_nodes WHERE project_id = %s",
+                    (pid,),
+                )
+                before = {r[0]: r[1] for r in cur.fetchall()}
 
-            cur.execute(
-                "UPDATE rms_nodes SET truth_value = 'IN' "
-                "WHERE id = %s AND project_id = %s",
-                (node_id, pid),
-            )
-            went_out, went_in = self._propagate(cur, node_id)
+                cur.execute(
+                    "UPDATE rms_nodes SET truth_value = 'IN' "
+                    "WHERE id = %s AND project_id = %s",
+                    (node_id, pid),
+                )
+                went_out, went_in = self._propagate(cur, node_id)
 
-            changed = went_out + went_in
-            retracted, restored = self._collect_what_if_results(
-                cur, changed, before, node_id,
-            )
+                changed = went_out + went_in
+                retracted, restored = self._collect_what_if_results(
+                    cur, changed, before, node_id,
+                )
+        finally:
+            self.conn.rollback()
 
-        self.conn.rollback()
         retracted.sort(key=lambda c: (c["depth"], c["id"]))
         restored.sort(key=lambda c: (c["depth"], c["id"]))
         return {
