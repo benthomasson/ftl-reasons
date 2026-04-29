@@ -474,6 +474,12 @@ def assert_node(node_id: str, db_path: str = DEFAULT_DB) -> dict:
         return {"changed": changed, "went_out": went_out, "went_in": went_in}
 
 
+def propagate(db_path: str = DEFAULT_DB) -> dict:
+    with _with_network(db_path, write=True) as net:
+        changed = net.recompute_all()
+    return {"changed": changed}
+
+
 def get_status(visible_to: list[str] | None = None, db_path: str = DEFAULT_DB) -> dict:
     """Get all nodes with truth values.
 
