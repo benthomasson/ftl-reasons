@@ -921,6 +921,25 @@ def cmd_list(args):
     print(f"\n{result['count']} node{'s' if result['count'] != 1 else ''}")
 
 
+def cmd_list_gated(args):
+    result = api.list_gated(
+        visible_to=_parse_visible_to(args),
+        db_path=args.db,
+    )
+
+    if not result["blockers"]:
+        print("No active gates found. All gated beliefs are satisfied.")
+        return
+
+    for blocker_id, info in sorted(result["blockers"].items()):
+        print(f"  [{blocker_id}] {info['text']}")
+        for gated in info["gated"]:
+            print(f"    ⊢ {gated['id']}: {gated['text']}")
+        print()
+
+    print(f"{result['blocker_count']} blocker(s) gating {result['gated_count']} belief(s)")
+
+
 def cmd_namespaces(args):
     result = api.list_namespaces(db_path=args.db)
     if not result["namespaces"]:
@@ -1173,6 +1192,9 @@ def main():
                    help="Apply a reviewed dedup plan file")
 
     # namespaces
+    p = sub.add_parser("list-gated", help="List OUT nodes blocked by IN outlist nodes")
+    p.add_argument("--visible-to", metavar="TAG,TAG", help="Only show nodes whose access_tags are a subset of these tags")
+
     sub.add_parser("namespaces", help="List all agent namespaces in the database")
 
     # list
@@ -1231,6 +1253,7 @@ def main():
         "ask": cmd_ask,
         "deduplicate": cmd_deduplicate,
         "list": cmd_list,
+        "list-gated": cmd_list_gated,
         "namespaces": cmd_namespaces,
     }
     commands[args.command](args)

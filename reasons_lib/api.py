@@ -1461,6 +1461,45 @@ def list_nodes(
         return {"nodes": nodes, "count": len(nodes)}
 
 
+def list_gated(
+    visible_to: list[str] | None = None,
+    db_path: str = DEFAULT_DB,
+) -> dict:
+    """Find OUT nodes blocked by IN outlist nodes (active gates).
+
+    Returns: {"blockers": {blocker_id: {"text": str, "gated": [{"id": str, "text": str}]}},
+              "gated_count": int, "blocker_count": int}
+    """
+    with _with_network(db_path) as net:
+        blockers: dict[str, dict] = {}
+        for nid, node in sorted(net.nodes.items()):
+            if node.truth_value != "OUT":
+                continue
+            if node.metadata.get("superseded_by"):
+                continue
+            if visible_to is not None and not _is_visible(node, visible_to):
+                continue
+            for j in node.justifications:
+                for outlist_id in j.outlist:
+                    if outlist_id not in net.nodes:
+                        continue
+                    out_node = net.nodes[outlist_id]
+                    if out_node.truth_value != "IN":
+                        continue
+                    if outlist_id not in blockers:
+                        blockers[outlist_id] = {
+                            "text": out_node.text,
+                            "gated": [],
+                        }
+                    if not any(g["id"] == nid for g in blockers[outlist_id]["gated"]):
+                        blockers[outlist_id]["gated"].append({
+                            "id": nid,
+                            "text": node.text,
+                        })
+        gated_count = sum(len(b["gated"]) for b in blockers.values())
+        return {"blockers": blockers, "gated_count": gated_count, "blocker_count": len(blockers)}
+
+
 def _rewrite_dependents(net, old_id: str, new_id: str):
     """Rewrite justifications that reference old_id to point at new_id.
 

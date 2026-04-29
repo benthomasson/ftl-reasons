@@ -598,6 +598,71 @@ class PgApi:
 
         return {"nodes": nodes, "count": len(nodes)}
 
+    def list_gated(self, visible_to=None):
+        pid = self.project_id
+
+        with self.conn.cursor() as cur:
+            # Find OUT nodes that have justifications with IN outlist nodes
+            cur.execute(
+                "SELECT n.id, n.text, n.metadata, j.outlist "
+                "FROM rms_nodes n "
+                "JOIN rms_justifications j ON j.node_id = n.id AND j.project_id = n.project_id "
+                "WHERE n.project_id = %s AND n.truth_value = 'OUT' "
+                "AND j.outlist != '[]'::jsonb",
+                (pid,),
+            )
+            candidates = cur.fetchall()
+
+            if not candidates:
+                return {"blockers": {}, "gated_count": 0, "blocker_count": 0}
+
+            # Collect all outlist node IDs
+            all_outlist_ids = set()
+            for row in candidates:
+                outlist = row[3]
+                if isinstance(outlist, str):
+                    outlist = json.loads(outlist)
+                all_outlist_ids.update(outlist)
+
+            # Fetch truth values and text for outlist nodes
+            if all_outlist_ids:
+                cur.execute(
+                    "SELECT id, text, truth_value, metadata FROM rms_nodes "
+                    "WHERE project_id = %s AND id = ANY(%s)",
+                    (pid, list(all_outlist_ids)),
+                )
+                outlist_info = {}
+                for r in cur.fetchall():
+                    meta = r[3]
+                    if isinstance(meta, str):
+                        meta = json.loads(meta)
+                    outlist_info[r[0]] = {"text": r[1], "truth_value": r[2], "metadata": meta}
+            else:
+                outlist_info = {}
+
+        blockers: dict[str, dict] = {}
+        for row in candidates:
+            nid, text, meta, outlist = row
+            if isinstance(meta, str):
+                meta = json.loads(meta)
+            if isinstance(outlist, str):
+                outlist = json.loads(outlist)
+            if meta.get("superseded_by"):
+                continue
+            if visible_to is not None and not self._is_visible(meta, visible_to):
+                continue
+            for outlist_id in outlist:
+                info = outlist_info.get(outlist_id)
+                if not info or info["truth_value"] != "IN":
+                    continue
+                if outlist_id not in blockers:
+                    blockers[outlist_id] = {"text": info["text"], "gated": []}
+                if not any(g["id"] == nid for g in blockers[outlist_id]["gated"]):
+                    blockers[outlist_id]["gated"].append({"id": nid, "text": text})
+
+        gated_count = sum(len(b["gated"]) for b in blockers.values())
+        return {"blockers": blockers, "gated_count": gated_count, "blocker_count": len(blockers)}
+
     def get_log(self, last=None):
         pid = self.project_id
         with self.conn.cursor() as cur:
