@@ -60,6 +60,43 @@ class TestAddNode:
         assert set(result["metadata"]["access_tags"]) == {"aws", "billing"}
 
 
+class TestRefIntegrity:
+
+    def test_add_node_phantom_antecedent(self, pg_api):
+        with pytest.raises(KeyError, match="ghost"):
+            pg_api.add_node("b", "Derived B", sl="ghost")
+
+    def test_add_node_phantom_outlist(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        with pytest.raises(KeyError, match="ghost"):
+            pg_api.add_node("b", "Derived B", sl="a", unless="ghost")
+
+    def test_add_justification_phantom_antecedent(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        with pytest.raises(KeyError, match="ghost"):
+            pg_api.add_justification("a", sl="ghost")
+
+    def test_add_justification_phantom_outlist(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        pg_api.add_node("b", "Beta")
+        with pytest.raises(KeyError, match="ghost"):
+            pg_api.add_justification("b", sl="a", unless="ghost")
+
+    def test_add_node_multiple_missing(self, pg_api):
+        with pytest.raises(KeyError, match="x.*y|y.*x"):
+            pg_api.add_node("b", "Derived B", sl="x,y")
+
+    def test_add_node_valid_refs(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        pg_api.add_node("b", "Beta")
+        result = pg_api.add_node("c", "Derived C", sl="a,b")
+        assert result["truth_value"] == "IN"
+
+    def test_add_node_premise_no_validation(self, pg_api):
+        result = pg_api.add_node("a", "Alpha premise")
+        assert result["truth_value"] == "IN"
+
+
 class TestRetractNode:
 
     def test_retract_premise(self, pg_api):

@@ -151,6 +151,9 @@ class PgApi:
 
             justifications = self._parse_justifications(sl, cp, unless, label)
 
+            if justifications:
+                self._validate_refs(cur, justifications)
+
             for j in justifications:
                 cur.execute(
                     "INSERT INTO rms_justifications (node_id, project_id, type, antecedents, outlist, label) "
@@ -209,6 +212,8 @@ class PgApi:
             justifications = self._parse_justifications(sl, cp, unless, label)
             if not justifications:
                 raise ValueError("No justification specified (use --sl or --cp)")
+
+            self._validate_refs(cur, justifications)
 
             for j in justifications:
                 cur.execute(
@@ -1739,6 +1744,22 @@ class PgApi:
         return "\n".join(lines) if lines else "No results found."
 
     # ── Internal: helpers ───────────────────────────────────────
+
+    def _validate_refs(self, cur, justifications):
+        all_ids = set()
+        for j in justifications:
+            all_ids.update(j["antecedents"])
+            all_ids.update(j["outlist"])
+        if not all_ids:
+            return
+        cur.execute(
+            "SELECT id FROM rms_nodes WHERE project_id = %s AND id = ANY(%s)",
+            (self.project_id, list(all_ids)),
+        )
+        found = {row[0] for row in cur.fetchall()}
+        missing = all_ids - found
+        if missing:
+            raise KeyError(f"Referenced nodes do not exist: {', '.join(sorted(missing))}")
 
     def _parse_justifications(self, sl, cp, unless, label):
         justs = []
