@@ -271,9 +271,10 @@ class TestFtsSearch:
         assert "a" in result
 
     def test_porter_stemming_plural(self, db_path):
+        from reasons_lib.api import _fts_search
         api.add_node("a", "max 250 jobs per pipeline", db_path=db_path)
-        result = api.search("job", db_path=db_path)
-        assert "a" in result
+        results = _fts_search("job", db_path)
+        assert "a" in results
 
     def test_progressive_relaxation(self, db_path):
         api.add_node("a", "sandbox access expires after 21 days", db_path=db_path)
