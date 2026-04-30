@@ -16,18 +16,26 @@ def hash_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def resolve_source_path(source: str, repos: dict[str, Path] | None = None) -> Path | None:
+def resolve_source_path(
+    source: str,
+    repos: dict[str, Path] | None = None,
+    db_dir: Path | None = None,
+) -> Path | None:
     """Resolve a source string like 'repo-name/path/to/file.md' to an absolute path.
 
-    If repos is provided, uses it as a mapping of repo names to paths.
-    Otherwise tries ~/git/<repo-name>/path/to/file.md.
+    Tries db_dir first (for expert repos where sources live next to reasons.db),
+    then repos dict, then ~/git/<repo-name> fallback.
     """
     if not source:
         return None
 
+    if db_dir:
+        p = db_dir / source
+        if p.exists():
+            return p
+
     parts = source.split("/", 1)
     if len(parts) < 2:
-        # No slash — treat as a bare filename in current directory
         p = Path(source)
         return p if p.exists() else None
 
@@ -44,6 +52,7 @@ def resolve_source_path(source: str, repos: dict[str, Path] | None = None) -> Pa
 def check_stale(
     network: Network,
     repos: dict[str, Path] | None = None,
+    db_dir: Path | None = None,
 ) -> list[dict]:
     """Check all IN nodes for source staleness.
 
@@ -65,7 +74,7 @@ def check_stale(
         if not node.source or not node.source_hash:
             continue
 
-        path = resolve_source_path(node.source, repos)
+        path = resolve_source_path(node.source, repos, db_dir)
         if path is None:
             results.append({
                 "node_id": nid,
@@ -95,6 +104,7 @@ def hash_sources(
     network: Network,
     repos: dict[str, Path] | None = None,
     force: bool = False,
+    db_dir: Path | None = None,
 ) -> list[dict]:
     """Backfill source hashes for nodes that have a source path but no stored hash.
 
@@ -112,7 +122,7 @@ def hash_sources(
         if node.source_hash and not force:
             continue
 
-        path = resolve_source_path(node.source, repos)
+        path = resolve_source_path(node.source, repos, db_dir)
         if path is None:
             continue
 

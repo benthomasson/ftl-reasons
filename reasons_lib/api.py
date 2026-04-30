@@ -1098,19 +1098,23 @@ def check_stale(
 
     Returns: {"stale": list[dict], "checked": int, "stale_count": int}
     """
+    from pathlib import Path as P
     from .check_stale import check_stale as _check
 
-    repo_paths = None
-    if repos:
-        from pathlib import Path as P
-        repo_paths = {k: P(v) for k, v in repos.items()}
+    db_dir = P(db_path).resolve().parent
 
     with _with_network(db_path) as net:
+        repo_paths = repos
+        if repo_paths is None and net.repos:
+            repo_paths = net.repos
+        if repo_paths:
+            repo_paths = {k: P(v) for k, v in repo_paths.items()}
+
         in_with_source = sum(
             1 for n in net.nodes.values()
             if n.truth_value == "IN" and n.source and n.source_hash
         )
-        results = _check(net, repo_paths)
+        results = _check(net, repo_paths, db_dir=db_dir)
         return {
             "stale": results,
             "checked": in_with_source,
@@ -1127,15 +1131,19 @@ def hash_sources(
 
     Returns: {"hashed": list[dict], "count": int}
     """
+    from pathlib import Path as P
     from .check_stale import hash_sources as _hash
 
-    repo_paths = None
-    if repos:
-        from pathlib import Path as P
-        repo_paths = {k: P(v) for k, v in repos.items()}
+    db_dir = P(db_path).resolve().parent
 
     with _with_network(db_path, write=True) as net:
-        results = _hash(net, repo_paths, force=force)
+        repo_paths = repos
+        if repo_paths is None and net.repos:
+            repo_paths = net.repos
+        if repo_paths:
+            repo_paths = {k: P(v) for k, v in repo_paths.items()}
+
+        results = _hash(net, repo_paths, force=force, db_dir=db_dir)
         return {"hashed": results, "count": len(results)}
 
 
