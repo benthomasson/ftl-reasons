@@ -76,6 +76,16 @@ class TestRefIntegrity:
         with pytest.raises(KeyError, match="ghost"):
             pg_api.add_justification("a", sl="ghost")
 
+    def test_add_justification_phantom_outlist(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        pg_api.add_node("b", "Beta")
+        with pytest.raises(KeyError, match="ghost"):
+            pg_api.add_justification("b", sl="a", unless="ghost")
+
+    def test_add_node_multiple_missing(self, pg_api):
+        with pytest.raises(KeyError, match="x.*y|y.*x"):
+            pg_api.add_node("b", "Derived B", sl="x,y")
+
     def test_add_node_valid_refs(self, pg_api):
         pg_api.add_node("a", "Alpha")
         pg_api.add_node("b", "Beta")
