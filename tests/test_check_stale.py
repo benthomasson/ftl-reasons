@@ -170,6 +170,20 @@ class TestCheckStale:
 
 class TestHashSources:
 
+    def test_backfills_via_db_dir(self, tmp_path):
+        entry_dir = tmp_path / "entries"
+        entry_dir.mkdir()
+        f = entry_dir / "topic.md"
+        f.write_text("content")
+
+        net = Network()
+        net.add_node("a", "Node A", source="entries/topic.md")
+
+        results = hash_sources(net, db_dir=tmp_path)
+        assert len(results) == 1
+        assert results[0]["node_id"] == "a"
+        assert net.nodes["a"].source_hash != ""
+
     def test_backfills_empty_hash(self, tmp_path):
         f = tmp_path / "source.md"
         f.write_text("content")
