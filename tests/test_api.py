@@ -263,6 +263,35 @@ class TestListNodesDepth:
         assert ids == ["mid"]
 
 
+class TestFtsSearch:
+
+    def test_porter_stemming(self, db_path):
+        api.add_node("a", "sandbox access is auto-deactivated after 21 days", db_path=db_path)
+        result = api.search("deactivation", db_path=db_path)
+        assert "a" in result
+
+    def test_porter_stemming_plural(self, db_path):
+        from reasons_lib.api import _fts_search
+        api.add_node("a", "max 250 jobs per pipeline", db_path=db_path)
+        results = _fts_search("job", db_path)
+        assert "a" in results
+
+    def test_progressive_relaxation(self, db_path):
+        api.add_node("a", "sandbox access expires after 21 days", db_path=db_path)
+        result = api.search("sandbox access duration expiration", db_path=db_path)
+        assert "a" in result
+
+    def test_two_term_no_relaxation(self, db_path):
+        api.add_node("a", "sandbox access expires", db_path=db_path)
+        result = api.search("sandbox quantum", db_path=db_path, format="compact")
+        assert "a" not in result
+
+    def test_no_false_positives(self, db_path):
+        api.add_node("a", "the quick brown fox", db_path=db_path)
+        result = api.search("quantum computing blockchain", db_path=db_path, format="compact")
+        assert "a" not in result
+
+
 class TestListGated:
 
     def test_no_gates(self, db_path):

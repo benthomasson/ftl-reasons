@@ -1286,27 +1286,39 @@ def search(query: str, visible_to: list[str] | None = None, db_path: str = DEFAU
             return _format_markdown(net, matched_ids, neighbor_ids)
 
 
+def _fts_query(conn, terms: list[str]) -> list[str]:
+    fts_query = " ".join(f'"{t}"' for t in terms)
+    cursor = conn.execute(
+        "SELECT id FROM nodes_fts WHERE nodes_fts MATCH ? ORDER BY rank LIMIT 20",
+        (fts_query,),
+    )
+    return [row[0] for row in cursor.fetchall()]
+
+
 def _fts_search(query: str, db_path: str) -> list[str]:
-    """Search using FTS5 full-text index."""
+    """Search using FTS5 full-text index with porter stemming and progressive relaxation."""
     import sqlite3
+    from itertools import combinations
     try:
         conn = sqlite3.connect(db_path)
-        # FTS5 match: all terms must appear (implicit AND)
-        # Quote each term to avoid FTS syntax issues
-        terms = query.strip().split()
-        fts_query = " ".join(f'"{t}"' for t in terms if t)
-        if not fts_query:
+        try:
+            terms = [t for t in query.strip().split() if t]
+            if not terms:
+                return []
+
+            results = _fts_query(conn, terms)
+
+            if not results and len(terms) > 2:
+                for n in range(len(terms) - 1, max(0, len(terms) - 3), -1):
+                    for combo in combinations(terms, n):
+                        results = _fts_query(conn, list(combo))
+                        if results:
+                            return results
+
+            return results
+        finally:
             conn.close()
-            return []
-        cursor = conn.execute(
-            "SELECT id FROM nodes_fts WHERE nodes_fts MATCH ? ORDER BY rank LIMIT 20",
-            (fts_query,),
-        )
-        results = [row[0] for row in cursor.fetchall()]
-        conn.close()
-        return results
     except (sqlite3.OperationalError, sqlite3.DatabaseError):
-        # FTS table doesn't exist or query failed
         return []
 
 
