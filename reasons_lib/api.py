@@ -1301,23 +1301,23 @@ def _fts_search(query: str, db_path: str) -> list[str]:
     from itertools import combinations
     try:
         conn = sqlite3.connect(db_path)
-        terms = [t for t in query.strip().split() if t]
-        if not terms:
+        try:
+            terms = [t for t in query.strip().split() if t]
+            if not terms:
+                return []
+
+            results = _fts_query(conn, terms)
+
+            if not results and len(terms) > 2:
+                for n in range(len(terms) - 1, max(0, len(terms) - 3), -1):
+                    for combo in combinations(terms, n):
+                        results = _fts_query(conn, list(combo))
+                        if results:
+                            return results
+
+            return results
+        finally:
             conn.close()
-            return []
-
-        results = _fts_query(conn, terms)
-
-        if not results and len(terms) > 2:
-            for n in range(len(terms) - 1, max(0, len(terms) - 3), -1):
-                for combo in combinations(terms, n):
-                    results = _fts_query(conn, list(combo))
-                    if results:
-                        conn.close()
-                        return results
-
-        conn.close()
-        return results
     except (sqlite3.OperationalError, sqlite3.DatabaseError):
         return []
 

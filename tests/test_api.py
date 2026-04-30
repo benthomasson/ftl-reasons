@@ -280,6 +280,11 @@ class TestFtsSearch:
         result = api.search("sandbox access duration expiration", db_path=db_path)
         assert "a" in result
 
+    def test_two_term_no_relaxation(self, db_path):
+        api.add_node("a", "sandbox access expires", db_path=db_path)
+        result = api.search("sandbox quantum", db_path=db_path, format="compact")
+        assert "a" not in result
+
     def test_no_false_positives(self, db_path):
         api.add_node("a", "the quick brown fox", db_path=db_path)
         result = api.search("quantum computing blockchain", db_path=db_path, format="compact")
