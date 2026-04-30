@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS network_meta (
     value TEXT NOT NULL
 );
 
-CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(id, text);
+CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(id, text, tokenize="porter unicode61");
 """
 
 
@@ -80,7 +80,8 @@ class Storage:
         with self.conn:
             # Clear and rewrite (simple strategy for small networks)
             self.conn.execute("DELETE FROM justifications")
-            self.conn.execute("DELETE FROM nodes_fts")
+            self.conn.execute("DROP TABLE IF EXISTS nodes_fts")
+            self.conn.execute("CREATE VIRTUAL TABLE nodes_fts USING fts5(id, text, tokenize='porter unicode61')")
             self.conn.execute("DELETE FROM nodes")
             self.conn.execute("DELETE FROM nogoods")
             self.conn.execute("DELETE FROM repos")
