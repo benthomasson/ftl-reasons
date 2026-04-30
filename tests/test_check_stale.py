@@ -45,8 +45,49 @@ class TestResolveSourcePath:
         result = resolve_source_path("")
         assert result is None
 
+    def test_resolve_relative_to_db_dir(self, tmp_path):
+        entry_dir = tmp_path / "entries" / "2026"
+        entry_dir.mkdir(parents=True)
+        f = entry_dir / "topic.md"
+        f.write_text("content")
+        result = resolve_source_path("entries/2026/topic.md", db_dir=tmp_path)
+        assert result == f
+
+    def test_db_dir_takes_precedence(self, tmp_path):
+        db_dir = tmp_path / "expert"
+        repo_dir = tmp_path / "repo"
+        for d in (db_dir / "entries", repo_dir / "entries"):
+            d.mkdir(parents=True)
+        (db_dir / "entries" / "topic.md").write_text("db version")
+        (repo_dir / "entries" / "topic.md").write_text("repo version")
+        result = resolve_source_path("entries/topic.md", repos={"entries": repo_dir}, db_dir=db_dir)
+        assert result == db_dir / "entries" / "topic.md"
+
+    def test_falls_back_to_repo_when_not_in_db_dir(self, tmp_path):
+        db_dir = tmp_path / "expert"
+        db_dir.mkdir()
+        repo_dir = tmp_path / "repo"
+        repo_dir.mkdir()
+        f = repo_dir / "file.md"
+        f.write_text("content")
+        result = resolve_source_path("myrepo/file.md", repos={"myrepo": repo_dir}, db_dir=db_dir)
+        assert result == f
+
 
 class TestCheckStale:
+
+    def test_fresh_node_via_db_dir(self, tmp_path):
+        entry_dir = tmp_path / "entries"
+        entry_dir.mkdir()
+        f = entry_dir / "topic.md"
+        f.write_text("original content")
+        h = hashlib.sha256(b"original content").hexdigest()
+
+        net = Network()
+        net.add_node("a", "Premise A", source="entries/topic.md", source_hash=h)
+
+        results = check_stale(net, db_dir=tmp_path)
+        assert results == []
 
     def test_fresh_node(self, tmp_path):
         f = tmp_path / "source.md"
@@ -128,6 +169,20 @@ class TestCheckStale:
 
 
 class TestHashSources:
+
+    def test_backfills_via_db_dir(self, tmp_path):
+        entry_dir = tmp_path / "entries"
+        entry_dir.mkdir()
+        f = entry_dir / "topic.md"
+        f.write_text("content")
+
+        net = Network()
+        net.add_node("a", "Node A", source="entries/topic.md")
+
+        results = hash_sources(net, db_dir=tmp_path)
+        assert len(results) == 1
+        assert results[0]["node_id"] == "a"
+        assert net.nodes["a"].source_hash != ""
 
     def test_backfills_empty_hash(self, tmp_path):
         f = tmp_path / "source.md"
