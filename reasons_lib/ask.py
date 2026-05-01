@@ -29,7 +29,11 @@ Rules:
 - If you need to search for more beliefs, respond with ONLY a single JSON line
   (no other text). The system will run the search and give you the results.
 - Cite belief IDs in [brackets] when referencing specific beliefs.
-- If the beliefs are insufficient to answer, say so honestly.
+- ONLY answer based on the beliefs provided. Do NOT use your training data or
+  general knowledge to fill gaps.
+- If the beliefs are insufficient to answer, respond EXACTLY with:
+  "I don't have enough beliefs in the network to answer this question."
+  Do NOT attempt a partial or speculative answer.
 
 ## Question
 
@@ -112,6 +116,8 @@ def _invoke_claude(prompt, timeout=300):
 
 MAX_ITERATIONS = 3
 
+NO_BELIEFS_MSG = "No matching beliefs found. Cannot answer from the belief network."
+
 
 def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None):
     """Answer a question using FTS5 belief search and optional LLM synthesis.
@@ -123,6 +129,9 @@ def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None
         return api.search(question, db_path=db_path, format=fmt)
 
     beliefs_context = api.search(question, db_path=db_path, format="markdown")
+
+    if not beliefs_context or beliefs_context.strip() == "No results found.":
+        return NO_BELIEFS_MSG
 
     tool_history = []
 
