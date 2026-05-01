@@ -60,23 +60,20 @@ def check_stale(
     network: Network,
     repos: dict[str, Path] | None = None,
     db_dir: Path | None = None,
-) -> list[dict]:
+    upgrade_hashes: bool = False,
+) -> tuple[list[dict], int]:
     """Check all IN nodes for source staleness.
 
-    Returns a list of dicts for each stale or missing-source node::
+    If upgrade_hashes=True, truncated hashes that are a prefix of the
+    current full hash are upgraded in place (caller must save the network).
 
-        # Content changed on disk:
-        {"node_id": str, "old_hash": str, "new_hash": str,
-         "source": str, "source_path": str, "reason": "content_changed"}
-
-        # Source file no longer exists:
-        {"node_id": str, "old_hash": str, "new_hash": None,
-         "source": str, "source_path": None, "reason": "source_deleted"}
+    Returns (stale_results, upgraded_count).
     """
     if repos is None and network.repos:
         repos = {k: Path(v) for k, v in network.repos.items()}
 
     results = []
+    upgraded = 0
 
     for nid, node in sorted(network.nodes.items()):
         if node.truth_value != "IN":
@@ -99,6 +96,20 @@ def check_stale(
 
         current_hash = hash_file(path)
         if current_hash != node.source_hash:
+            if len(node.source_hash) == 16 and current_hash.startswith(node.source_hash):
+                if upgrade_hashes:
+                    node.source_hash = current_hash
+                    upgraded += 1
+                    continue
+                results.append({
+                    "node_id": nid,
+                    "old_hash": node.source_hash,
+                    "new_hash": current_hash,
+                    "source": node.source,
+                    "source_path": str(path),
+                    "reason": "truncated_hash",
+                })
+                continue
             results.append({
                 "node_id": nid,
                 "old_hash": node.source_hash,
@@ -108,7 +119,7 @@ def check_stale(
                 "reason": "content_changed",
             })
 
-    return results
+    return results, upgraded
 
 
 def hash_sources(

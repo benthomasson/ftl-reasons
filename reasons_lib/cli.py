@@ -564,13 +564,19 @@ def cmd_hash_sources(args):
 
 
 def cmd_check_stale(args):
-    result = api.check_stale(db_path=args.db)
+    result = api.check_stale(upgrade_hashes=args.upgrade_hashes, db_path=args.db)
+
+    if result.get("upgraded"):
+        print(f"Upgraded {result['upgraded']} truncated hash(es) to full length.")
 
     if not result["stale"]:
         print(f"All {result['checked']} nodes with sources are fresh.")
         return
 
-    for item in result["stale"]:
+    truncated = [i for i in result["stale"] if i.get("reason") == "truncated_hash"]
+    stale = [i for i in result["stale"] if i.get("reason") != "truncated_hash"]
+
+    for item in stale:
         if item.get("reason") == "source_deleted":
             print(f"  DELETED  {item['node_id']}")
             print(f"           source: {item['source']}")
@@ -580,9 +586,14 @@ def cmd_check_stale(args):
             print(f"         hash: {item['old_hash']} -> {item['new_hash']}")
         print()
 
-    fresh = result["checked"] - result["stale_count"]
-    print(f"{fresh} fresh, {result['stale_count']} STALE (of {result['checked']} checked)")
-    sys.exit(1)
+    if truncated:
+        print(f"WARNING: {len(truncated)} node(s) have truncated hashes.")
+        print("  Run 'reasons check-stale --upgrade-hashes' to upgrade them.\n")
+
+    fresh = result["checked"] - len(stale)
+    print(f"{fresh} fresh, {len(stale)} stale (of {result['checked']} checked)")
+    if stale:
+        sys.exit(1)
 
 
 def cmd_compact(args):
@@ -1159,7 +1170,9 @@ def main():
     p.add_argument("--force", action="store_true", help="Re-hash all nodes, even those with existing hashes")
 
     # check-stale
-    sub.add_parser("check-stale", help="Check IN nodes for source file staleness")
+    p = sub.add_parser("check-stale", help="Check IN nodes for source file staleness")
+    p.add_argument("--upgrade-hashes", action="store_true",
+                   help="Upgrade truncated hashes to full length in place")
 
     # compact
     p = sub.add_parser("compact", help="Token-budgeted belief state summary")
