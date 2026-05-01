@@ -20,14 +20,21 @@ def resolve_source_path(
     source: str,
     repos: dict[str, Path] | None = None,
     db_dir: Path | None = None,
+    agent: str | None = None,
 ) -> Path | None:
     """Resolve a source string like 'repo-name/path/to/file.md' to an absolute path.
 
-    Tries db_dir first (for expert repos where sources live next to reasons.db),
-    then repos dict, then ~/git/<repo-name> fallback.
+    Tries agent repo first (for agent-imported beliefs where source is relative
+    to the agent's repo), then db_dir (for expert repos where sources live next
+    to reasons.db), then repos dict by first path component, then ~/git/ fallback.
     """
     if not source:
         return None
+
+    if agent and repos and agent in repos:
+        p = repos[agent] / source
+        if p.exists():
+            return p
 
     if db_dir:
         p = db_dir / source
@@ -66,6 +73,9 @@ def check_stale(
         {"node_id": str, "old_hash": str, "new_hash": None,
          "source": str, "source_path": None, "reason": "source_deleted"}
     """
+    if repos is None and network.repos:
+        repos = {k: Path(v) for k, v in network.repos.items()}
+
     results = []
 
     for nid, node in sorted(network.nodes.items()):
@@ -74,7 +84,8 @@ def check_stale(
         if not node.source or not node.source_hash:
             continue
 
-        path = resolve_source_path(node.source, repos, db_dir)
+        agent = node.metadata.get("agent") if node.metadata else None
+        path = resolve_source_path(node.source, repos, db_dir, agent=agent)
         if path is None:
             results.append({
                 "node_id": nid,
@@ -114,6 +125,9 @@ def hash_sources(
     Returns a list of dicts for each node that was hashed:
         {"node_id": str, "source": str, "hash": str, "was_empty": bool}
     """
+    if repos is None and network.repos:
+        repos = {k: Path(v) for k, v in network.repos.items()}
+
     results = []
 
     for nid, node in sorted(network.nodes.items()):
@@ -122,7 +136,8 @@ def hash_sources(
         if node.source_hash and not force:
             continue
 
-        path = resolve_source_path(node.source, repos, db_dir)
+        agent = node.metadata.get("agent") if node.metadata else None
+        path = resolve_source_path(node.source, repos, db_dir, agent=agent)
         if path is None:
             continue
 

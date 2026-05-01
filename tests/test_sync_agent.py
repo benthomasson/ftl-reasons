@@ -516,3 +516,17 @@ class TestSyncAgentRevocation:
 
         node = api.show_node("test-agent:alpha-fact", db_path=db)
         assert node["truth_value"] == "OUT"
+
+
+class TestSyncRegistersRepo:
+
+    def test_sync_registers_repo(self, initial_import):
+        db, tmp_path = initial_import
+        p = tmp_path / "beliefs.md"
+        p.write_text(INITIAL_BELIEFS)
+        api.sync_agent("test-agent", str(p), db_path=db)
+
+        repos = api.list_repos(db_path=db)["repos"]
+        assert "test-agent" in repos
+        from pathlib import Path
+        assert repos["test-agent"] == str(Path(str(p)).resolve().parent)
