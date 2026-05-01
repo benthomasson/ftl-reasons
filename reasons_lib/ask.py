@@ -1,17 +1,16 @@
 """Ask natural language questions against a belief network.
 
 Uses FTS5 search to find relevant beliefs, then optionally synthesizes
-an answer via `claude -p` with a tool loop that allows the LLM to
+an answer via an LLM with a tool loop that allows the model to
 request additional belief searches.
 """
 
 import json
-import os
-import shutil
 import subprocess
 import sys
 
 from . import api
+from .llm import invoke_model
 
 
 ASK_PROMPT = """\
@@ -127,29 +126,8 @@ def build_final_prompt(question, beliefs_context, tool_history=None):
 
 
 def _invoke_claude(prompt, timeout=300):
-    """Call `claude -p` with the given prompt. Returns response text.
-
-    Raises FileNotFoundError if claude is not in PATH.
-    Raises RuntimeError if claude exits non-zero.
-    Raises subprocess.TimeoutExpired on timeout.
-    """
-    if not shutil.which("claude"):
-        raise FileNotFoundError("'claude' CLI not found in PATH")
-
-    # Strip CLAUDECODE to avoid recursive invocation inside Claude Code
-    env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
-
-    result = subprocess.run(
-        ["claude", "-p"],
-        input=prompt,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        env=env,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"claude failed: {result.stderr}")
-    return result.stdout
+    """Call the default LLM (claude). Backward-compat wrapper."""
+    return invoke_model(prompt, model="claude", timeout=timeout)
 
 
 MAX_ITERATIONS = 3
@@ -163,7 +141,8 @@ def _beliefs_or_no_match(beliefs_context):
     return beliefs_context
 
 
-def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None):
+def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None,
+        model="claude"):
     """Answer a question using FTS5 belief search and optional LLM synthesis.
 
     Returns the answer text.
@@ -186,7 +165,7 @@ def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None
               file=sys.stderr)
 
         try:
-            response = _invoke_claude(prompt, timeout=timeout)
+            response = invoke_model(prompt, model=model, timeout=timeout)
         except subprocess.TimeoutExpired:
             print(f"LLM timed out after {timeout}s", file=sys.stderr)
             return _beliefs_or_no_match(beliefs_context)
@@ -213,7 +192,7 @@ def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None
             print(f"Synthesizing (final)...", file=sys.stderr)
             prompt = build_final_prompt(question, beliefs_context, tool_history)
             try:
-                response = _invoke_claude(prompt, timeout=timeout)
+                response = invoke_model(prompt, model=model, timeout=timeout)
             except subprocess.TimeoutExpired:
                 print(f"LLM timed out after {timeout}s", file=sys.stderr)
                 return _beliefs_or_no_match(beliefs_context)

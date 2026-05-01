@@ -632,6 +632,7 @@ def cmd_ask(args):
         timeout=args.timeout,
         no_synth=args.no_synth,
         format=getattr(args, "format", None),
+        model=args.model or "claude",
     )
     print(result)
 
@@ -693,9 +694,7 @@ def _derive_one_round(args, round_num=None):
 
     Used by cmd_derive for both single-round and --exhaust mode.
     """
-    import asyncio
-    import os
-    import shutil
+    import subprocess
 
     from .derive import (
         build_prompt,
@@ -751,44 +750,16 @@ def _derive_one_round(args, round_num=None):
 
     # Model invocation via CLI
     model = args.model or "claude"
-    model_commands = {
-        "claude": ["claude", "-p"],
-        "gemini": ["gemini", "-p", ""],
-    }
-
-    if model not in model_commands:
-        print(f"{prefix}Unknown model: {model}. Available: {list(model_commands.keys())}",
-              file=sys.stderr)
-        return -1
-
-    cmd = model_commands[model]
-    if not shutil.which(cmd[0]):
-        print(f"{prefix}Error: '{cmd[0]}' CLI not found in PATH", file=sys.stderr)
-        return -1
 
     print(f"{prefix}Deriving with {model}...", file=sys.stderr)
 
-    env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
-
-    async def _invoke():
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=env,
-        )
-        stdout, stderr = await asyncio.wait_for(
-            proc.communicate(prompt.encode()),
-            timeout=args.timeout,
-        )
-        if proc.returncode != 0:
-            raise RuntimeError(f"Model failed: {stderr.decode()}")
-        return stdout.decode()
-
+    from .llm import invoke_model
     try:
-        response = asyncio.run(_invoke())
-    except TimeoutError:
+        response = invoke_model(prompt, model=model, timeout=args.timeout)
+    except FileNotFoundError as e:
+        print(f"{prefix}Error: {e}", file=sys.stderr)
+        return -1
+    except subprocess.TimeoutExpired:
         print(f"{prefix}Model timed out after {args.timeout}s", file=sys.stderr)
         return -1
     except Exception as e:
@@ -947,6 +918,7 @@ def cmd_list_gated(args):
 def cmd_list_negative(args):
     result = api.list_negative(
         visible_to=_parse_visible_to(args),
+        model=getattr(args, "model", None) or "claude",
         db_path=args.db,
     )
 
@@ -1098,7 +1070,7 @@ def main():
     p.add_argument("-o", "--output", default="proposed-derivations.md",
                    help="Output file for proposals (default: proposed-derivations.md)")
     p.add_argument("-m", "--model", default=None,
-                   help="Model to use: claude or gemini (default: claude)")
+                   help="Model to use (default: claude). Use ollama:<model> for local models")
     p.add_argument("--auto", action="store_true",
                    help="Automatically add proposals (no review step)")
     p.add_argument("--dry-run", action="store_true",
@@ -1202,6 +1174,8 @@ def main():
                    help="Output format for --no-synth (default: compact)")
     p.add_argument("--timeout", type=int, default=300,
                    help="LLM timeout in seconds (default: 300)")
+    p.add_argument("-m", "--model", default=None,
+                   help="Model to use (default: claude). Use ollama:<model> for local models")
 
     # deduplicate
     p = sub.add_parser("deduplicate", help="Find and optionally retract duplicate IN beliefs")
@@ -1220,6 +1194,8 @@ def main():
 
     p = sub.add_parser("list-negative", help="Find IN beliefs describing problems/defects/risks (LLM-classified)")
     p.add_argument("--visible-to", metavar="TAG,TAG", help="Only show nodes whose access_tags are a subset of these tags")
+    p.add_argument("-m", "--model", default=None,
+                   help="Model to use (default: claude). Use ollama:<model> for local models")
 
     sub.add_parser("namespaces", help="List all agent namespaces in the database")
 

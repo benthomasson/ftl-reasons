@@ -1567,11 +1567,12 @@ If none are genuinely negative, return: []
 
 def list_negative(
     visible_to: list[str] | None = None,
+    model: str = "claude",
     db_path: str = DEFAULT_DB,
 ) -> dict:
     """Find IN beliefs that describe problems, defects, or risks.
 
-    Uses keyword pre-filtering then LLM classification via claude -p.
+    Uses keyword pre-filtering then LLM classification via an LLM.
 
     Returns: {"negative": [{"id": str, "text": str}, ...],
               "count": int, "candidates": int, "total": int}
@@ -1605,7 +1606,8 @@ def list_negative(
         lines = [f"- [{nid}] `{text}`" for nid, text in candidates]
         prompt = NEGATIVE_CLASSIFY_PROMPT.format(candidates="\n".join(lines))
 
-        response = ask._invoke_claude(prompt)
+        from .llm import invoke_model
+        response = invoke_model(prompt, model=model)
 
         negative_ids = set()
         for match in re.finditer(r"\[.*?\]", response, re.DOTALL):
