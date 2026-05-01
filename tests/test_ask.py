@@ -165,7 +165,7 @@ class TestCmdAskNoSynth:
 class TestInvokeClaude:
 
     def test_claude_not_in_path(self):
-        with patch("shutil.which", return_value=None):
+        with patch("reasons_lib.llm.shutil.which", return_value=None):
             with pytest.raises(FileNotFoundError, match="claude"):
                 _invoke_claude("test prompt")
 
@@ -175,7 +175,7 @@ class TestAskNoBeliefs:
     def test_empty_network_llm_declines(self, db_path):
         run_cli("init", db_path=db_path)
         refusal = "I don't have enough beliefs in the network to answer this question."
-        with patch("reasons_lib.ask._invoke_claude", return_value=refusal):
+        with patch("reasons_lib.ask.invoke_model", return_value=refusal):
             result = ask("what is the meaning of life", db_path=db_path)
         assert "don't have enough beliefs" in result
 
@@ -183,20 +183,20 @@ class TestAskNoBeliefs:
         run_cli("init", db_path=db_path)
         run_cli("add", "alpha", "Alpha belief about propagation", db_path=db_path)
         refusal = "I don't have enough beliefs in the network to answer this question."
-        with patch("reasons_lib.ask._invoke_claude", return_value=refusal):
+        with patch("reasons_lib.ask.invoke_model", return_value=refusal):
             result = ask("zzzznonexistent", db_path=db_path)
         assert "don't have enough beliefs" in result
 
     def test_timeout_on_empty_returns_no_beliefs_message(self, db_path):
         run_cli("init", db_path=db_path)
-        with patch("reasons_lib.ask._invoke_claude",
+        with patch("reasons_lib.ask.invoke_model",
                     side_effect=subprocess.TimeoutExpired("claude", 300)):
             result = ask("nothing matches", db_path=db_path)
         assert result == NO_BELIEFS_MSG
 
     def test_error_on_empty_returns_no_beliefs_message(self, db_path):
         run_cli("init", db_path=db_path)
-        with patch("reasons_lib.ask._invoke_claude",
+        with patch("reasons_lib.ask.invoke_model",
                     side_effect=RuntimeError("claude crashed")):
             result = ask("nothing matches", db_path=db_path)
         assert result == NO_BELIEFS_MSG
@@ -207,13 +207,13 @@ class TestAskNoBeliefs:
 
         calls = [0]
 
-        def mock_invoke(prompt, timeout=300):
+        def mock_invoke(prompt, model="claude", timeout=300):
             calls[0] += 1
             if calls[0] == 1:
                 return '{"tool": "search_beliefs", "query": "retraction"}'
             raise subprocess.TimeoutExpired("claude", 300)
 
-        with patch("reasons_lib.ask._invoke_claude", side_effect=mock_invoke):
+        with patch("reasons_lib.ask.invoke_model", side_effect=mock_invoke):
             result = ask("zzzznothing", db_path=db_path)
         assert "retraction" in result.lower()
         assert result != NO_BELIEFS_MSG
@@ -224,13 +224,13 @@ class TestAskNoBeliefs:
 
         calls = [0]
 
-        def mock_invoke(prompt, timeout=300):
+        def mock_invoke(prompt, model="claude", timeout=300):
             calls[0] += 1
             if calls[0] == 1:
                 return '{"tool": "search_beliefs", "query": "zzzznothing"}'
             raise subprocess.TimeoutExpired("claude", 300)
 
-        with patch("reasons_lib.ask._invoke_claude", side_effect=mock_invoke):
+        with patch("reasons_lib.ask.invoke_model", side_effect=mock_invoke):
             result = ask("propagation", db_path=db_path)
         assert "propagation" in result.lower()
         assert result != NO_BELIEFS_MSG
@@ -242,7 +242,7 @@ class TestAskWithMockedLLM:
         run_cli("init", db_path=db_path)
         run_cli("add", "a", "Alpha belief", db_path=db_path)
 
-        with patch("reasons_lib.ask._invoke_claude", return_value="The answer is alpha."):
+        with patch("reasons_lib.ask.invoke_model", return_value="The answer is alpha."):
             result = ask("what is alpha?", db_path=db_path)
         assert result == "The answer is alpha."
 
@@ -257,12 +257,12 @@ class TestAskWithMockedLLM:
         ]
         call_count = [0]
 
-        def mock_invoke(prompt, timeout=300):
+        def mock_invoke(prompt, model="claude", timeout=300):
             idx = call_count[0]
             call_count[0] += 1
             return responses[idx]
 
-        with patch("reasons_lib.ask._invoke_claude", side_effect=mock_invoke):
+        with patch("reasons_lib.ask.invoke_model", side_effect=mock_invoke):
             result = ask("how does retraction work?", db_path=db_path)
         assert "retraction" in result.lower() or "Retraction" in result
         assert call_count[0] == 2
@@ -273,13 +273,13 @@ class TestAskWithMockedLLM:
 
         calls = [0]
 
-        def mock_invoke(prompt, timeout=300):
+        def mock_invoke(prompt, model="claude", timeout=300):
             calls[0] += 1
             if calls[0] <= 3:
                 return '{"tool": "search_beliefs", "query": "more"}'
             return "The answer based on alpha [a]."
 
-        with patch("reasons_lib.ask._invoke_claude", side_effect=mock_invoke):
+        with patch("reasons_lib.ask.invoke_model", side_effect=mock_invoke):
             result = ask("alpha", db_path=db_path)
         assert calls[0] == 4
         assert "alpha" in result.lower()
@@ -289,7 +289,7 @@ class TestAskWithMockedLLM:
         run_cli("init", db_path=db_path)
         run_cli("add", "a", "Alpha belief", db_path=db_path)
 
-        with patch("reasons_lib.ask._invoke_claude",
+        with patch("reasons_lib.ask.invoke_model",
                     side_effect=subprocess.TimeoutExpired("claude", 300)):
             result = ask("alpha", db_path=db_path)
         assert "a" in result
@@ -298,7 +298,7 @@ class TestAskWithMockedLLM:
         run_cli("init", db_path=db_path)
         run_cli("add", "a", "Alpha belief", db_path=db_path)
 
-        with patch("reasons_lib.ask._invoke_claude",
+        with patch("reasons_lib.ask.invoke_model",
                     side_effect=RuntimeError("claude crashed")):
             result = ask("alpha", db_path=db_path)
         assert "a" in result
@@ -307,7 +307,7 @@ class TestAskWithMockedLLM:
         run_cli("init", db_path=db_path)
         run_cli("add", "a", "Alpha", db_path=db_path)
 
-        with patch("reasons_lib.ask._invoke_claude",
+        with patch("reasons_lib.ask.invoke_model",
                     return_value='{"tool": "unknown_tool", "query": "x"}'):
             result = ask("question", db_path=db_path)
         assert "unknown_tool" in result
@@ -318,13 +318,13 @@ class TestAskWithMockedLLM:
 
         calls = [0]
 
-        def mock_invoke(prompt, timeout=300):
+        def mock_invoke(prompt, model="claude", timeout=300):
             calls[0] += 1
             if calls[0] <= 3:
                 return '{"tool": "search_beliefs", "query": "more"}'
             raise subprocess.TimeoutExpired("claude", 300)
 
-        with patch("reasons_lib.ask._invoke_claude", side_effect=mock_invoke):
+        with patch("reasons_lib.ask.invoke_model", side_effect=mock_invoke):
             result = ask("alpha", db_path=db_path)
         assert calls[0] == 4
         assert "search_beliefs" not in result
@@ -334,7 +334,7 @@ class TestAskWithMockedLLM:
         run_cli("init", db_path=db_path)
         run_cli("add", "a", "Alpha belief", db_path=db_path)
 
-        with patch("reasons_lib.ask._invoke_claude",
+        with patch("reasons_lib.ask.invoke_model",
                     return_value='{"tool": "search_beliefs", "query": "more"}'):
             result = ask("alpha", db_path=db_path)
         assert "search_beliefs" not in result
