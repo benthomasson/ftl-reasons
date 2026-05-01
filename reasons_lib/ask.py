@@ -161,9 +161,6 @@ def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None
         if tool_call is None:
             return response.strip()
 
-        if iteration == MAX_ITERATIONS - 1:
-            return _beliefs_or_no_match(beliefs_context)
-
         if tool_call.get("tool") == "search_beliefs":
             query = tool_call.get("query", "")
             print(f"  Searching: {query}", file=sys.stderr)
@@ -172,6 +169,16 @@ def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None
             if result and result.strip() != "No results found.":
                 beliefs_context = result
         else:
+            return response.strip()
+
+        if iteration == MAX_ITERATIONS - 1:
+            print(f"Synthesizing (final)...", file=sys.stderr)
+            prompt = build_ask_prompt(question, beliefs_context, tool_history)
+            prompt += FINAL_TURN_INSTRUCTION
+            try:
+                response = _invoke_claude(prompt, timeout=timeout)
+            except (subprocess.TimeoutExpired, Exception):
+                return _beliefs_or_no_match(beliefs_context)
             return response.strip()
 
     return _beliefs_or_no_match(beliefs_context)
