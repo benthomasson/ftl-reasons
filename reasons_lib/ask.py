@@ -29,7 +29,11 @@ Rules:
 - If you need to search for more beliefs, respond with ONLY a single JSON line
   (no other text). The system will run the search and give you the results.
 - Cite belief IDs in [brackets] when referencing specific beliefs.
-- If the beliefs are insufficient to answer, say so honestly.
+- ONLY answer based on the beliefs provided. Do NOT use your training data or
+  general knowledge to fill gaps.
+- If the beliefs are insufficient to answer, respond EXACTLY with:
+  "I don't have enough beliefs in the network to answer this question."
+  Do NOT attempt a partial or speculative answer.
 
 ## Question
 
@@ -112,6 +116,14 @@ def _invoke_claude(prompt, timeout=300):
 
 MAX_ITERATIONS = 3
 
+NO_BELIEFS_MSG = "No matching beliefs found. Cannot answer from the belief network."
+
+
+def _beliefs_or_no_match(beliefs_context):
+    if not beliefs_context or beliefs_context.strip() == "No results found.":
+        return NO_BELIEFS_MSG
+    return beliefs_context
+
 
 def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None):
     """Answer a question using FTS5 belief search and optional LLM synthesis.
@@ -139,10 +151,10 @@ def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None
             response = _invoke_claude(prompt, timeout=timeout)
         except subprocess.TimeoutExpired:
             print(f"LLM timed out after {timeout}s", file=sys.stderr)
-            return beliefs_context
+            return _beliefs_or_no_match(beliefs_context)
         except Exception as e:
             print(f"LLM error: {e}", file=sys.stderr)
-            return beliefs_context
+            return _beliefs_or_no_match(beliefs_context)
 
         tool_call = extract_tool_call(response)
 
@@ -154,7 +166,9 @@ def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None
             print(f"  Searching: {query}", file=sys.stderr)
             result = api.search(query, db_path=db_path, format="markdown")
             tool_history.append({"query": query, "result": result})
+            if result and result.strip() != "No results found.":
+                beliefs_context = result
         else:
             return response.strip()
 
-    return beliefs_context
+    return _beliefs_or_no_match(beliefs_context)
