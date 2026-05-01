@@ -17,6 +17,8 @@ Usage:
     reasons sync-agent aap-expert ~/git/aap-expert/beliefs.md
 """
 
+from pathlib import Path
+
 from . import Justification, Nogood
 from .import_beliefs import parse_beliefs, parse_nogoods
 from .network import Network
@@ -270,6 +272,9 @@ def _import_claims(network, agent_name, claims, source_path, nogoods):
         network, agent_name, source_path
     )
 
+    if source_path:
+        network.repos[agent_name] = str(Path(source_path).resolve().parent)
+
     ordered = _topo_sort_claims(claims)
 
     imported = 0
@@ -335,6 +340,9 @@ def _sync_claims(network, agent_name, claims, source_path, nogoods):
     active_id, inactive_id, created_premise = _ensure_agent_nodes(
         network, agent_name, source_path
     )
+
+    if source_path:
+        network.repos[agent_name] = str(Path(source_path).resolve().parent)
 
     remote_ids = {f"{prefix}{c['id']}" for c in claims}
 

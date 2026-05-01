@@ -448,6 +448,14 @@ def test_retracted_json_belief_survives_propagate(db, tmp_path):
     assert b["truth_value"] == "OUT", "dependent of retracted premise resurrected"
 
 
+def test_import_agent_registers_repo(db, beliefs_file):
+    api.import_agent("test-agent", beliefs_file, db_path=db)
+    repos = api.list_repos(db_path=db)["repos"]
+    assert "test-agent" in repos
+    from pathlib import Path
+    assert repos["test-agent"] == str(Path(beliefs_file).resolve().parent)
+
+
 def test_import_agent_nogoods(db, beliefs_file):
     result = api.import_agent("test-agent", beliefs_file, db_path=db)
     assert result["nogoods_imported"] == 1
