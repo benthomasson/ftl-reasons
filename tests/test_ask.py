@@ -194,6 +194,23 @@ class TestAskNoBeliefs:
             result = ask("nothing matches", db_path=db_path)
         assert result == NO_BELIEFS_MSG
 
+    def test_timeout_after_successful_tool_search_returns_beliefs(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "b", "Beta belief about retraction", db_path=db_path)
+
+        calls = [0]
+
+        def mock_invoke(prompt, timeout=300):
+            calls[0] += 1
+            if calls[0] == 1:
+                return '{"tool": "search_beliefs", "query": "retraction"}'
+            raise subprocess.TimeoutExpired("claude", 300)
+
+        with patch("reasons_lib.ask._invoke_claude", side_effect=mock_invoke):
+            result = ask("zzzznothing", db_path=db_path)
+        assert "retraction" in result.lower()
+        assert result != NO_BELIEFS_MSG
+
 
 class TestAskWithMockedLLM:
 

@@ -166,6 +166,8 @@ def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None
             print(f"  Searching: {query}", file=sys.stderr)
             result = api.search(query, db_path=db_path, format="markdown")
             tool_history.append({"query": query, "result": result})
+            if result and result.strip() != "No results found.":
+                beliefs_context = result
         else:
             return response.strip()
 
