@@ -45,11 +45,6 @@ Rules:
 {tool_history}"""
 
 
-FINAL_TURN_INSTRUCTION = (
-    "\n\n**Final turn — write your answer now, no more tool calls.**"
-)
-
-
 FINAL_ASK_PROMPT = """\
 You are answering a question using a belief network (a Truth Maintenance System).
 Each belief has an ID, text, truth value (IN = held true, OUT = retracted), and
@@ -219,7 +214,13 @@ def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None
             prompt = build_final_prompt(question, beliefs_context, tool_history)
             try:
                 response = _invoke_claude(prompt, timeout=timeout)
-            except (subprocess.TimeoutExpired, Exception):
+            except subprocess.TimeoutExpired:
+                print(f"LLM timed out after {timeout}s", file=sys.stderr)
+                return _beliefs_or_no_match(beliefs_context)
+            except Exception as e:
+                print(f"LLM error: {e}", file=sys.stderr)
+                return _beliefs_or_no_match(beliefs_context)
+            if extract_tool_call(response):
                 return _beliefs_or_no_match(beliefs_context)
             return response.strip()
 
