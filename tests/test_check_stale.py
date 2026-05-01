@@ -63,6 +63,27 @@ class TestResolveSourcePath:
         result = resolve_source_path("entries/topic.md", repos={"entries": repo_dir}, db_dir=db_dir)
         assert result == db_dir / "entries" / "topic.md"
 
+    def test_resolve_via_agent_repo(self, tmp_path):
+        agent_dir = tmp_path / "agent-repo"
+        entry_dir = agent_dir / "entries" / "2026"
+        entry_dir.mkdir(parents=True)
+        f = entry_dir / "topic.md"
+        f.write_text("content")
+        repos = {"code": agent_dir}
+        result = resolve_source_path("entries/2026/topic.md", repos=repos, agent="code")
+        assert result == f
+
+    def test_agent_repo_takes_precedence_over_split(self, tmp_path):
+        agent_dir = tmp_path / "agent-repo"
+        entries_dir = tmp_path / "entries-repo"
+        for d in (agent_dir / "entries", entries_dir):
+            d.mkdir(parents=True)
+        (agent_dir / "entries" / "topic.md").write_text("agent version")
+        (entries_dir / "topic.md").write_text("entries version")
+        repos = {"code": agent_dir, "entries": entries_dir}
+        result = resolve_source_path("entries/topic.md", repos=repos, agent="code")
+        assert result == agent_dir / "entries" / "topic.md"
+
     def test_falls_back_to_repo_when_not_in_db_dir(self, tmp_path):
         db_dir = tmp_path / "expert"
         db_dir.mkdir()
@@ -166,6 +187,47 @@ class TestCheckStale:
 
         results = check_stale(net, repos={"r": tmp_path})
         assert len(results) == 2
+
+    def test_agent_imported_node_resolves_via_agent_repo(self, tmp_path):
+        agent_dir = tmp_path / "agent-repo"
+        entry_dir = agent_dir / "entries"
+        entry_dir.mkdir(parents=True)
+        f = entry_dir / "topic.md"
+        f.write_text("original content")
+        h = hashlib.sha256(b"original content").hexdigest()
+
+        net = Network()
+        net.repos["code"] = str(agent_dir)
+        net.add_node(
+            "code:topic-belief", "Topic belief",
+            source="entries/topic.md", source_hash=h,
+            metadata={"agent": "code"},
+        )
+
+        results = check_stale(net)
+        assert results == []
+
+    def test_agent_imported_node_detects_stale(self, tmp_path):
+        agent_dir = tmp_path / "agent-repo"
+        entry_dir = agent_dir / "entries"
+        entry_dir.mkdir(parents=True)
+        f = entry_dir / "topic.md"
+        f.write_text("original content")
+        h = hashlib.sha256(b"original content").hexdigest()
+
+        net = Network()
+        net.repos["code"] = str(agent_dir)
+        net.add_node(
+            "code:topic-belief", "Topic belief",
+            source="entries/topic.md", source_hash=h,
+            metadata={"agent": "code"},
+        )
+
+        f.write_text("updated content")
+        results = check_stale(net)
+        assert len(results) == 1
+        assert results[0]["node_id"] == "code:topic-belief"
+        assert results[0]["reason"] == "content_changed"
 
 
 class TestHashSources:
