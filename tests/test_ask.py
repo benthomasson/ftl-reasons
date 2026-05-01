@@ -211,6 +211,23 @@ class TestAskNoBeliefs:
         assert "retraction" in result.lower()
         assert result != NO_BELIEFS_MSG
 
+    def test_retry_no_results_preserves_initial_beliefs(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "Alpha belief about propagation", db_path=db_path)
+
+        calls = [0]
+
+        def mock_invoke(prompt, timeout=300):
+            calls[0] += 1
+            if calls[0] == 1:
+                return '{"tool": "search_beliefs", "query": "zzzznothing"}'
+            raise subprocess.TimeoutExpired("claude", 300)
+
+        with patch("reasons_lib.ask._invoke_claude", side_effect=mock_invoke):
+            result = ask("propagation", db_path=db_path)
+        assert "propagation" in result.lower()
+        assert result != NO_BELIEFS_MSG
+
 
 class TestAskWithMockedLLM:
 
