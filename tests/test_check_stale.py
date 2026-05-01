@@ -107,7 +107,7 @@ class TestCheckStale:
         net = Network()
         net.add_node("a", "Premise A", source="entries/topic.md", source_hash=h)
 
-        results = check_stale(net, db_dir=tmp_path)
+        results, _ = check_stale(net, db_dir=tmp_path)
         assert results == []
 
     def test_fresh_node(self, tmp_path):
@@ -118,7 +118,7 @@ class TestCheckStale:
         net = Network()
         net.add_node("a", "Premise A", source="myrepo/source.md", source_hash=h)
 
-        results = check_stale(net, repos={"myrepo": tmp_path})
+        results, _ = check_stale(net, repos={"myrepo": tmp_path})
         assert results == []
 
     def test_stale_node(self, tmp_path):
@@ -132,7 +132,7 @@ class TestCheckStale:
         # Change the file
         f.write_text("updated content")
 
-        results = check_stale(net, repos={"myrepo": tmp_path})
+        results, _ = check_stale(net, repos={"myrepo": tmp_path})
         assert len(results) == 1
         assert results[0]["node_id"] == "a"
         assert results[0]["old_hash"] == old_hash
@@ -150,21 +150,21 @@ class TestCheckStale:
 
         f.write_text("changed")
 
-        results = check_stale(net, repos={"myrepo": tmp_path})
+        results, _ = check_stale(net, repos={"myrepo": tmp_path})
         assert results == []
 
     def test_skips_nodes_without_hash(self, tmp_path):
         net = Network()
         net.add_node("a", "Premise A", source="myrepo/source.md")  # no hash
 
-        results = check_stale(net, repos={"myrepo": tmp_path})
+        results, _ = check_stale(net, repos={"myrepo": tmp_path})
         assert results == []
 
     def test_reports_missing_source_files(self, tmp_path):
         net = Network()
         net.add_node("a", "Premise A", source="myrepo/missing.md", source_hash="abc123")
 
-        results = check_stale(net, repos={"myrepo": tmp_path})
+        results, _ = check_stale(net, repos={"myrepo": tmp_path})
         assert len(results) == 1
         assert results[0]["node_id"] == "a"
         assert results[0]["reason"] == "source_deleted"
@@ -185,7 +185,7 @@ class TestCheckStale:
         f1.write_text("new a")
         f2.write_text("new b")
 
-        results = check_stale(net, repos={"r": tmp_path})
+        results, _ = check_stale(net, repos={"r": tmp_path})
         assert len(results) == 2
 
     def test_agent_imported_node_resolves_via_agent_repo(self, tmp_path):
@@ -204,7 +204,7 @@ class TestCheckStale:
             metadata={"agent": "code"},
         )
 
-        results = check_stale(net)
+        results, _ = check_stale(net)
         assert results == []
 
     def test_agent_imported_node_detects_stale(self, tmp_path):
@@ -224,10 +224,55 @@ class TestCheckStale:
         )
 
         f.write_text("updated content")
-        results = check_stale(net)
+        results, _ = check_stale(net)
         assert len(results) == 1
         assert results[0]["node_id"] == "code:topic-belief"
         assert results[0]["reason"] == "content_changed"
+
+
+class TestPrefixHashUpgrade:
+
+    def test_prefix_hash_treated_as_fresh(self, tmp_path):
+        f = tmp_path / "source.md"
+        f.write_text("hello world")
+        full_hash = hashlib.sha256(b"hello world").hexdigest()
+        truncated = full_hash[:16]
+
+        net = Network()
+        net.add_node("a", "Premise A", source="myrepo/source.md", source_hash=truncated)
+
+        results, upgraded = check_stale(net, repos={"myrepo": tmp_path})
+        assert results == []
+        assert upgraded == 1
+        assert net.nodes["a"].source_hash == full_hash
+
+    def test_genuine_change_still_detected(self, tmp_path):
+        f = tmp_path / "source.md"
+        f.write_text("original content")
+        old_hash = hashlib.sha256(b"original content").hexdigest()[:16]
+
+        net = Network()
+        net.add_node("a", "Premise A", source="myrepo/source.md", source_hash=old_hash)
+
+        f.write_text("different content")
+
+        results, upgraded = check_stale(net, repos={"myrepo": tmp_path})
+        assert len(results) == 1
+        assert results[0]["reason"] == "content_changed"
+        assert upgraded == 0
+
+    def test_full_hash_match_unchanged(self, tmp_path):
+        f = tmp_path / "source.md"
+        f.write_text("hello world")
+        full_hash = hashlib.sha256(b"hello world").hexdigest()
+
+        net = Network()
+        net.add_node("a", "Premise A", source="myrepo/source.md", source_hash=full_hash)
+
+        results, upgraded = check_stale(net, repos={"myrepo": tmp_path})
+        assert results == []
+        assert upgraded == 0
+        assert net.nodes["a"].source_hash == full_hash
 
 
 class TestHashSources:

@@ -1103,7 +1103,7 @@ def check_stale(
 
     db_dir = P(db_path).resolve().parent
 
-    with _with_network(db_path) as net:
+    with _with_network(db_path, write=True) as net:
         repo_paths = repos
         if repo_paths is None and net.repos:
             repo_paths = net.repos
@@ -1114,11 +1114,12 @@ def check_stale(
             1 for n in net.nodes.values()
             if n.truth_value == "IN" and n.source and n.source_hash
         )
-        results = _check(net, repo_paths, db_dir=db_dir)
+        results, upgraded = _check(net, repo_paths, db_dir=db_dir)
         return {
             "stale": results,
             "checked": in_with_source,
             "stale_count": len(results),
+            "upgraded": upgraded,
         }
 
 

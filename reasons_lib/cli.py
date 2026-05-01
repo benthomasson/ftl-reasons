@@ -566,6 +566,9 @@ def cmd_hash_sources(args):
 def cmd_check_stale(args):
     result = api.check_stale(db_path=args.db)
 
+    if result.get("upgraded"):
+        print(f"Upgraded {result['upgraded']} truncated hash(es) to full length.")
+
     if not result["stale"]:
         print(f"All {result['checked']} nodes with sources are fresh.")
         return

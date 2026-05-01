@@ -77,6 +77,7 @@ def check_stale(
         repos = {k: Path(v) for k, v in network.repos.items()}
 
     results = []
+    upgraded = 0
 
     for nid, node in sorted(network.nodes.items()):
         if node.truth_value != "IN":
@@ -99,6 +100,10 @@ def check_stale(
 
         current_hash = hash_file(path)
         if current_hash != node.source_hash:
+            if current_hash.startswith(node.source_hash):
+                node.source_hash = current_hash
+                upgraded += 1
+                continue
             results.append({
                 "node_id": nid,
                 "old_hash": node.source_hash,
@@ -108,7 +113,7 @@ def check_stale(
                 "reason": "content_changed",
             })
 
-    return results
+    return results, upgraded
 
 
 def hash_sources(
