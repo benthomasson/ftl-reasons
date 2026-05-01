@@ -430,3 +430,34 @@ class TestListNegative:
             assert result["negative"][0]["id"] == "b"
             prompt = mock_llm.call_args[0][0]
             assert "critical bug" not in prompt
+
+    def test_single_batch_calls_llm_once(self, db_path):
+        for i in range(5):
+            api.add_node(f"bug-{i}", f"There is a bug in module {i}", db_path=db_path)
+        with patch("reasons_lib.llm.invoke_model", return_value='["bug-0"]') as mock_llm:
+            result = api.list_negative(db_path=db_path)
+            assert mock_llm.call_count == 1
+            assert result["count"] == 1
+
+    def test_batching_large_set(self, db_path):
+        for i in range(120):
+            api.add_node(f"bug-{i:03d}", f"There is a bug in module {i}", db_path=db_path)
+
+        call_count = [0]
+
+        def mock_invoke(prompt, model="claude"):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return '["bug-010", "bug-020"]'
+            elif call_count[0] == 2:
+                return '["bug-060"]'
+            else:
+                return '[]'
+
+        with patch("reasons_lib.llm.invoke_model", side_effect=mock_invoke):
+            result = api.list_negative(db_path=db_path)
+        assert call_count[0] == 3
+        assert result["count"] == 3
+        assert result["candidates"] == 120
+        found_ids = {n["id"] for n in result["negative"]}
+        assert found_ids == {"bug-010", "bug-020", "bug-060"}

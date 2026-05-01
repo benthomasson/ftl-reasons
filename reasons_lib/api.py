@@ -9,6 +9,7 @@ All functions return dicts suitable for JSON serialization.
 
 import json
 import re
+import sys
 from pathlib import Path
 
 from . import Justification
@@ -1534,6 +1535,8 @@ def list_gated(
         return {"blockers": blockers, "gated_count": gated_count, "blocker_count": len(blockers)}
 
 
+NEGATIVE_BATCH_SIZE = 50
+
 NEGATIVE_TERMS = [
     'bug', 'defect', 'missing', 'fail', 'error', 'broken', 'incorrect',
     'wrong', 'risk', 'gap', 'lack', 'vulnerable', 'insecure', 'stale',
@@ -1603,21 +1606,29 @@ def list_negative(
         if not candidates:
             return empty
 
-        lines = [f"- [{nid}] `{text}`" for nid, text in candidates]
-        prompt = NEGATIVE_CLASSIFY_PROMPT.format(candidates="\n".join(lines))
-
         from .llm import invoke_model
-        response = invoke_model(prompt, model=model)
 
         negative_ids = set()
-        for match in re.finditer(r"\[.*?\]", response, re.DOTALL):
-            try:
-                ids = json.loads(match.group())
-                if isinstance(ids, list):
-                    negative_ids = set(ids)
-                    break
-            except json.JSONDecodeError:
-                continue
+        total_batches = (len(candidates) + NEGATIVE_BATCH_SIZE - 1) // NEGATIVE_BATCH_SIZE
+        for i in range(0, len(candidates), NEGATIVE_BATCH_SIZE):
+            batch = candidates[i:i + NEGATIVE_BATCH_SIZE]
+            lines = [f"- [{nid}] `{text}`" for nid, text in batch]
+            prompt = NEGATIVE_CLASSIFY_PROMPT.format(candidates="\n".join(lines))
+
+            batch_num = i // NEGATIVE_BATCH_SIZE + 1
+            print(f"  Classifying batch {batch_num}/{total_batches} "
+                  f"({len(batch)} candidates)...", file=sys.stderr)
+
+            response = invoke_model(prompt, model=model)
+
+            for match in re.finditer(r"\[.*?\]", response, re.DOTALL):
+                try:
+                    ids = json.loads(match.group())
+                    if isinstance(ids, list):
+                        negative_ids.update(ids)
+                        break
+                except json.JSONDecodeError:
+                    continue
 
         candidate_map = {nid: text for nid, text in candidates}
         negative = [
