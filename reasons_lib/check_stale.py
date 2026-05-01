@@ -96,9 +96,19 @@ def check_stale(
 
         current_hash = hash_file(path)
         if current_hash != node.source_hash:
-            if upgrade_hashes and current_hash.startswith(node.source_hash):
-                node.source_hash = current_hash
-                upgraded += 1
+            if current_hash.startswith(node.source_hash):
+                if upgrade_hashes:
+                    node.source_hash = current_hash
+                    upgraded += 1
+                    continue
+                results.append({
+                    "node_id": nid,
+                    "old_hash": node.source_hash,
+                    "new_hash": current_hash,
+                    "source": node.source,
+                    "source_path": str(path),
+                    "reason": "truncated_hash",
+                })
                 continue
             results.append({
                 "node_id": nid,

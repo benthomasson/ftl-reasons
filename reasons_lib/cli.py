@@ -573,7 +573,10 @@ def cmd_check_stale(args):
         print(f"All {result['checked']} nodes with sources are fresh.")
         return
 
-    for item in result["stale"]:
+    truncated = [i for i in result["stale"] if i.get("reason") == "truncated_hash"]
+    stale = [i for i in result["stale"] if i.get("reason") != "truncated_hash"]
+
+    for item in stale:
         if item.get("reason") == "source_deleted":
             print(f"  DELETED  {item['node_id']}")
             print(f"           source: {item['source']}")
@@ -583,9 +586,14 @@ def cmd_check_stale(args):
             print(f"         hash: {item['old_hash']} -> {item['new_hash']}")
         print()
 
+    if truncated:
+        print(f"WARNING: {len(truncated)} node(s) have truncated hashes.")
+        print("  Run 'reasons check-stale --upgrade-hashes' to upgrade them.\n")
+
     fresh = result["checked"] - result["stale_count"]
-    print(f"{fresh} fresh, {result['stale_count']} STALE (of {result['checked']} checked)")
-    sys.exit(1)
+    print(f"{fresh} fresh, {len(stale)} stale (of {result['checked']} checked)")
+    if stale:
+        sys.exit(1)
 
 
 def cmd_compact(args):

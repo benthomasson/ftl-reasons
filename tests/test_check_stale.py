@@ -247,7 +247,7 @@ class TestPrefixHashUpgrade:
         assert upgraded == 1
         assert net.nodes["a"].source_hash == full_hash
 
-    def test_prefix_hash_without_flag_reports_stale(self, tmp_path):
+    def test_prefix_hash_without_flag_warns(self, tmp_path):
         f = tmp_path / "source.md"
         f.write_text("hello world")
         full_hash = hashlib.sha256(b"hello world").hexdigest()
@@ -258,7 +258,7 @@ class TestPrefixHashUpgrade:
 
         results, upgraded = check_stale(net, repos={"myrepo": tmp_path})
         assert len(results) == 1
-        assert results[0]["reason"] == "content_changed"
+        assert results[0]["reason"] == "truncated_hash"
         assert upgraded == 0
         assert net.nodes["a"].source_hash == truncated
 
