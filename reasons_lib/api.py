@@ -1092,18 +1092,23 @@ def export_markdown(visible_to: list[str] | None = None, db_path: str = DEFAULT_
 
 def check_stale(
     repos: dict[str, str] | None = None,
+    upgrade_hashes: bool = False,
     db_path: str = DEFAULT_DB,
 ) -> dict:
     """Check all IN nodes for source file staleness.
 
-    Returns: {"stale": list[dict], "checked": int, "stale_count": int}
+    If upgrade_hashes=True, truncated hashes that prefix-match the current
+    full hash are upgraded in place and saved to the database.
+
+    Returns: {"stale": list[dict], "checked": int, "stale_count": int,
+              "upgraded": int}
     """
     from pathlib import Path as P
     from .check_stale import check_stale as _check
 
     db_dir = P(db_path).resolve().parent
 
-    with _with_network(db_path, write=True) as net:
+    with _with_network(db_path, write=upgrade_hashes) as net:
         repo_paths = repos
         if repo_paths is None and net.repos:
             repo_paths = net.repos
@@ -1114,7 +1119,8 @@ def check_stale(
             1 for n in net.nodes.values()
             if n.truth_value == "IN" and n.source and n.source_hash
         )
-        results, upgraded = _check(net, repo_paths, db_dir=db_dir)
+        results, upgraded = _check(net, repo_paths, db_dir=db_dir,
+                                   upgrade_hashes=upgrade_hashes)
         return {
             "stale": results,
             "checked": in_with_source,

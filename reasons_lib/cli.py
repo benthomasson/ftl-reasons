@@ -564,7 +564,7 @@ def cmd_hash_sources(args):
 
 
 def cmd_check_stale(args):
-    result = api.check_stale(db_path=args.db)
+    result = api.check_stale(upgrade_hashes=args.upgrade_hashes, db_path=args.db)
 
     if result.get("upgraded"):
         print(f"Upgraded {result['upgraded']} truncated hash(es) to full length.")
@@ -1162,7 +1162,9 @@ def main():
     p.add_argument("--force", action="store_true", help="Re-hash all nodes, even those with existing hashes")
 
     # check-stale
-    sub.add_parser("check-stale", help="Check IN nodes for source file staleness")
+    p = sub.add_parser("check-stale", help="Check IN nodes for source file staleness")
+    p.add_argument("--upgrade-hashes", action="store_true",
+                   help="Upgrade truncated hashes to full length in place")
 
     # compact
     p = sub.add_parser("compact", help="Token-budgeted belief state summary")

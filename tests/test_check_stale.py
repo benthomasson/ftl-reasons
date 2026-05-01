@@ -241,10 +241,26 @@ class TestPrefixHashUpgrade:
         net = Network()
         net.add_node("a", "Premise A", source="myrepo/source.md", source_hash=truncated)
 
-        results, upgraded = check_stale(net, repos={"myrepo": tmp_path})
+        results, upgraded = check_stale(net, repos={"myrepo": tmp_path},
+                                        upgrade_hashes=True)
         assert results == []
         assert upgraded == 1
         assert net.nodes["a"].source_hash == full_hash
+
+    def test_prefix_hash_without_flag_reports_stale(self, tmp_path):
+        f = tmp_path / "source.md"
+        f.write_text("hello world")
+        full_hash = hashlib.sha256(b"hello world").hexdigest()
+        truncated = full_hash[:16]
+
+        net = Network()
+        net.add_node("a", "Premise A", source="myrepo/source.md", source_hash=truncated)
+
+        results, upgraded = check_stale(net, repos={"myrepo": tmp_path})
+        assert len(results) == 1
+        assert results[0]["reason"] == "content_changed"
+        assert upgraded == 0
+        assert net.nodes["a"].source_hash == truncated
 
     def test_genuine_change_still_detected(self, tmp_path):
         f = tmp_path / "source.md"
@@ -256,7 +272,8 @@ class TestPrefixHashUpgrade:
 
         f.write_text("different content")
 
-        results, upgraded = check_stale(net, repos={"myrepo": tmp_path})
+        results, upgraded = check_stale(net, repos={"myrepo": tmp_path},
+                                        upgrade_hashes=True)
         assert len(results) == 1
         assert results[0]["reason"] == "content_changed"
         assert upgraded == 0
@@ -269,7 +286,8 @@ class TestPrefixHashUpgrade:
         net = Network()
         net.add_node("a", "Premise A", source="myrepo/source.md", source_hash=full_hash)
 
-        results, upgraded = check_stale(net, repos={"myrepo": tmp_path})
+        results, upgraded = check_stale(net, repos={"myrepo": tmp_path},
+                                        upgrade_hashes=True)
         assert results == []
         assert upgraded == 0
         assert net.nodes["a"].source_hash == full_hash

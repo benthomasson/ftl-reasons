@@ -60,18 +60,14 @@ def check_stale(
     network: Network,
     repos: dict[str, Path] | None = None,
     db_dir: Path | None = None,
-) -> list[dict]:
+    upgrade_hashes: bool = False,
+) -> tuple[list[dict], int]:
     """Check all IN nodes for source staleness.
 
-    Returns a list of dicts for each stale or missing-source node::
+    If upgrade_hashes=True, truncated hashes that are a prefix of the
+    current full hash are upgraded in place (caller must save the network).
 
-        # Content changed on disk:
-        {"node_id": str, "old_hash": str, "new_hash": str,
-         "source": str, "source_path": str, "reason": "content_changed"}
-
-        # Source file no longer exists:
-        {"node_id": str, "old_hash": str, "new_hash": None,
-         "source": str, "source_path": None, "reason": "source_deleted"}
+    Returns (stale_results, upgraded_count).
     """
     if repos is None and network.repos:
         repos = {k: Path(v) for k, v in network.repos.items()}
@@ -100,7 +96,7 @@ def check_stale(
 
         current_hash = hash_file(path)
         if current_hash != node.source_hash:
-            if current_hash.startswith(node.source_hash):
+            if upgrade_hashes and current_hash.startswith(node.source_hash):
                 node.source_hash = current_hash
                 upgraded += 1
                 continue
