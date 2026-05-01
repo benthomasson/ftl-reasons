@@ -590,7 +590,7 @@ def cmd_check_stale(args):
         print(f"WARNING: {len(truncated)} node(s) have truncated hashes.")
         print("  Run 'reasons check-stale --upgrade-hashes' to upgrade them.\n")
 
-    fresh = result["checked"] - len(stale) - len(truncated) - result.get("upgraded", 0)
+    fresh = result["checked"] - len(stale)
     print(f"{fresh} fresh, {len(stale)} stale (of {result['checked']} checked)")
     if stale:
         sys.exit(1)
