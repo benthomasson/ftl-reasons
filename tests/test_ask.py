@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from reasons_lib.ask import extract_tool_call, build_ask_prompt, ask, _invoke_claude, NO_BELIEFS_MSG
+from reasons_lib.ask import extract_tool_call, build_ask_prompt, build_final_prompt, ask, _invoke_claude, NO_BELIEFS_MSG
 from reasons_lib.cli import main
 
 
@@ -94,6 +94,13 @@ class TestBuildAskPrompt:
         prompt = build_ask_prompt("question", "context")
         assert "search_beliefs" in prompt
         assert '"tool"' in prompt
+
+    def test_final_prompt_has_no_tool_definition(self):
+        prompt = build_final_prompt("question", "context")
+        assert "search_beliefs" not in prompt
+        assert '"tool"' not in prompt
+        assert "question" in prompt
+        assert "context" in prompt
 
 
 class TestAskNoSynth:
