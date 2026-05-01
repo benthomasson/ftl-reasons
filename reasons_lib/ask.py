@@ -158,8 +158,11 @@ def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None
 
         tool_call = extract_tool_call(response)
 
-        if tool_call is None or iteration == MAX_ITERATIONS - 1:
+        if tool_call is None:
             return response.strip()
+
+        if iteration == MAX_ITERATIONS - 1:
+            return _beliefs_or_no_match(beliefs_context)
 
         if tool_call.get("tool") == "search_beliefs":
             query = tool_call.get("query", "")

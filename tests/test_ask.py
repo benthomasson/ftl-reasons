@@ -260,16 +260,17 @@ class TestAskWithMockedLLM:
         assert "retraction" in result.lower() or "Retraction" in result
         assert call_count[0] == 2
 
-    def test_max_iterations_forces_answer(self, db_path):
+    def test_max_iterations_returns_beliefs_not_tool_call(self, db_path):
         run_cli("init", db_path=db_path)
-        run_cli("add", "a", "Alpha", db_path=db_path)
+        run_cli("add", "a", "Alpha belief", db_path=db_path)
 
         def always_tool_call(prompt, timeout=300):
             return '{"tool": "search_beliefs", "query": "more"}'
 
         with patch("reasons_lib.ask._invoke_claude", side_effect=always_tool_call):
-            result = ask("question", db_path=db_path)
-        assert "search_beliefs" in result
+            result = ask("alpha", db_path=db_path)
+        assert "search_beliefs" not in result
+        assert "Alpha" in result or result == NO_BELIEFS_MSG
 
     def test_timeout_returns_search_results(self, db_path):
         run_cli("init", db_path=db_path)
