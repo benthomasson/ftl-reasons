@@ -96,7 +96,7 @@ def check_stale(
 
         current_hash = hash_file(path)
         if current_hash != node.source_hash:
-            if current_hash.startswith(node.source_hash):
+            if len(node.source_hash) == 16 and current_hash.startswith(node.source_hash):
                 if upgrade_hashes:
                     node.source_hash = current_hash
                     upgraded += 1
