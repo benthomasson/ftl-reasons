@@ -45,9 +45,28 @@ Rules:
 {tool_history}"""
 
 
-FINAL_TURN_INSTRUCTION = (
-    "\n\n**Final turn — write your answer now, no more tool calls.**"
-)
+FINAL_ASK_PROMPT = """\
+You are answering a question using a belief network (a Truth Maintenance System).
+Each belief has an ID, text, truth value (IN = held true, OUT = retracted), and
+may have justifications tracing why it is believed.
+
+Rules:
+- Cite belief IDs in [brackets] when referencing specific beliefs.
+- ONLY answer based on the beliefs provided. Do NOT use your training data or
+  general knowledge to fill gaps.
+- If the beliefs are insufficient to answer, respond EXACTLY with:
+  "I don't have enough beliefs in the network to answer this question."
+  Do NOT attempt a partial or speculative answer.
+- Write your answer now.
+
+## Question
+
+{question}
+
+## Belief matches
+
+{beliefs_context}
+{tool_history}"""
 
 
 def extract_tool_call(text):
@@ -82,6 +101,25 @@ def build_ask_prompt(question, beliefs_context, tool_history=None):
         history_section = "\n\n## Additional search results\n\n" + "\n\n---\n\n".join(parts)
 
     return ASK_PROMPT.format(
+        question=question,
+        beliefs_context=beliefs_context,
+        tool_history=history_section,
+    )
+
+
+def build_final_prompt(question, beliefs_context, tool_history=None):
+    """Build prompt for final synthesis — no tool definition."""
+    history_section = ""
+    if tool_history:
+        parts = []
+        for entry in tool_history:
+            parts.append(
+                f"### Tool call: search_beliefs(\"{entry['query']}\")\n\n"
+                f"{entry['result']}"
+            )
+        history_section = "\n\n## Additional search results\n\n" + "\n\n---\n\n".join(parts)
+
+    return FINAL_ASK_PROMPT.format(
         question=question,
         beliefs_context=beliefs_context,
         tool_history=history_section,
@@ -139,10 +177,10 @@ def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None
     tool_history = []
 
     for iteration in range(MAX_ITERATIONS):
-        prompt = build_ask_prompt(question, beliefs_context, tool_history)
-
         if iteration == MAX_ITERATIONS - 1:
-            prompt += FINAL_TURN_INSTRUCTION
+            prompt = build_final_prompt(question, beliefs_context, tool_history)
+        else:
+            prompt = build_ask_prompt(question, beliefs_context, tool_history)
 
         print(f"Synthesizing (round {iteration + 1}/{MAX_ITERATIONS})...",
               file=sys.stderr)
@@ -158,7 +196,7 @@ def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None
 
         tool_call = extract_tool_call(response)
 
-        if tool_call is None or iteration == MAX_ITERATIONS - 1:
+        if tool_call is None:
             return response.strip()
 
         if tool_call.get("tool") == "search_beliefs":
@@ -169,6 +207,21 @@ def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None
             if result and result.strip() != "No results found.":
                 beliefs_context = result
         else:
+            return response.strip()
+
+        if iteration == MAX_ITERATIONS - 1:
+            print(f"Synthesizing (final)...", file=sys.stderr)
+            prompt = build_final_prompt(question, beliefs_context, tool_history)
+            try:
+                response = _invoke_claude(prompt, timeout=timeout)
+            except subprocess.TimeoutExpired:
+                print(f"LLM timed out after {timeout}s", file=sys.stderr)
+                return _beliefs_or_no_match(beliefs_context)
+            except Exception as e:
+                print(f"LLM error: {e}", file=sys.stderr)
+                return _beliefs_or_no_match(beliefs_context)
+            if extract_tool_call(response):
+                return _beliefs_or_no_match(beliefs_context)
             return response.strip()
 
     return _beliefs_or_no_match(beliefs_context)

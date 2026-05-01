@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from reasons_lib.ask import extract_tool_call, build_ask_prompt, ask, _invoke_claude, NO_BELIEFS_MSG
+from reasons_lib.ask import extract_tool_call, build_ask_prompt, build_final_prompt, ask, _invoke_claude, NO_BELIEFS_MSG
 from reasons_lib.cli import main
 
 
@@ -94,6 +94,13 @@ class TestBuildAskPrompt:
         prompt = build_ask_prompt("question", "context")
         assert "search_beliefs" in prompt
         assert '"tool"' in prompt
+
+    def test_final_prompt_has_no_tool_definition(self):
+        prompt = build_final_prompt("question", "context")
+        assert "search_beliefs" not in prompt
+        assert '"tool"' not in prompt
+        assert "question" in prompt
+        assert "context" in prompt
 
 
 class TestAskNoSynth:
@@ -260,16 +267,23 @@ class TestAskWithMockedLLM:
         assert "retraction" in result.lower() or "Retraction" in result
         assert call_count[0] == 2
 
-    def test_max_iterations_forces_answer(self, db_path):
+    def test_final_tool_call_triggers_extra_synthesis(self, db_path):
         run_cli("init", db_path=db_path)
-        run_cli("add", "a", "Alpha", db_path=db_path)
+        run_cli("add", "a", "Alpha belief", db_path=db_path)
 
-        def always_tool_call(prompt, timeout=300):
-            return '{"tool": "search_beliefs", "query": "more"}'
+        calls = [0]
 
-        with patch("reasons_lib.ask._invoke_claude", side_effect=always_tool_call):
-            result = ask("question", db_path=db_path)
-        assert "search_beliefs" in result
+        def mock_invoke(prompt, timeout=300):
+            calls[0] += 1
+            if calls[0] <= 3:
+                return '{"tool": "search_beliefs", "query": "more"}'
+            return "The answer based on alpha [a]."
+
+        with patch("reasons_lib.ask._invoke_claude", side_effect=mock_invoke):
+            result = ask("alpha", db_path=db_path)
+        assert calls[0] == 4
+        assert "alpha" in result.lower()
+        assert "search_beliefs" not in result
 
     def test_timeout_returns_search_results(self, db_path):
         run_cli("init", db_path=db_path)
@@ -297,3 +311,31 @@ class TestAskWithMockedLLM:
                     return_value='{"tool": "unknown_tool", "query": "x"}'):
             result = ask("question", db_path=db_path)
         assert "unknown_tool" in result
+
+    def test_extra_synthesis_timeout_returns_beliefs(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "Alpha belief", db_path=db_path)
+
+        calls = [0]
+
+        def mock_invoke(prompt, timeout=300):
+            calls[0] += 1
+            if calls[0] <= 3:
+                return '{"tool": "search_beliefs", "query": "more"}'
+            raise subprocess.TimeoutExpired("claude", 300)
+
+        with patch("reasons_lib.ask._invoke_claude", side_effect=mock_invoke):
+            result = ask("alpha", db_path=db_path)
+        assert calls[0] == 4
+        assert "search_beliefs" not in result
+        assert "Alpha" in result or result == NO_BELIEFS_MSG
+
+    def test_extra_synthesis_tool_call_returns_beliefs(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "Alpha belief", db_path=db_path)
+
+        with patch("reasons_lib.ask._invoke_claude",
+                    return_value='{"tool": "search_beliefs", "query": "more"}'):
+            result = ask("alpha", db_path=db_path)
+        assert "search_beliefs" not in result
+        assert "Alpha" in result or result == NO_BELIEFS_MSG
