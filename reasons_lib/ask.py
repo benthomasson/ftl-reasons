@@ -119,6 +119,12 @@ MAX_ITERATIONS = 3
 NO_BELIEFS_MSG = "No matching beliefs found. Cannot answer from the belief network."
 
 
+def _beliefs_or_no_match(beliefs_context):
+    if not beliefs_context or beliefs_context.strip() == "No results found.":
+        return NO_BELIEFS_MSG
+    return beliefs_context
+
+
 def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None):
     """Answer a question using FTS5 belief search and optional LLM synthesis.
 
@@ -129,9 +135,6 @@ def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None
         return api.search(question, db_path=db_path, format=fmt)
 
     beliefs_context = api.search(question, db_path=db_path, format="markdown")
-
-    if not beliefs_context or beliefs_context.strip() == "No results found.":
-        return NO_BELIEFS_MSG
 
     tool_history = []
 
@@ -148,10 +151,10 @@ def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None
             response = _invoke_claude(prompt, timeout=timeout)
         except subprocess.TimeoutExpired:
             print(f"LLM timed out after {timeout}s", file=sys.stderr)
-            return beliefs_context
+            return _beliefs_or_no_match(beliefs_context)
         except Exception as e:
             print(f"LLM error: {e}", file=sys.stderr)
-            return beliefs_context
+            return _beliefs_or_no_match(beliefs_context)
 
         tool_call = extract_tool_call(response)
 
@@ -166,4 +169,4 @@ def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None
         else:
             return response.strip()
 
-    return beliefs_context
+    return _beliefs_or_no_match(beliefs_context)
