@@ -21,6 +21,12 @@ class TestResolveModelCmd:
     def test_resolve_ollama_with_tag(self):
         assert resolve_model_cmd("ollama:qwen3.5:27b") == ["ollama", "run", "qwen3.5:27b"]
 
+    def test_resolve_claude_submodel(self):
+        assert resolve_model_cmd("claude:sonnet") == ["claude", "-p", "--model", "sonnet"]
+
+    def test_resolve_claude_submodel_full_name(self):
+        assert resolve_model_cmd("claude:claude-sonnet-4-6") == ["claude", "-p", "--model", "claude-sonnet-4-6"]
+
     def test_resolve_unknown_raises(self):
         with pytest.raises(ValueError, match="Unknown model"):
             resolve_model_cmd("gpt-4")

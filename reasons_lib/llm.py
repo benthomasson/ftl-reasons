@@ -1,8 +1,9 @@
 """Shared LLM invocation via CLI subprocesses.
 
-Supports named models (claude, gemini) and ollama models via
-'ollama:<model>' syntax. All invocations pipe prompts to stdin
-and read responses from stdout.
+Supports named models (claude, gemini), Claude submodels via
+'claude:<model>' syntax, and ollama models via 'ollama:<model>'
+syntax. All invocations pipe prompts to stdin and read responses
+from stdout.
 """
 
 import os
@@ -19,15 +20,19 @@ MODEL_COMMANDS = {
 def resolve_model_cmd(model: str) -> list[str]:
     """Resolve a model name to a CLI command list.
 
-    Supports named models ('claude', 'gemini') and ollama models
+    Supports named models ('claude', 'gemini'), Claude submodels
+    via 'claude:<model>' (e.g. 'claude:sonnet'), and ollama models
     via 'ollama:<model>' syntax (e.g. 'ollama:gemma3:4b').
     """
     if model in MODEL_COMMANDS:
         return MODEL_COMMANDS[model]
+    if model.startswith("claude:"):
+        submodel = model.split(":", 1)[1]
+        return ["claude", "-p", "--model", submodel]
     if model.startswith("ollama:"):
         ollama_model = model.split(":", 1)[1]
         return ["ollama", "run", ollama_model]
-    available = list(MODEL_COMMANDS) + ["ollama:<model>"]
+    available = list(MODEL_COMMANDS) + ["claude:<model>", "ollama:<model>"]
     raise ValueError(f"Unknown model: {model}. Available: {available}")
 
 
