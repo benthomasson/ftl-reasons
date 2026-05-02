@@ -15,6 +15,9 @@ from . import api
 from .llm import invoke_model
 
 
+_CITE_RULE = "- Cite belief IDs in [brackets] when referencing specific beliefs."
+_CITE_RULE_NATURAL = "- Do not cite belief IDs. Answer in plain natural language."
+
 ASK_PROMPT = """\
 You are answering a question using a belief network (a Truth Maintenance System).
 Each belief has an ID, text, truth value (IN = held true, OUT = retracted), and
@@ -29,7 +32,7 @@ Rules:
   answer directly. Do NOT call the tool.
 - If you need to search for more beliefs, respond with ONLY a single JSON line
   (no other text). The system will run the search and give you the results.
-- Cite belief IDs in [brackets] when referencing specific beliefs.
+{cite_rule}
 - ONLY answer based on the beliefs provided. Do NOT use your training data or
   general knowledge to fill gaps.
 - If the beliefs are insufficient to answer, respond EXACTLY with:
@@ -52,7 +55,7 @@ Each belief has an ID, text, truth value (IN = held true, OUT = retracted), and
 may have justifications tracing why it is believed.
 
 Rules:
-- Cite belief IDs in [brackets] when referencing specific beliefs.
+{cite_rule}
 - ONLY answer based on the beliefs provided. Do NOT use your training data or
   general knowledge to fill gaps.
 - If the beliefs are insufficient to answer, respond EXACTLY with:
@@ -76,7 +79,7 @@ Each belief has an ID, text, truth value (IN = held true, OUT = retracted), and
 may have justifications tracing why it is believed.
 
 Rules:
-- Cite belief IDs in [brackets] when referencing specific beliefs.
+{cite_rule}
 - ONLY answer based on the beliefs provided. Do NOT use your training data or
   general knowledge to fill gaps.
 - If the beliefs are insufficient to answer, respond EXACTLY with:
@@ -92,11 +95,12 @@ Rules:
 {beliefs_context}"""
 
 
-def build_simple_prompt(question, beliefs_context):
+def build_simple_prompt(question, beliefs_context, natural=False):
     """Build prompt for simple single-pass synthesis — no tool definitions."""
     return SIMPLE_ASK_PROMPT.format(
         question=question,
         beliefs_context=beliefs_context,
+        cite_rule=_CITE_RULE_NATURAL if natural else _CITE_RULE,
     )
 
 
@@ -119,7 +123,7 @@ def extract_tool_call(text):
     return None
 
 
-def build_ask_prompt(question, beliefs_context, tool_history=None):
+def build_ask_prompt(question, beliefs_context, tool_history=None, natural=False):
     """Build the full prompt for LLM synthesis."""
     history_section = ""
     if tool_history:
@@ -135,10 +139,11 @@ def build_ask_prompt(question, beliefs_context, tool_history=None):
         question=question,
         beliefs_context=beliefs_context,
         tool_history=history_section,
+        cite_rule=_CITE_RULE_NATURAL if natural else _CITE_RULE,
     )
 
 
-def build_final_prompt(question, beliefs_context, tool_history=None):
+def build_final_prompt(question, beliefs_context, tool_history=None, natural=False):
     """Build prompt for final synthesis — no tool definition."""
     history_section = ""
     if tool_history:
@@ -154,6 +159,7 @@ def build_final_prompt(question, beliefs_context, tool_history=None):
         question=question,
         beliefs_context=beliefs_context,
         tool_history=history_section,
+        cite_rule=_CITE_RULE_NATURAL if natural else _CITE_RULE,
     )
 
 
@@ -185,6 +191,14 @@ def _strip_belief_metadata(beliefs_context):
         if line.startswith("**Supported by:**"):
             continue
         if line.startswith("**Supports:**"):
+            continue
+        if line.startswith("**Depended on by:**"):
+            continue
+        if line.startswith("**Related nodes:**"):
+            continue
+        if re.match(r'^- \*\*\S+\*\* \((?:IN|OUT)\):', line):
+            continue
+        if line.strip() == "---":
             continue
         out.append(line)
     result = "\n".join(out).strip()
@@ -358,7 +372,7 @@ def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None
         if not beliefs_context.strip():
             return NO_BELIEFS_MSG
 
-        prompt = build_simple_prompt(question, beliefs_context)
+        prompt = build_simple_prompt(question, beliefs_context, natural=natural)
         print("Synthesizing (simple)...", file=sys.stderr)
         try:
             response = invoke_model(prompt, model=model, timeout=timeout)
@@ -384,9 +398,9 @@ def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None
 
     for iteration in range(MAX_ITERATIONS):
         if iteration == MAX_ITERATIONS - 1:
-            prompt = build_final_prompt(question, beliefs_context, tool_history)
+            prompt = build_final_prompt(question, beliefs_context, tool_history, natural=natural)
         else:
-            prompt = build_ask_prompt(question, beliefs_context, tool_history)
+            prompt = build_ask_prompt(question, beliefs_context, tool_history, natural=natural)
 
         print(f"Synthesizing (round {iteration + 1}/{MAX_ITERATIONS})...",
               file=sys.stderr)
@@ -417,7 +431,7 @@ def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None
 
         if iteration == MAX_ITERATIONS - 1:
             print(f"Synthesizing (final)...", file=sys.stderr)
-            prompt = build_final_prompt(question, beliefs_context, tool_history)
+            prompt = build_final_prompt(question, beliefs_context, tool_history, natural=natural)
             try:
                 response = invoke_model(prompt, model=model, timeout=timeout)
             except subprocess.TimeoutExpired:

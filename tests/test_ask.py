@@ -358,6 +358,15 @@ class TestBuildSimplePrompt:
         assert "search_beliefs" not in prompt
         assert '"tool"' not in prompt
 
+    def test_natural_mode_no_cite(self):
+        prompt = build_simple_prompt("question", "context", natural=True)
+        assert "Cite belief IDs" not in prompt
+        assert "plain natural language" in prompt
+
+    def test_default_has_cite(self):
+        prompt = build_simple_prompt("question", "context")
+        assert "Cite belief IDs in [brackets]" in prompt
+
 
 class TestAskSimple:
 
@@ -446,6 +455,27 @@ class TestStripBeliefMetadata:
         result = _strip_belief_metadata(context)
         assert "**Supports:**" not in result
 
+    def test_strips_depended_on_by(self):
+        context = "**Depended on by:** x, y\nBelief text."
+        result = _strip_belief_metadata(context)
+        assert "**Depended on by:**" not in result
+        assert "Belief text." in result
+
+    def test_strips_related_nodes(self):
+        context = "**Related nodes:**\n\n- **foo** (IN): Some text\n- **bar** (OUT): Other text\nBelief text."
+        result = _strip_belief_metadata(context)
+        assert "**Related nodes:**" not in result
+        assert "- **foo**" not in result
+        assert "- **bar**" not in result
+        assert "Belief text." in result
+
+    def test_strips_separator(self):
+        context = "Belief A.\n\n---\n\nBelief B."
+        result = _strip_belief_metadata(context)
+        assert "---" not in result
+        assert "Belief A." in result
+        assert "Belief B." in result
+
     def test_preserves_plain_text(self):
         context = "Propagation uses BFS.\nRetraction cascades through dependents."
         result = _strip_belief_metadata(context)
@@ -470,11 +500,17 @@ class TestStripBeliefMetadata:
             "**Source:** code:network.py\n"
             "**Depends on:** core-algo\n"
             "**Supported by:** impl-detail\n"
+            "**Depended on by:** retract-cascade\n"
             "\n"
             "### retract-cascade\n"
             "**Status:** IN\n"
             "Retraction cascades through dependents.\n"
             "**Justification:** SL(prop-bfs)\n"
+            "\n"
+            "---\n"
+            "**Related nodes:**\n"
+            "\n"
+            "- **core-algo** (IN): Core algorithm implementation\n"
         )
         result = _strip_belief_metadata(context)
         assert "Propagation uses breadth-first search." in result
@@ -483,6 +519,10 @@ class TestStripBeliefMetadata:
         assert "**Status:**" not in result
         assert "**Source:**" not in result
         assert "**Depends on:**" not in result
+        assert "**Depended on by:**" not in result
+        assert "**Related nodes:**" not in result
+        assert "---" not in result
+        assert "- **core-algo**" not in result
 
 
 class TestSearchSourceChunks:
@@ -566,6 +606,27 @@ class TestAskNatural:
         assert "### " not in prompt
         assert "propagation" in prompt.lower()
 
+    def test_natural_removes_cite_instruction(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "Alpha belief", db_path=db_path)
+
+        with patch("reasons_lib.ask.invoke_model",
+                    return_value="Natural answer.") as mock_llm:
+            ask("alpha", db_path=db_path, simple=True, natural=True)
+        prompt = mock_llm.call_args[0][0]
+        assert "Cite belief IDs" not in prompt
+        assert "plain natural language" in prompt
+
+    def test_non_natural_has_cite_instruction(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "Alpha belief", db_path=db_path)
+
+        with patch("reasons_lib.ask.invoke_model",
+                    return_value="Answer.") as mock_llm:
+            ask("alpha", db_path=db_path, simple=True, natural=False)
+        prompt = mock_llm.call_args[0][0]
+        assert "Cite belief IDs in [brackets]" in prompt
+
     def test_natural_in_full_mode(self, db_path):
         run_cli("init", db_path=db_path)
         run_cli("add", "a", "Alpha belief", db_path=db_path)
@@ -576,6 +637,8 @@ class TestAskNatural:
         prompt = mock_llm.call_args[0][0]
         assert "**Status:**" not in prompt
         assert "### " not in prompt
+        assert "Cite belief IDs" not in prompt
+        assert "plain natural language" in prompt
 
 
 class TestAskWithSources:
