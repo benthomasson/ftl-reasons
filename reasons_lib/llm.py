@@ -13,7 +13,7 @@ import subprocess
 
 MODEL_COMMANDS = {
     "claude": ["claude", "-p"],
-    "gemini": ["gemini", "-p", ""],
+    "gemini": ["gemini", "--skip-trust", "-p", ""],
 }
 
 
@@ -21,18 +21,22 @@ def resolve_model_cmd(model: str) -> list[str]:
     """Resolve a model name to a CLI command list.
 
     Supports named models ('claude', 'gemini'), Claude submodels
-    via 'claude:<model>' (e.g. 'claude:sonnet'), and ollama models
-    via 'ollama:<model>' syntax (e.g. 'ollama:gemma3:4b').
+    via 'claude:<model>' (e.g. 'claude:sonnet'), Gemini submodels
+    via 'gemini:<model>' (e.g. 'gemini:gemini-2.5-flash'), and
+    ollama models via 'ollama:<model>' syntax (e.g. 'ollama:gemma3:4b').
     """
     if model in MODEL_COMMANDS:
         return MODEL_COMMANDS[model]
     if model.startswith("claude:"):
         submodel = model.split(":", 1)[1]
         return ["claude", "-p", "--model", submodel]
+    if model.startswith("gemini:"):
+        submodel = model.split(":", 1)[1]
+        return ["gemini", "--skip-trust", "-m", submodel, "-p", ""]
     if model.startswith("ollama:"):
         ollama_model = model.split(":", 1)[1]
         return ["ollama", "run", ollama_model]
-    available = list(MODEL_COMMANDS) + ["claude:<model>", "ollama:<model>"]
+    available = list(MODEL_COMMANDS) + ["claude:<model>", "gemini:<model>", "ollama:<model>"]
     raise ValueError(f"Unknown model: {model}. Available: {available}")
 
 
@@ -60,4 +64,9 @@ def invoke_model(prompt: str, model: str = "claude", timeout: int = 300) -> str:
     )
     if result.returncode != 0:
         raise RuntimeError(f"{model} failed: {result.stderr}")
-    return result.stdout
+    output = result.stdout
+    if model.startswith("ollama:") and "Thinking...\n" in output:
+        parts = output.split("...done thinking.\n", 1)
+        if len(parts) == 2:
+            output = parts[1]
+    return output
