@@ -633,6 +633,7 @@ def cmd_ask(args):
         no_synth=args.no_synth,
         format=getattr(args, "format", None),
         model=args.model or "claude",
+        simple=args.simple,
     )
     print(result)
 
@@ -1176,6 +1177,8 @@ def main():
                    help="LLM timeout in seconds (default: 300)")
     p.add_argument("-m", "--model", default=None,
                    help="Model to use (default: claude). Use ollama:<model> for local models")
+    p.add_argument("--simple", action="store_true",
+                   help="Single-pass synthesis with pre-retrieved beliefs (better for smaller models)")
 
     # deduplicate
     p = sub.add_parser("deduplicate", help="Find and optionally retract duplicate IN beliefs")

@@ -68,6 +68,36 @@ Rules:
 {tool_history}"""
 
 
+SIMPLE_ASK_PROMPT = """\
+You are answering a question using a belief network (a Truth Maintenance System).
+Each belief has an ID, text, truth value (IN = held true, OUT = retracted), and
+may have justifications tracing why it is believed.
+
+Rules:
+- Cite belief IDs in [brackets] when referencing specific beliefs.
+- ONLY answer based on the beliefs provided. Do NOT use your training data or
+  general knowledge to fill gaps.
+- If the beliefs are insufficient to answer, respond EXACTLY with:
+  "I don't have enough beliefs in the network to answer this question."
+  Do NOT attempt a partial or speculative answer.
+
+## Question
+
+{question}
+
+## Belief matches
+
+{beliefs_context}"""
+
+
+def build_simple_prompt(question, beliefs_context):
+    """Build prompt for simple single-pass synthesis — no tool definitions."""
+    return SIMPLE_ASK_PROMPT.format(
+        question=question,
+        beliefs_context=beliefs_context,
+    )
+
+
 def extract_tool_call(text):
     """Extract a tool call from LLM response text.
 
@@ -142,7 +172,7 @@ def _beliefs_or_no_match(beliefs_context):
 
 
 def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None,
-        model="claude"):
+        model="claude", simple=False):
     """Answer a question using FTS5 belief search and optional LLM synthesis.
 
     Returns the answer text.
@@ -150,6 +180,23 @@ def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None
     if no_synth:
         fmt = format or "compact"
         return api.search(question, db_path=db_path, format=fmt)
+
+    if simple:
+        beliefs_context = api.search(question, db_path=db_path, format="markdown",
+                                     depth=2)
+        if not beliefs_context or beliefs_context.strip() == "No results found.":
+            return NO_BELIEFS_MSG
+        prompt = build_simple_prompt(question, beliefs_context)
+        print("Synthesizing (simple)...", file=sys.stderr)
+        try:
+            response = invoke_model(prompt, model=model, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            print(f"LLM timed out after {timeout}s", file=sys.stderr)
+            return _beliefs_or_no_match(beliefs_context)
+        except Exception as e:
+            print(f"LLM error: {e}", file=sys.stderr)
+            return _beliefs_or_no_match(beliefs_context)
+        return response.strip()
 
     beliefs_context = api.search(question, db_path=db_path, format="markdown")
 
