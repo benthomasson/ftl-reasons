@@ -1,5 +1,6 @@
 """Tests for the ask module (FTS5 search + LLM synthesis)."""
 
+import sqlite3
 import subprocess
 import sys
 from io import StringIO
@@ -7,7 +8,11 @@ from unittest.mock import patch
 
 import pytest
 
-from reasons_lib.ask import extract_tool_call, build_ask_prompt, build_final_prompt, build_simple_prompt, ask, _invoke_claude, NO_BELIEFS_MSG
+from reasons_lib.ask import (
+    extract_tool_call, build_ask_prompt, build_final_prompt, build_simple_prompt,
+    ask, _invoke_claude, _strip_belief_metadata, _search_source_chunks,
+    NO_BELIEFS_MSG,
+)
 from reasons_lib.cli import main
 
 
@@ -399,3 +404,282 @@ class TestAskSimple:
         prompt = mock_llm.call_args[0][0]
         assert "search_beliefs" not in prompt
         assert '"tool"' not in prompt
+
+
+class TestStripBeliefMetadata:
+
+    def test_strips_header_lines(self):
+        context = "### my-belief\n**Status:** IN\nThe actual belief text.\n"
+        result = _strip_belief_metadata(context)
+        assert "### my-belief" not in result
+        assert "The actual belief text." in result
+
+    def test_strips_status(self):
+        context = "**Status:** IN\nBelief text."
+        result = _strip_belief_metadata(context)
+        assert "**Status:**" not in result
+        assert "Belief text." in result
+
+    def test_strips_source(self):
+        context = "**Source:** repo:file.py\nBelief text."
+        result = _strip_belief_metadata(context)
+        assert "**Source:**" not in result
+        assert "Belief text." in result
+
+    def test_strips_depends_on(self):
+        context = "**Depends on:** a, b\nBelief text."
+        result = _strip_belief_metadata(context)
+        assert "**Depends on:**" not in result
+
+    def test_strips_justification(self):
+        context = "**Justification:** SL(a)\nBelief text."
+        result = _strip_belief_metadata(context)
+        assert "**Justification:**" not in result
+
+    def test_strips_supported_by(self):
+        context = "**Supported by:** x, y\nBelief text."
+        result = _strip_belief_metadata(context)
+        assert "**Supported by:**" not in result
+
+    def test_strips_supports(self):
+        context = "**Supports:** z\nBelief text."
+        result = _strip_belief_metadata(context)
+        assert "**Supports:**" not in result
+
+    def test_preserves_plain_text(self):
+        context = "Propagation uses BFS.\nRetraction cascades through dependents."
+        result = _strip_belief_metadata(context)
+        assert result == context
+
+    def test_collapses_blank_lines(self):
+        context = "Text A.\n\n\n\n\nText B."
+        result = _strip_belief_metadata(context)
+        assert "\n\n\n" not in result
+        assert "Text A." in result
+        assert "Text B." in result
+
+    def test_empty_input(self):
+        assert _strip_belief_metadata("") == ""
+        assert _strip_belief_metadata(None) is None
+
+    def test_full_markdown_format(self):
+        context = (
+            "### prop-bfs\n"
+            "**Status:** IN\n"
+            "Propagation uses breadth-first search.\n"
+            "**Source:** code:network.py\n"
+            "**Depends on:** core-algo\n"
+            "**Supported by:** impl-detail\n"
+            "\n"
+            "### retract-cascade\n"
+            "**Status:** IN\n"
+            "Retraction cascades through dependents.\n"
+            "**Justification:** SL(prop-bfs)\n"
+        )
+        result = _strip_belief_metadata(context)
+        assert "Propagation uses breadth-first search." in result
+        assert "Retraction cascades through dependents." in result
+        assert "### " not in result
+        assert "**Status:**" not in result
+        assert "**Source:**" not in result
+        assert "**Depends on:**" not in result
+
+
+class TestSearchSourceChunks:
+
+    @pytest.fixture
+    def sources_db(self, tmp_path):
+        db = str(tmp_path / "sources.db")
+        conn = sqlite3.connect(db)
+        conn.execute("""
+            CREATE TABLE chunks (
+                id INTEGER PRIMARY KEY,
+                text TEXT,
+                cluster TEXT,
+                filename TEXT,
+                section TEXT
+            )
+        """)
+        conn.execute("""
+            INSERT INTO chunks (id, text, cluster, filename, section)
+            VALUES (1, 'Red Hat Summit 2025 is in Boston', 'events', 'events.md', 'Summit')
+        """)
+        conn.execute("""
+            INSERT INTO chunks (id, text, cluster, filename, section)
+            VALUES (2, 'OpenShift supports Kubernetes workloads', 'products', 'openshift.md', NULL)
+        """)
+        conn.execute("""
+            INSERT INTO chunks (id, text, cluster, filename, section)
+            VALUES (3, 'Ansible automates IT infrastructure', 'products', 'ansible.md', 'Overview')
+        """)
+        conn.execute("""
+            CREATE VIRTUAL TABLE chunks_fts USING fts5(text, content=chunks, content_rowid=id)
+        """)
+        conn.execute("INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild')")
+        conn.commit()
+        conn.close()
+        return db
+
+    def test_returns_matching_chunks(self, sources_db):
+        result = _search_source_chunks("Red Hat Summit", sources_db)
+        assert "Red Hat Summit 2025 is in Boston" in result
+        assert "events.md" in result
+
+    def test_includes_section_in_header(self, sources_db):
+        result = _search_source_chunks("Summit Boston", sources_db)
+        assert "> Summit" in result
+
+    def test_no_section_omits_separator(self, sources_db):
+        result = _search_source_chunks("OpenShift Kubernetes", sources_db)
+        assert "openshift.md" in result
+        assert "> " not in result.split("openshift.md")[1].split("\n")[0]
+
+    def test_no_matches_returns_empty(self, sources_db):
+        result = _search_source_chunks("zzzznonexistent", sources_db)
+        assert result == ""
+
+    def test_single_char_words_filtered(self, sources_db):
+        result = _search_source_chunks("a b c", sources_db)
+        assert result == ""
+
+    def test_bad_db_returns_empty(self, tmp_path):
+        result = _search_source_chunks("test", str(tmp_path / "nonexistent.db"))
+        assert result == ""
+
+    def test_respects_top_k(self, sources_db):
+        result = _search_source_chunks("Red Hat", sources_db, top_k=1)
+        assert "### [1]" in result
+        assert "### [2]" not in result
+
+
+class TestAskNatural:
+
+    def test_natural_strips_metadata(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "Alpha belief about propagation", db_path=db_path)
+
+        with patch("reasons_lib.ask.invoke_model",
+                    return_value="Natural answer.") as mock_llm:
+            result = ask("propagation", db_path=db_path, simple=True, natural=True)
+        prompt = mock_llm.call_args[0][0]
+        assert "**Status:**" not in prompt
+        assert "### " not in prompt
+        assert "propagation" in prompt.lower()
+
+    def test_natural_in_full_mode(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "Alpha belief", db_path=db_path)
+
+        with patch("reasons_lib.ask.invoke_model",
+                    return_value="Answer from full mode.") as mock_llm:
+            result = ask("alpha", db_path=db_path, natural=True)
+        prompt = mock_llm.call_args[0][0]
+        assert "**Status:**" not in prompt
+        assert "### " not in prompt
+
+
+class TestAskWithSources:
+
+    @pytest.fixture
+    def sources_db(self, tmp_path):
+        db = str(tmp_path / "sources.db")
+        conn = sqlite3.connect(db)
+        conn.execute("""
+            CREATE TABLE chunks (
+                id INTEGER PRIMARY KEY, text TEXT, cluster TEXT,
+                filename TEXT, section TEXT
+            )
+        """)
+        conn.execute("""
+            INSERT INTO chunks VALUES (1, 'Summit is in June 2025', 'ev', 'events.md', 'Dates')
+        """)
+        conn.execute("""
+            CREATE VIRTUAL TABLE chunks_fts USING fts5(text, content=chunks, content_rowid=id)
+        """)
+        conn.execute("INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild')")
+        conn.commit()
+        conn.close()
+        return db
+
+    def test_sources_appended_to_context(self, db_path, sources_db):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "Summit info belief", db_path=db_path)
+
+        with patch("reasons_lib.ask.invoke_model",
+                    return_value="Answer with sources.") as mock_llm:
+            result = ask("Summit", db_path=db_path, simple=True,
+                         sources_db=sources_db)
+        prompt = mock_llm.call_args[0][0]
+        assert "Source Documents" in prompt
+        assert "Summit is in June 2025" in prompt
+        assert "events.md" in prompt
+
+    def test_sources_only_when_beliefs_empty(self, db_path, sources_db):
+        run_cli("init", db_path=db_path)
+
+        with patch("reasons_lib.ask.invoke_model",
+                    return_value="Answer from sources only.") as mock_llm:
+            result = ask("Summit", db_path=db_path, simple=True,
+                         sources_db=sources_db)
+        assert result == "Answer from sources only."
+
+    def test_no_sources_match_returns_no_beliefs(self, db_path, sources_db):
+        run_cli("init", db_path=db_path)
+
+        result = ask("zzzznonexistent", db_path=db_path, simple=True,
+                     sources_db=sources_db)
+        assert result == NO_BELIEFS_MSG
+
+
+class TestAskDual:
+
+    @pytest.fixture
+    def sources_db(self, tmp_path):
+        db = str(tmp_path / "sources.db")
+        conn = sqlite3.connect(db)
+        conn.execute("""
+            CREATE TABLE chunks (
+                id INTEGER PRIMARY KEY, text TEXT, cluster TEXT,
+                filename TEXT, section TEXT
+            )
+        """)
+        conn.execute("""
+            INSERT INTO chunks VALUES (1, 'Doc about alpha topic', 'docs', 'alpha.md', NULL)
+        """)
+        conn.execute("""
+            CREATE VIRTUAL TABLE chunks_fts USING fts5(text, content=chunks, content_rowid=id)
+        """)
+        conn.execute("INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild')")
+        conn.commit()
+        conn.close()
+        return db
+
+    def test_dual_calls_three_times(self, db_path, sources_db):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "Alpha belief", db_path=db_path)
+
+        calls = [0]
+
+        def mock_invoke(prompt, model="claude", timeout=300):
+            calls[0] += 1
+            if calls[0] == 1:
+                return "TMS answer about alpha [a]."
+            elif calls[0] == 2:
+                return "FTS answer about alpha [alpha.md]."
+            else:
+                return "Merged: alpha is described in both sources."
+
+        with patch("reasons_lib.ask.invoke_model", side_effect=mock_invoke):
+            result = ask("alpha", db_path=db_path, simple=True, dual=True,
+                         sources_db=sources_db)
+        assert calls[0] == 3
+        assert "Merged" in result
+
+    def test_dual_without_sources_db_skips(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "Alpha belief", db_path=db_path)
+
+        with patch("reasons_lib.ask.invoke_model",
+                    return_value="Normal answer."):
+            result = ask("alpha", db_path=db_path, simple=True, dual=True)
+        assert result == "Normal answer."
