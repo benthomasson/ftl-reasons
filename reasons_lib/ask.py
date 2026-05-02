@@ -181,9 +181,9 @@ def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None
         fmt = format or "compact"
         return api.search(question, db_path=db_path, format=fmt)
 
-    beliefs_context = api.search(question, db_path=db_path, format="markdown")
-
     if simple:
+        beliefs_context = api.search(question, db_path=db_path, format="markdown",
+                                     depth=2)
         if not beliefs_context or beliefs_context.strip() == "No results found.":
             return NO_BELIEFS_MSG
         prompt = build_simple_prompt(question, beliefs_context)
@@ -197,6 +197,8 @@ def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None
             print(f"LLM error: {e}", file=sys.stderr)
             return _beliefs_or_no_match(beliefs_context)
         return response.strip()
+
+    beliefs_context = api.search(question, db_path=db_path, format="markdown")
 
     tool_history = []
 

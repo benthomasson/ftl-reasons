@@ -1231,11 +1231,12 @@ def lookup(query: str, visible_to: list[str] | None = None, db_path: str = DEFAU
         return "\n".join(parts)
 
 
-def search(query: str, visible_to: list[str] | None = None, db_path: str = DEFAULT_DB, format: str = "markdown") -> str:
+def search(query: str, visible_to: list[str] | None = None, db_path: str = DEFAULT_DB,
+           format: str = "markdown", depth: int = 1) -> str:
     """Search nodes using full-text search with neighbor expansion.
 
     Uses SQLite FTS5 for ranked all-terms matching. Returns matched nodes
-    plus their immediate neighbors (dependencies and dependents) formatted
+    plus their neighbors (dependencies and dependents) formatted
     as readable markdown.
 
     Falls back to substring matching if FTS5 table is not available.
@@ -1245,6 +1246,7 @@ def search(query: str, visible_to: list[str] | None = None, db_path: str = DEFAU
         visible_to: only return nodes whose access_tags are a subset
         db_path: path to RMS database
         format: output format — "markdown" (default), "json", or "minimal"
+        depth: number of hops to expand along justification chains (default: 1)
 
     Returns: formatted string with matched nodes and neighbors
     """
@@ -1267,20 +1269,27 @@ def search(query: str, visible_to: list[str] | None = None, db_path: str = DEFAU
             if not matched_ids:
                 return "No results found."
 
-        # Expand to include neighbors (1-hop in dependency graph)
+        # Expand to include neighbors (BFS along dependency graph)
         neighbor_ids = set()
-        for nid in matched_ids:
-            if nid in net.nodes:
+        frontier = set(matched_ids)
+        visited = set(matched_ids)
+        for _ in range(depth):
+            next_frontier = set()
+            for nid in frontier:
+                if nid not in net.nodes:
+                    continue
                 node = net.nodes[nid]
-                # Dependencies (antecedents from justifications)
                 for j in node.justifications:
                     for ant_id in j.antecedents:
-                        if ant_id in net.nodes:
+                        if ant_id in net.nodes and ant_id not in visited:
                             neighbor_ids.add(ant_id)
-                # Dependents (nodes that depend on this one)
+                            next_frontier.add(ant_id)
                 for dep_id in node.dependents:
-                    if dep_id in net.nodes:
+                    if dep_id in net.nodes and dep_id not in visited:
                         neighbor_ids.add(dep_id)
+                        next_frontier.add(dep_id)
+            visited |= next_frontier
+            frontier = next_frontier
 
         # Remove already-matched nodes from neighbors
         neighbor_ids -= set(matched_ids)

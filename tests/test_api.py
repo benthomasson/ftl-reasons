@@ -291,6 +291,28 @@ class TestFtsSearch:
         result = api.search("quantum computing blockchain", db_path=db_path, format="compact")
         assert "a" not in result
 
+    def test_depth_1_includes_direct_antecedents(self, db_path):
+        api.add_node("premise", "Propagation uses BFS", db_path=db_path)
+        api.add_node("derived", "Propagation is safe", sl="premise", db_path=db_path)
+        result = api.search("safe", db_path=db_path, format="compact", depth=1)
+        assert "premise" in result
+
+    def test_depth_2_includes_transitive_antecedents(self, db_path):
+        api.add_node("root", "BFS traversal algorithm", db_path=db_path)
+        api.add_node("mid", "Propagation uses BFS", sl="root", db_path=db_path)
+        api.add_node("leaf", "Propagation is safe", sl="mid", db_path=db_path)
+        result_d1 = api.search("safe", db_path=db_path, format="compact", depth=1)
+        result_d2 = api.search("safe", db_path=db_path, format="compact", depth=2)
+        assert "root" not in result_d1
+        assert "root" in result_d2
+
+    def test_depth_0_no_expansion(self, db_path):
+        api.add_node("premise", "Propagation uses BFS", db_path=db_path)
+        api.add_node("derived", "Propagation is safe", sl="premise", db_path=db_path)
+        result = api.search("safe", db_path=db_path, format="compact", depth=0)
+        assert "premise" not in result
+        assert "derived" in result
+
 
 class TestListGated:
 
