@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from reasons_lib.ask import extract_tool_call, build_ask_prompt, build_final_prompt, ask, _invoke_claude, NO_BELIEFS_MSG
+from reasons_lib.ask import extract_tool_call, build_ask_prompt, build_final_prompt, build_simple_prompt, ask, _invoke_claude, NO_BELIEFS_MSG
 from reasons_lib.cli import main
 
 
@@ -339,3 +339,63 @@ class TestAskWithMockedLLM:
             result = ask("alpha", db_path=db_path)
         assert "search_beliefs" not in result
         assert "Alpha" in result or result == NO_BELIEFS_MSG
+
+
+class TestBuildSimplePrompt:
+
+    def test_contains_question_and_context(self):
+        prompt = build_simple_prompt("What is BFS?", "Some belief context")
+        assert "What is BFS?" in prompt
+        assert "Some belief context" in prompt
+
+    def test_no_tool_definition(self):
+        prompt = build_simple_prompt("question", "context")
+        assert "search_beliefs" not in prompt
+        assert '"tool"' not in prompt
+
+
+class TestAskSimple:
+
+    def test_simple_direct_answer(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "Alpha belief about propagation", db_path=db_path)
+
+        with patch("reasons_lib.ask.invoke_model",
+                    return_value="Propagation uses BFS [a].") as mock_llm:
+            result = ask("propagation", db_path=db_path, simple=True)
+        assert result == "Propagation uses BFS [a]."
+        assert mock_llm.call_count == 1
+
+    def test_simple_no_results(self, db_path):
+        run_cli("init", db_path=db_path)
+        result = ask("zzzznonexistent", db_path=db_path, simple=True)
+        assert result == NO_BELIEFS_MSG
+
+    def test_simple_timeout_returns_beliefs(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "Alpha belief", db_path=db_path)
+
+        with patch("reasons_lib.ask.invoke_model",
+                    side_effect=subprocess.TimeoutExpired("claude", 300)):
+            result = ask("alpha", db_path=db_path, simple=True)
+        assert "Alpha" in result
+
+    def test_simple_error_returns_beliefs(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "Alpha belief", db_path=db_path)
+
+        with patch("reasons_lib.ask.invoke_model",
+                    side_effect=RuntimeError("model crashed")):
+            result = ask("alpha", db_path=db_path, simple=True)
+        assert "Alpha" in result
+
+    def test_simple_prompt_has_no_tool_definition(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "Alpha belief", db_path=db_path)
+
+        with patch("reasons_lib.ask.invoke_model",
+                    return_value="Answer.") as mock_llm:
+            ask("alpha", db_path=db_path, simple=True)
+        prompt = mock_llm.call_args[0][0]
+        assert "search_beliefs" not in prompt
+        assert '"tool"' not in prompt
