@@ -636,6 +636,7 @@ def cmd_ask(args):
         simple=args.simple,
         sources_db=args.full_sources,
         natural=args.natural,
+        dual=args.dual,
     )
     print(result)
 
@@ -1185,6 +1186,8 @@ def main():
                    help="Also search source document chunks from FTS5 index (e.g. rag_fts.db)")
     p.add_argument("--natural", action="store_true",
                    help="Strip belief IDs, status, and justification metadata from context")
+    p.add_argument("--dual", action="store_true",
+                   help="Run TMS and FTS RAG separately, then merge (requires --full-sources)")
 
     # deduplicate
     p = sub.add_parser("deduplicate", help="Find and optionally retract duplicate IN beliefs")

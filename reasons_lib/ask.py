@@ -229,6 +229,77 @@ def _search_source_chunks(question, sources_db, top_k=10):
     return "\n\n---\n\n".join(parts)
 
 
+FTS_RAG_PROMPT = """\
+You are a Red Hat domain expert answering questions using retrieved document excerpts.
+
+Below are the most relevant excerpts from Red Hat internal documents, retrieved via
+full-text search. Use them to answer the question. Cite your sources by referencing
+the document filename in [brackets].
+
+If the excerpts don't contain enough information to answer the question, say so honestly.
+Do not fabricate information that isn't in the provided excerpts.
+
+## Retrieved Documents
+
+{context}
+
+## Question
+
+{question}
+
+## Instructions
+
+- Answer the question based on the retrieved documents above
+- Cite sources using [filename] notation
+- If information is insufficient, say what you can and note the gaps
+- Be specific and concise
+"""
+
+MERGE_PROMPT = """\
+You are merging two answers to the same question. Each answer was produced
+independently using a different retrieval method:
+
+- Answer A used a structured belief network with dependency chains
+- Answer B used full-text search over source documents
+
+Produce a single merged answer that:
+- Combines information from both answers
+- When both answers cover the same point, use the more specific/detailed version
+- Preserve all citations (belief IDs in [brackets] from Answer A, [filenames] from Answer B)
+- Do not add information that neither answer contains
+- If the answers contradict each other, note the disagreement
+
+## Question
+
+{question}
+
+## Answer A (Belief Network)
+
+{answer_tms}
+
+## Answer B (Source Documents)
+
+{answer_fts}
+"""
+
+
+def _fts_rag_answer(question, sources_db, model="claude", timeout=300):
+    """Run FTS5 RAG over source document chunks and synthesize an answer."""
+    context = _search_source_chunks(question, sources_db)
+    if not context:
+        return "No relevant documents found for this question."
+    prompt = FTS_RAG_PROMPT.format(context=context, question=question)
+    return invoke_model(prompt, model=model, timeout=timeout).strip()
+
+
+def _merge_answers(question, answer_tms, answer_fts, model="claude", timeout=300):
+    """Merge two answers from different retrieval paths."""
+    prompt = MERGE_PROMPT.format(
+        question=question, answer_tms=answer_tms, answer_fts=answer_fts,
+    )
+    return invoke_model(prompt, model=model, timeout=timeout).strip()
+
+
 MAX_ITERATIONS = 3
 
 NO_BELIEFS_MSG = "No matching beliefs found. Cannot answer from the belief network."
@@ -241,7 +312,7 @@ def _beliefs_or_no_match(beliefs_context):
 
 
 def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None,
-        model="claude", simple=False, sources_db=None, natural=False):
+        model="claude", simple=False, sources_db=None, natural=False, dual=False):
     """Answer a question using FTS5 belief search and optional LLM synthesis.
 
     Args:
@@ -250,9 +321,22 @@ def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None
                     belief context for fuller coverage.
         natural: strip belief IDs, status markers, and justification metadata
                  from context, presenting beliefs as plain natural language.
+        dual: run TMS and FTS RAG in separate calls, then merge the two
+              answers in a third call. Requires sources_db.
 
     Returns the answer text.
     """
+    if dual and sources_db:
+        print("Dual path: running TMS...", file=sys.stderr)
+        answer_tms = ask(question, db_path=db_path, timeout=timeout,
+                         model=model, simple=simple)
+        print("Dual path: running FTS RAG...", file=sys.stderr)
+        answer_fts = _fts_rag_answer(question, sources_db, model=model,
+                                     timeout=timeout)
+        print("Dual path: merging answers...", file=sys.stderr)
+        return _merge_answers(question, answer_tms, answer_fts, model=model,
+                              timeout=timeout)
+
     if no_synth:
         fmt = format or "compact"
         return api.search(question, db_path=db_path, format=fmt)
