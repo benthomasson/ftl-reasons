@@ -634,6 +634,8 @@ def cmd_ask(args):
         format=getattr(args, "format", None),
         model=args.model or "claude",
         simple=args.simple,
+        sources_db=args.full_sources,
+        natural=args.natural,
     )
     print(result)
 
@@ -1179,6 +1181,10 @@ def main():
                    help="Model to use (default: claude). Use ollama:<model> for local models")
     p.add_argument("--simple", action="store_true",
                    help="Single-pass synthesis with pre-retrieved beliefs (better for smaller models)")
+    p.add_argument("--full-sources", default=None, metavar="FTS_DB",
+                   help="Also search source document chunks from FTS5 index (e.g. rag_fts.db)")
+    p.add_argument("--natural", action="store_true",
+                   help="Strip belief IDs, status, and justification metadata from context")
 
     # deduplicate
     p = sub.add_parser("deduplicate", help="Find and optionally retract duplicate IN beliefs")

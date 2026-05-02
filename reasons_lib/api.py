@@ -1320,21 +1320,47 @@ def _fts_query(conn, terms: list[str]) -> list[str]:
     return [row[0] for row in cursor.fetchall()]
 
 
+_STOP_WORDS = frozenset({
+    "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
+    "have", "has", "had", "do", "does", "did", "will", "would", "could",
+    "should", "may", "might", "shall", "can", "need", "must",
+    "in", "on", "at", "to", "for", "of", "with", "by", "from", "as",
+    "into", "through", "during", "before", "after", "above", "below",
+    "between", "under", "over", "about", "against", "along", "among",
+    "and", "but", "or", "nor", "not", "so", "yet", "both", "either",
+    "neither", "each", "every", "all", "any", "few", "more", "most",
+    "other", "some", "such", "no", "only", "own", "same", "than",
+    "too", "very", "just", "also", "now", "how", "what", "when", "where",
+    "which", "who", "whom", "why", "this", "that", "these", "those",
+    "it", "its", "he", "she", "they", "them", "his", "her", "their",
+    "we", "you", "your", "my", "our", "me", "us", "him",
+    "if", "then", "else", "while", "until", "unless",
+    "there", "here", "up", "out", "off",
+    "specific", "specifically", "particular", "particularly",
+    "included", "including", "within", "between",
+})
+
+
 def _fts_search(query: str, db_path: str) -> list[str]:
     """Search using FTS5 full-text index with porter stemming and progressive relaxation."""
+    import re
     import sqlite3
     from itertools import combinations
     try:
         conn = sqlite3.connect(db_path)
         try:
-            terms = [t for t in query.strip().split() if t]
+            raw_terms = re.findall(r'\w+', query)
+            terms = [t for t in raw_terms if t.lower() not in _STOP_WORDS and len(t) > 1]
+            if not terms:
+                terms = [t for t in raw_terms if len(t) > 1]
             if not terms:
                 return []
 
             results = _fts_query(conn, terms)
 
             if not results and len(terms) > 2:
-                for n in range(len(terms) - 1, max(0, len(terms) - 3), -1):
+                min_terms = max(1, len(terms) // 2)
+                for n in range(len(terms) - 1, min_terms - 1, -1):
                     for combo in combinations(terms, n):
                         results = _fts_query(conn, list(combo))
                         if results:

@@ -6,6 +6,8 @@ request additional belief searches.
 """
 
 import json
+import re
+import sqlite3
 import subprocess
 import sys
 
@@ -160,6 +162,73 @@ def _invoke_claude(prompt, timeout=300):
     return invoke_model(prompt, model="claude", timeout=timeout)
 
 
+def _strip_belief_metadata(beliefs_context):
+    """Strip IDs, status markers, and justification metadata from belief context.
+
+    Converts structured belief format to plain natural language paragraphs.
+    """
+    if not beliefs_context:
+        return beliefs_context
+    lines = beliefs_context.split("\n")
+    out = []
+    for line in lines:
+        if line.startswith("### "):
+            continue
+        if line.startswith("**Status:**"):
+            continue
+        if line.startswith("**Source:**"):
+            continue
+        if line.startswith("**Depends on:**"):
+            continue
+        if line.startswith("**Justification:**"):
+            continue
+        if line.startswith("**Supported by:**"):
+            continue
+        if line.startswith("**Supports:**"):
+            continue
+        out.append(line)
+    result = "\n".join(out).strip()
+    result = re.sub(r'\n{3,}', '\n\n', result)
+    return result
+
+
+def _search_source_chunks(question, sources_db, top_k=10):
+    """Search FTS5 index of source document chunks."""
+    words = re.findall(r'\w+', question)
+    words = [w for w in words if len(w) > 1]
+    if not words:
+        return ""
+    fts_query = " OR ".join(f'"{w}"' for w in words)
+
+    try:
+        conn = sqlite3.connect(sources_db)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT c.text, c.cluster, c.filename, c.section
+            FROM chunks_fts
+            JOIN chunks c ON c.id = chunks_fts.rowid
+            WHERE chunks_fts MATCH ?
+            ORDER BY chunks_fts.rank
+            LIMIT ?
+        """, (fts_query, top_k))
+        rows = cur.fetchall()
+        conn.close()
+    except (sqlite3.OperationalError, sqlite3.DatabaseError):
+        return ""
+
+    if not rows:
+        return ""
+
+    parts = []
+    for i, row in enumerate(rows, 1):
+        header = f"[{i}] {row['filename']}"
+        if row["section"]:
+            header += f" > {row['section']}"
+        parts.append(f"### {header}\n\n{row['text']}")
+    return "\n\n---\n\n".join(parts)
+
+
 MAX_ITERATIONS = 3
 
 NO_BELIEFS_MSG = "No matching beliefs found. Cannot answer from the belief network."
@@ -172,8 +241,15 @@ def _beliefs_or_no_match(beliefs_context):
 
 
 def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None,
-        model="claude", simple=False):
+        model="claude", simple=False, sources_db=None, natural=False):
     """Answer a question using FTS5 belief search and optional LLM synthesis.
+
+    Args:
+        sources_db: path to FTS5 index of source document chunks (rag_fts.db).
+                    When provided, appends retrieved document excerpts to the
+                    belief context for fuller coverage.
+        natural: strip belief IDs, status markers, and justification metadata
+                 from context, presenting beliefs as plain natural language.
 
     Returns the answer text.
     """
@@ -185,7 +261,19 @@ def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None
         beliefs_context = api.search(question, db_path=db_path, format="markdown",
                                      depth=2)
         if not beliefs_context or beliefs_context.strip() == "No results found.":
+            beliefs_context = ""
+
+        if natural and beliefs_context:
+            beliefs_context = _strip_belief_metadata(beliefs_context)
+
+        if sources_db:
+            sources_context = _search_source_chunks(question, sources_db)
+            if sources_context:
+                beliefs_context = beliefs_context + "\n\n## Source Documents\n\n" + sources_context
+
+        if not beliefs_context.strip():
             return NO_BELIEFS_MSG
+
         prompt = build_simple_prompt(question, beliefs_context)
         print("Synthesizing (simple)...", file=sys.stderr)
         try:
@@ -199,6 +287,14 @@ def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None
         return response.strip()
 
     beliefs_context = api.search(question, db_path=db_path, format="markdown")
+
+    if natural and beliefs_context:
+        beliefs_context = _strip_belief_metadata(beliefs_context)
+
+    if sources_db:
+        sources_context = _search_source_chunks(question, sources_db)
+        if sources_context:
+            beliefs_context = (beliefs_context or "") + "\n\n## Source Documents\n\n" + sources_context
 
     tool_history = []
 
