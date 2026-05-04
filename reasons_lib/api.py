@@ -9,7 +9,9 @@ All functions return dicts suitable for JSON serialization.
 
 import json
 import re
+import sqlite3
 import sys
+from itertools import combinations
 from pathlib import Path
 
 from . import Justification
@@ -1343,9 +1345,6 @@ _STOP_WORDS = frozenset({
 
 def _fts_search(query: str, db_path: str) -> list[str]:
     """Search using FTS5 full-text index with porter stemming and progressive relaxation."""
-    import re
-    import sqlite3
-    from itertools import combinations
     try:
         conn = sqlite3.connect(db_path)
         try:
@@ -1421,7 +1420,6 @@ def _format_markdown(net, matched_ids: list[str], neighbor_ids: set[str]) -> str
 
 def _format_json(net, matched_ids: list[str], neighbor_ids: set[str]) -> str:
     """Format results as JSON."""
-    import json
     results = []
     for nid in matched_ids:
         node = net.nodes[nid]

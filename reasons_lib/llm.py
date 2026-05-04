@@ -65,6 +65,7 @@ def invoke_model(prompt: str, model: str = "claude", timeout: int = 300) -> str:
     if result.returncode != 0:
         raise RuntimeError(f"{model} failed: {result.stderr}")
     output = result.stdout
+    # Fragile: ollama thinking markers may change across versions
     if model.startswith("ollama:") and "Thinking...\n" in output:
         parts = output.split("...done thinking.\n", 1)
         if len(parts) == 2:

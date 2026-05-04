@@ -342,7 +342,10 @@ def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None
         natural: strip belief IDs, status markers, and justification metadata
                  from context, presenting beliefs as plain natural language.
         dual: run TMS and FTS RAG in separate calls, then merge the two
-              answers in a third call. Requires sources_db.
+              answers in a third call. Requires sources_db. Makes 3 LLM
+              calls with simple=True (1 TMS + 1 FTS + 1 merge), or up to
+              5 with simple=False (up to 3 TMS tool-loop rounds + 1 FTS
+              + 1 merge). Timeout applies per call.
 
     Returns the answer text.
     """
