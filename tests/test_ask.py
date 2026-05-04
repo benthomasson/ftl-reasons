@@ -346,6 +346,70 @@ class TestAskWithMockedLLM:
         assert "Alpha" in result or result == NO_BELIEFS_MSG
 
 
+class TestAskSourcesPreserved:
+
+    @pytest.fixture
+    def sources_db(self, tmp_path):
+        db = str(tmp_path / "sources.db")
+        conn = sqlite3.connect(db)
+        conn.execute("""
+            CREATE TABLE chunks (
+                id INTEGER PRIMARY KEY, text TEXT, cluster TEXT,
+                filename TEXT, section TEXT
+            )
+        """)
+        conn.execute("""
+            INSERT INTO chunks VALUES (1, 'Important source doc content', 'docs', 'doc.md', NULL)
+        """)
+        conn.execute("""
+            CREATE VIRTUAL TABLE chunks_fts USING fts5(text, content=chunks, content_rowid=id)
+        """)
+        conn.execute("INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild')")
+        conn.commit()
+        conn.close()
+        return db
+
+    def test_sources_survive_tool_call(self, db_path, sources_db):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "Alpha belief about docs", db_path=db_path)
+        run_cli("add", "b", "Beta belief about important topics", db_path=db_path)
+
+        calls = [0]
+
+        def mock_invoke(prompt, model="claude", timeout=300):
+            calls[0] += 1
+            if calls[0] == 1:
+                return '{"tool": "search_beliefs", "query": "important"}'
+            assert "Source Documents" in prompt, "Source documents lost after tool call"
+            assert "Important source doc content" in prompt
+            return "Answer combining beliefs and sources."
+
+        with patch("reasons_lib.ask.invoke_model", side_effect=mock_invoke):
+            result = ask("important docs", db_path=db_path, sources_db=sources_db)
+        assert calls[0] == 2
+        assert result == "Answer combining beliefs and sources."
+
+    def test_natural_applied_to_tool_results(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "Alpha belief", db_path=db_path)
+        run_cli("add", "b", "Beta belief about retraction", db_path=db_path)
+
+        calls = [0]
+
+        def mock_invoke(prompt, model="claude", timeout=300):
+            calls[0] += 1
+            if calls[0] == 1:
+                return '{"tool": "search_beliefs", "query": "retraction"}'
+            assert "**Status:**" not in prompt, "Status metadata leaked into natural prompt"
+            assert "**Source:**" not in prompt, "Source metadata leaked into natural prompt"
+            return "Natural answer about retraction."
+
+        with patch("reasons_lib.ask.invoke_model", side_effect=mock_invoke):
+            result = ask("retraction", db_path=db_path, natural=True)
+        assert calls[0] == 2
+        assert result == "Natural answer about retraction."
+
+
 class TestBuildSimplePrompt:
 
     def test_contains_question_and_context(self):

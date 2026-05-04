@@ -389,18 +389,25 @@ def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None
     if natural and beliefs_context:
         beliefs_context = _strip_belief_metadata(beliefs_context)
 
+    sources_suffix = ""
     if sources_db:
         sources_context = _search_source_chunks(question, sources_db)
         if sources_context:
-            beliefs_context = (beliefs_context or "") + "\n\n## Source Documents\n\n" + sources_context
+            sources_suffix = "\n\n## Source Documents\n\n" + sources_context
+
+    def _full_context():
+        if sources_suffix:
+            return (beliefs_context or "") + sources_suffix
+        return beliefs_context
 
     tool_history = []
 
     for iteration in range(MAX_ITERATIONS):
+        ctx = _full_context()
         if iteration == MAX_ITERATIONS - 1:
-            prompt = build_final_prompt(question, beliefs_context, tool_history, natural=natural)
+            prompt = build_final_prompt(question, ctx, tool_history, natural=natural)
         else:
-            prompt = build_ask_prompt(question, beliefs_context, tool_history, natural=natural)
+            prompt = build_ask_prompt(question, ctx, tool_history, natural=natural)
 
         print(f"Synthesizing (round {iteration + 1}/{MAX_ITERATIONS})...",
               file=sys.stderr)
@@ -409,10 +416,10 @@ def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None
             response = invoke_model(prompt, model=model, timeout=timeout)
         except subprocess.TimeoutExpired:
             print(f"LLM timed out after {timeout}s", file=sys.stderr)
-            return _beliefs_or_no_match(beliefs_context)
+            return _beliefs_or_no_match(ctx)
         except Exception as e:
             print(f"LLM error: {e}", file=sys.stderr)
-            return _beliefs_or_no_match(beliefs_context)
+            return _beliefs_or_no_match(ctx)
 
         tool_call = extract_tool_call(response)
 
@@ -423,25 +430,29 @@ def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None
             query = tool_call.get("query", "")
             print(f"  Searching: {query}", file=sys.stderr)
             result = api.search(query, db_path=db_path, format="markdown")
-            tool_history.append({"query": query, "result": result})
+            history_result = _strip_belief_metadata(result) if natural and result else result
+            tool_history.append({"query": query, "result": history_result})
             if result and result.strip() != "No results found.":
                 beliefs_context = result
+                if natural:
+                    beliefs_context = _strip_belief_metadata(beliefs_context)
         else:
             return response.strip()
 
         if iteration == MAX_ITERATIONS - 1:
             print(f"Synthesizing (final)...", file=sys.stderr)
-            prompt = build_final_prompt(question, beliefs_context, tool_history, natural=natural)
+            ctx = _full_context()
+            prompt = build_final_prompt(question, ctx, tool_history, natural=natural)
             try:
                 response = invoke_model(prompt, model=model, timeout=timeout)
             except subprocess.TimeoutExpired:
                 print(f"LLM timed out after {timeout}s", file=sys.stderr)
-                return _beliefs_or_no_match(beliefs_context)
+                return _beliefs_or_no_match(ctx)
             except Exception as e:
                 print(f"LLM error: {e}", file=sys.stderr)
-                return _beliefs_or_no_match(beliefs_context)
+                return _beliefs_or_no_match(ctx)
             if extract_tool_call(response):
-                return _beliefs_or_no_match(beliefs_context)
+                return _beliefs_or_no_match(ctx)
             return response.strip()
 
     return _beliefs_or_no_match(beliefs_context)
