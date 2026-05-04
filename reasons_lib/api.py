@@ -1358,10 +1358,15 @@ def _fts_search(query: str, db_path: str) -> list[str]:
 
             results = _fts_query(conn, terms)
 
+            _MAX_RELAXATION_QUERIES = 50
             if not results and len(terms) > 2:
                 min_terms = max(1, len(terms) // 2)
+                budget = _MAX_RELAXATION_QUERIES
                 for n in range(len(terms) - 1, min_terms - 1, -1):
                     for combo in combinations(terms, n):
+                        budget -= 1
+                        if budget < 0:
+                            return results
                         results = _fts_query(conn, list(combo))
                         if results:
                             return results

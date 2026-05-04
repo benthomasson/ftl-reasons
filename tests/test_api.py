@@ -321,6 +321,22 @@ class TestFtsSearch:
         results = _fts_search("propagation? (BFS)", db_path)
         assert "a" in results
 
+    def test_long_query_does_not_explode(self, db_path):
+        from reasons_lib.api import _fts_search, _fts_query
+        from unittest.mock import patch as mock_patch
+        api.add_node("a", "alpha beta gamma delta", db_path=db_path)
+        query = " ".join(f"term{i}" for i in range(20))
+        call_count = [0]
+        original_fts_query = _fts_query
+
+        def counting_fts_query(conn, terms):
+            call_count[0] += 1
+            return original_fts_query(conn, terms)
+
+        with mock_patch("reasons_lib.api._fts_query", side_effect=counting_fts_query):
+            _fts_search(query, db_path)
+        assert call_count[0] <= 51
+
     def test_depth_1_includes_direct_antecedents(self, db_path):
         api.add_node("premise", "Propagation uses BFS", db_path=db_path)
         api.add_node("derived", "Propagation is safe", sl="premise", db_path=db_path)
