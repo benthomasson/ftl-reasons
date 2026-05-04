@@ -208,26 +208,32 @@ def _strip_belief_metadata(beliefs_context):
 
 def _search_source_chunks(question, sources_db, top_k=10):
     """Search FTS5 index of source document chunks."""
-    words = re.findall(r'\w+', question)
-    words = [w for w in words if len(w) > 1]
+    from .api import _STOP_WORDS
+
+    raw_words = re.findall(r'\w+', question)
+    words = [w for w in raw_words if w.lower() not in _STOP_WORDS and len(w) > 1]
+    if not words:
+        words = [w for w in raw_words if len(w) > 1]
     if not words:
         return ""
     fts_query = " OR ".join(f'"{w}"' for w in words)
 
     try:
         conn = sqlite3.connect(sources_db)
-        conn.row_factory = sqlite3.Row
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT c.text, c.cluster, c.filename, c.section
-            FROM chunks_fts
-            JOIN chunks c ON c.id = chunks_fts.rowid
-            WHERE chunks_fts MATCH ?
-            ORDER BY chunks_fts.rank
-            LIMIT ?
-        """, (fts_query, top_k))
-        rows = cur.fetchall()
-        conn.close()
+        try:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT c.text, c.cluster, c.filename, c.section
+                FROM chunks_fts
+                JOIN chunks c ON c.id = chunks_fts.rowid
+                WHERE chunks_fts MATCH ?
+                ORDER BY chunks_fts.rank
+                LIMIT ?
+            """, (fts_query, top_k))
+            rows = cur.fetchall()
+        finally:
+            conn.close()
     except (sqlite3.OperationalError, sqlite3.DatabaseError):
         return ""
 
@@ -244,9 +250,9 @@ def _search_source_chunks(question, sources_db, top_k=10):
 
 
 FTS_RAG_PROMPT = """\
-You are a Red Hat domain expert answering questions using retrieved document excerpts.
+You are answering questions using retrieved document excerpts.
 
-Below are the most relevant excerpts from Red Hat internal documents, retrieved via
+Below are the most relevant excerpts from source documents, retrieved via
 full-text search. Use them to answer the question. Cite your sources by referencing
 the document filename in [brackets].
 
@@ -340,10 +346,13 @@ def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None
 
     Returns the answer text.
     """
+    if dual and not sources_db:
+        raise ValueError("--dual requires --full-sources")
+
     if dual and sources_db:
         print("Dual path: running TMS...", file=sys.stderr)
         answer_tms = ask(question, db_path=db_path, timeout=timeout,
-                         model=model, simple=simple)
+                         model=model, simple=simple, natural=natural)
         print("Dual path: running FTS RAG...", file=sys.stderr)
         answer_fts = _fts_rag_answer(question, sources_db, model=model,
                                      timeout=timeout)

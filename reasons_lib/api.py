@@ -1337,7 +1337,7 @@ _STOP_WORDS = frozenset({
     "if", "then", "else", "while", "until", "unless",
     "there", "here", "up", "out", "off",
     "specific", "specifically", "particular", "particularly",
-    "included", "including", "within", "between",
+    "included", "including", "within",
 })
 
 

@@ -655,6 +655,14 @@ class TestSearchSourceChunks:
         assert "### [1]" in result
         assert "### [2]" not in result
 
+    def test_stop_words_filtered(self, sources_db):
+        result = _search_source_chunks("What is the Summit about?", sources_db)
+        assert "Summit" in result
+
+    def test_all_stop_words_falls_back(self, sources_db):
+        result = _search_source_chunks("What is the", sources_db)
+        assert result == "" or isinstance(result, str)
+
 
 class TestAskNatural:
 
@@ -802,11 +810,30 @@ class TestAskDual:
         assert calls[0] == 3
         assert "Merged" in result
 
-    def test_dual_without_sources_db_skips(self, db_path):
+    def test_dual_without_sources_db_raises(self, db_path):
         run_cli("init", db_path=db_path)
         run_cli("add", "a", "Alpha belief", db_path=db_path)
 
-        with patch("reasons_lib.ask.invoke_model",
-                    return_value="Normal answer."):
-            result = ask("alpha", db_path=db_path, simple=True, dual=True)
-        assert result == "Normal answer."
+        with pytest.raises(ValueError, match="--dual requires --full-sources"):
+            ask("alpha", db_path=db_path, simple=True, dual=True)
+
+    def test_dual_propagates_natural(self, db_path, sources_db):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "Alpha belief", db_path=db_path)
+
+        calls = [0]
+
+        def mock_invoke(prompt, model="claude", timeout=300):
+            calls[0] += 1
+            if calls[0] == 1:
+                assert "**Status:**" not in prompt, "natural not propagated to TMS leg"
+                return "Natural TMS answer."
+            elif calls[0] == 2:
+                return "FTS answer."
+            else:
+                return "Merged answer."
+
+        with patch("reasons_lib.ask.invoke_model", side_effect=mock_invoke):
+            result = ask("alpha", db_path=db_path, simple=True, dual=True,
+                         sources_db=sources_db, natural=True)
+        assert calls[0] == 3
