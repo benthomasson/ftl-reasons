@@ -291,6 +291,52 @@ class TestFtsSearch:
         result = api.search("quantum computing blockchain", db_path=db_path, format="compact")
         assert "a" not in result
 
+    def test_stop_words_filtered(self, db_path):
+        from reasons_lib.api import _fts_search
+        api.add_node("a", "propagation uses BFS algorithm", db_path=db_path)
+        results = _fts_search("What is the propagation algorithm?", db_path)
+        assert "a" in results
+
+    def test_all_stop_words_falls_back_to_raw(self, db_path):
+        from reasons_lib.api import _fts_search
+        api.add_node("a", "the system is working", db_path=db_path)
+        results = _fts_search("what is the", db_path)
+        assert "a" in results
+
+    def test_single_char_words_only_returns_empty(self, db_path):
+        from reasons_lib.api import _fts_search
+        api.add_node("a", "some content", db_path=db_path)
+        results = _fts_search("a b c", db_path)
+        assert results == []
+
+    def test_natural_language_question(self, db_path):
+        api.add_node("a", "retraction cascades through dependent nodes", db_path=db_path)
+        result = api.search("How does retraction work in the system?",
+                            db_path=db_path, format="compact")
+        assert "a" in result
+
+    def test_punctuation_in_query(self, db_path):
+        from reasons_lib.api import _fts_search
+        api.add_node("a", "propagation uses BFS", db_path=db_path)
+        results = _fts_search("propagation? (BFS)", db_path)
+        assert "a" in results
+
+    def test_long_query_does_not_explode(self, db_path):
+        from reasons_lib.api import _fts_search, _fts_query
+        from unittest.mock import patch as mock_patch
+        api.add_node("a", "alpha beta gamma delta", db_path=db_path)
+        query = " ".join(f"term{i}" for i in range(20))
+        call_count = [0]
+        original_fts_query = _fts_query
+
+        def counting_fts_query(conn, terms):
+            call_count[0] += 1
+            return original_fts_query(conn, terms)
+
+        with mock_patch("reasons_lib.api._fts_query", side_effect=counting_fts_query):
+            _fts_search(query, db_path)
+        assert call_count[0] <= 51
+
     def test_depth_1_includes_direct_antecedents(self, db_path):
         api.add_node("premise", "Propagation uses BFS", db_path=db_path)
         api.add_node("derived", "Propagation is safe", sl="premise", db_path=db_path)

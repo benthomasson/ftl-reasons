@@ -13,7 +13,17 @@ class TestResolveModelCmd:
         assert resolve_model_cmd("claude") == ["claude", "-p"]
 
     def test_resolve_gemini(self):
-        assert resolve_model_cmd("gemini") == ["gemini", "-p", ""]
+        assert resolve_model_cmd("gemini") == ["gemini", "--skip-trust", "-p", ""]
+
+    def test_resolve_gemini_submodel(self):
+        assert resolve_model_cmd("gemini:gemini-2.5-flash") == [
+            "gemini", "--skip-trust", "-m", "gemini-2.5-flash", "-p", ""
+        ]
+
+    def test_resolve_gemini_submodel_short(self):
+        assert resolve_model_cmd("gemini:flash") == [
+            "gemini", "--skip-trust", "-m", "flash", "-p", ""
+        ]
 
     def test_resolve_ollama_model(self):
         assert resolve_model_cmd("ollama:gemma3:4b") == ["ollama", "run", "gemma3:4b"]
@@ -66,6 +76,38 @@ class TestInvokeModel:
             assert result == "ollama response"
             args = mock_run.call_args
             assert args[0][0] == ["ollama", "run", "gemma3:4b"]
+
+    def test_ollama_strips_thinking_output(self):
+        thinking = "Thinking...\nsome internal reasoning\n...done thinking.\nThe actual answer."
+        mock_result = type("Result", (), {"returncode": 0, "stdout": thinking, "stderr": ""})()
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/ollama"), \
+             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+            result = invoke_model("hello", model="ollama:qwen3:4b")
+            assert result == "The actual answer."
+
+    def test_ollama_no_thinking_markers_unchanged(self):
+        output = "Just a normal response."
+        mock_result = type("Result", (), {"returncode": 0, "stdout": output, "stderr": ""})()
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/ollama"), \
+             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+            result = invoke_model("hello", model="ollama:qwen3:4b")
+            assert result == "Just a normal response."
+
+    def test_ollama_incomplete_thinking_unchanged(self):
+        output = "Thinking...\nsome reasoning but no end marker"
+        mock_result = type("Result", (), {"returncode": 0, "stdout": output, "stderr": ""})()
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/ollama"), \
+             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+            result = invoke_model("hello", model="ollama:qwen3:4b")
+            assert result == output
+
+    def test_claude_does_not_strip_thinking(self):
+        output = "Thinking...\nsome reasoning\n...done thinking.\nAnswer."
+        mock_result = type("Result", (), {"returncode": 0, "stdout": output, "stderr": ""})()
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+            result = invoke_model("hello", model="claude")
+            assert result == output
 
     def test_strips_claudecode_env(self):
         mock_result = type("Result", (), {"returncode": 0, "stdout": "ok", "stderr": ""})()
