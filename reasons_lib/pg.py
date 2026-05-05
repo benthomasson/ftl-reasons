@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS rms_nodes (
     text TEXT NOT NULL,
     truth_value TEXT NOT NULL DEFAULT 'IN' CHECK (truth_value IN ('IN', 'OUT')),
     source TEXT DEFAULT '',
+    source_url TEXT DEFAULT '',
     source_hash TEXT DEFAULT '',
     date TEXT DEFAULT '',
     metadata JSONB DEFAULT '{}',
@@ -122,13 +123,20 @@ class PgApi:
         with self.conn.cursor() as cur:
             cur.execute(SCHEMA)
             cur.execute(INDEXES)
+            # Migrate existing databases: add source_url if missing
+            cur.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = 'rms_nodes' AND column_name = 'source_url'"
+            )
+            if not cur.fetchone():
+                cur.execute("ALTER TABLE rms_nodes ADD COLUMN source_url TEXT DEFAULT ''")
         self.conn.commit()
         return {"project_id": self.project_id, "created": True}
 
     # ── Core mutations ──────────────────────────────────────────
 
     def add_node(self, node_id, text, sl="", cp="", unless="", label="",
-                 source="", access_tags=None):
+                 source="", source_url="", access_tags=None):
         pid = self.project_id
         now = datetime.now().isoformat(timespec="seconds")
         metadata = {}
@@ -144,9 +152,9 @@ class PgApi:
                 raise ValueError(f"Node '{node_id}' already exists")
 
             cur.execute(
-                "INSERT INTO rms_nodes (id, project_id, text, source, date, metadata) "
-                "VALUES (%s, %s, %s, %s, %s, %s)",
-                (node_id, pid, text, source, now, json.dumps(metadata)),
+                "INSERT INTO rms_nodes (id, project_id, text, source, source_url, date, metadata) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                (node_id, pid, text, source, source_url, now, json.dumps(metadata)),
             )
 
             justifications = self._parse_justifications(sl, cp, unless, label)
@@ -567,7 +575,7 @@ class PgApi:
         pid = self.project_id
         with self.conn.cursor() as cur:
             cur.execute(
-                "SELECT id, text, truth_value, source, source_hash, metadata "
+                "SELECT id, text, truth_value, source, source_url, source_hash, metadata "
                 "FROM rms_nodes WHERE id = %s AND project_id = %s",
                 (node_id, pid),
             )
@@ -575,7 +583,7 @@ class PgApi:
             if not row:
                 raise KeyError(f"Node '{node_id}' not found")
 
-            nid, text, tv, source, source_hash, meta = row
+            nid, text, tv, source, source_url, source_hash, meta = row
             if isinstance(meta, str):
                 meta = json.loads(meta)
 
@@ -604,6 +612,7 @@ class PgApi:
             "text": text,
             "truth_value": tv,
             "source": source,
+            "source_url": source_url or "",
             "source_hash": source_hash,
             "justifications": justifications,
             "dependents": dependents,

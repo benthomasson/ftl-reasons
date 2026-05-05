@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS nodes (
     text TEXT NOT NULL,
     truth_value TEXT NOT NULL DEFAULT 'IN',
     source TEXT DEFAULT '',
+    source_url TEXT DEFAULT '',
     source_hash TEXT DEFAULT '',
     date TEXT DEFAULT '',
     metadata_json TEXT DEFAULT '{}'
@@ -73,6 +74,10 @@ class Storage:
 
     def _init_schema(self) -> None:
         self.conn.executescript(SCHEMA)
+        # Migrate existing databases: add source_url if missing
+        cols = [c[1] for c in self.conn.execute("PRAGMA table_info(nodes)").fetchall()]
+        if "source_url" not in cols:
+            self.conn.execute("ALTER TABLE nodes ADD COLUMN source_url TEXT DEFAULT ''")
         self.conn.commit()
 
     def save(self, network: Network) -> None:
@@ -90,13 +95,14 @@ class Storage:
 
             for node in network.nodes.values():
                 self.conn.execute(
-                    "INSERT INTO nodes (id, text, truth_value, source, source_hash, date, metadata_json) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO nodes (id, text, truth_value, source, source_url, source_hash, date, metadata_json) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         node.id,
                         node.text,
                         node.truth_value,
                         node.source,
+                        node.source_url,
                         node.source_hash,
                         node.date,
                         json.dumps(node.metadata),
@@ -143,9 +149,16 @@ class Storage:
         network = Network()
 
         # Load nodes (without justifications first, to avoid ordering issues)
-        cursor = self.conn.execute(
-            "SELECT id, text, truth_value, source, source_hash, date, metadata_json FROM nodes"
-        )
+        # Check if source_url column exists (backward compat with older DBs)
+        has_source_url = "source_url" in [c[1] for c in self.conn.execute("PRAGMA table_info(nodes)").fetchall()]
+        if has_source_url:
+            cursor = self.conn.execute(
+                "SELECT id, text, truth_value, source, source_url, source_hash, date, metadata_json FROM nodes"
+            )
+        else:
+            cursor = self.conn.execute(
+                "SELECT id, text, truth_value, source, '', source_hash, date, metadata_json FROM nodes"
+            )
         node_rows = cursor.fetchall()
 
         # Load justifications keyed by node_id
@@ -164,13 +177,14 @@ class Storage:
 
         # Build nodes directly (bypass add_node to preserve exact state)
         for row in node_rows:
-            nid, text, truth_value, source, source_hash, date, meta_json = row
+            nid, text, truth_value, source, source_url, source_hash, date, meta_json = row
             node = Node(
                 id=nid,
                 text=text,
                 truth_value=truth_value,
                 justifications=justifications_by_node.get(nid, []),
                 source=source,
+                source_url=source_url or "",
                 source_hash=source_hash,
                 date=date,
                 metadata=json.loads(meta_json),

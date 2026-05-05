@@ -139,6 +139,7 @@ def add_node(
     unless: str = "",
     label: str = "",
     source: str = "",
+    source_url: str = "",
     namespace: str | None = None,
     any_mode: bool = False,
     access_tags: list[str] | None = None,
@@ -220,6 +221,7 @@ def add_node(
             text=text,
             justifications=justifications or None,
             source=source,
+            source_url=source_url,
             metadata=metadata or None,
         )
         jtype = justifications[0].type if justifications else "premise"
@@ -522,6 +524,7 @@ def show_node(node_id: str, visible_to: list[str] | None = None, db_path: str = 
             "text": node.text,
             "truth_value": node.truth_value,
             "source": node.source,
+            "source_url": node.source_url,
             "source_hash": node.source_hash,
             "justifications": [
                 {"type": j.type, "antecedents": j.antecedents, "outlist": j.outlist, "label": j.label}
@@ -716,6 +719,7 @@ def export_network(visible_to: list[str] | None = None, db_path: str = DEFAULT_D
                         for j in n.justifications
                     ],
                     "source": n.source,
+                    "source_url": n.source_url,
                     "source_hash": n.source_hash,
                     "date": n.date,
                     "metadata": {k: v for k, v in n.metadata.items() if not k.startswith("_")},
@@ -943,6 +947,7 @@ def import_json(json_file: str, db_path: str = DEFAULT_DB) -> dict:
                         text=ndata.get("text", ""),
                         justifications=justifications,
                         source=ndata.get("source", ""),
+                        source_url=ndata.get("source_url", ""),
                         source_hash=ndata.get("source_hash", ""),
                         date=ndata.get("date", ""),
                         metadata=ndata.get("metadata", {}),
@@ -980,6 +985,7 @@ def import_json(json_file: str, db_path: str = DEFAULT_DB) -> dict:
                         text=ndata.get("text", ""),
                         justifications=justifications,
                         source=ndata.get("source", ""),
+                        source_url=ndata.get("source_url", ""),
                         source_hash=ndata.get("source_hash", ""),
                         date=ndata.get("date", ""),
                         metadata=ndata.get("metadata", {}),
