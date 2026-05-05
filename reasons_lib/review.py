@@ -48,6 +48,8 @@ Return ONLY a JSON array. For each belief, one object:
 
 Rules:
 - Return one object per belief reviewed, in the same order as presented.
+- A belief may have multiple justifications (alternative support paths).
+  It is valid if ANY justification is sound. Evaluate each independently.
 - "unnecessary_antecedents" should be empty [] if all are necessary.
 - "comment" should be a single sentence explaining the most important finding.
 - Be rigorous: a conclusion that sounds reasonable but doesn't follow
@@ -68,11 +70,13 @@ def format_belief_for_review(node_id, nodes):
     lines.append(f"Claim: {node.get('text', '')}")
 
     justs = node.get("justifications", [])
-    if justs:
-        j = justs[0]
+    for ji, j in enumerate(justs):
         antecedents = j.get("antecedents", [])
         outlist = j.get("outlist", [])
         label = j.get("label", "")
+
+        if len(justs) > 1:
+            lines.append(f"Justification {ji + 1}/{len(justs)}:")
 
         if antecedents:
             lines.append("Antecedents:")

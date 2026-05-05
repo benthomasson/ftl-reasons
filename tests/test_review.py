@@ -114,6 +114,39 @@ class TestFormatBeliefForReview:
         result = format_belief_for_review("does-not-exist", nodes)
         assert result == ""
 
+    def test_multiple_justifications(self):
+        nodes = _make_nodes()
+        nodes["multi-just"] = {
+            "text": "Supported by two independent paths",
+            "truth_value": "IN",
+            "justifications": [
+                {
+                    "type": "SL",
+                    "antecedents": ["premise-a", "premise-b"],
+                    "outlist": [],
+                    "label": "path one",
+                },
+                {
+                    "type": "SL",
+                    "antecedents": ["premise-c"],
+                    "outlist": [],
+                    "label": "path two",
+                },
+            ],
+        }
+        result = format_belief_for_review("multi-just", nodes)
+        assert "Justification 1/2:" in result
+        assert "Justification 2/2:" in result
+        assert "premise-a: A is true" in result
+        assert "premise-c: C is true" in result
+        assert "Label: path one" in result
+        assert "Label: path two" in result
+
+    def test_single_justification_no_numbering(self):
+        nodes = _make_nodes()
+        result = format_belief_for_review("derived-ab", nodes)
+        assert "Justification 1/" not in result
+
     def test_no_justifications(self):
         nodes = _make_nodes()
         result = format_belief_for_review("premise-a", nodes)
