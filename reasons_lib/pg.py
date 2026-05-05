@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS rms_nodes (
     text TEXT NOT NULL,
     truth_value TEXT NOT NULL DEFAULT 'IN' CHECK (truth_value IN ('IN', 'OUT')),
     source TEXT DEFAULT '',
+    source_url TEXT DEFAULT '',
     source_hash TEXT DEFAULT '',
     date TEXT DEFAULT '',
     metadata JSONB DEFAULT '{}',
@@ -122,6 +123,13 @@ class PgApi:
         with self.conn.cursor() as cur:
             cur.execute(SCHEMA)
             cur.execute(INDEXES)
+            # Migrate existing databases: add source_url if missing
+            cur.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = 'rms_nodes' AND column_name = 'source_url'"
+            )
+            if not cur.fetchone():
+                cur.execute("ALTER TABLE rms_nodes ADD COLUMN source_url TEXT DEFAULT ''")
         self.conn.commit()
         return {"project_id": self.project_id, "created": True}
 

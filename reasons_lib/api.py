@@ -719,6 +719,7 @@ def export_network(visible_to: list[str] | None = None, db_path: str = DEFAULT_D
                         for j in n.justifications
                     ],
                     "source": n.source,
+                    "source_url": n.source_url,
                     "source_hash": n.source_hash,
                     "date": n.date,
                     "metadata": {k: v for k, v in n.metadata.items() if not k.startswith("_")},
@@ -946,6 +947,7 @@ def import_json(json_file: str, db_path: str = DEFAULT_DB) -> dict:
                         text=ndata.get("text", ""),
                         justifications=justifications,
                         source=ndata.get("source", ""),
+                        source_url=ndata.get("source_url", ""),
                         source_hash=ndata.get("source_hash", ""),
                         date=ndata.get("date", ""),
                         metadata=ndata.get("metadata", {}),
@@ -983,6 +985,7 @@ def import_json(json_file: str, db_path: str = DEFAULT_DB) -> dict:
                         text=ndata.get("text", ""),
                         justifications=justifications,
                         source=ndata.get("source", ""),
+                        source_url=ndata.get("source_url", ""),
                         source_hash=ndata.get("source_hash", ""),
                         date=ndata.get("date", ""),
                         metadata=ndata.get("metadata", {}),
