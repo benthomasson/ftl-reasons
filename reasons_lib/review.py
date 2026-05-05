@@ -6,7 +6,6 @@ structurally valid.
 """
 
 import json
-import re
 import sys
 
 from .llm import invoke_model
@@ -102,30 +101,33 @@ def format_belief_for_review(node_id, nodes):
 def parse_review_response(response):
     """Extract review results JSON array from LLM response.
 
-    Scans for a JSON array in the response text. Returns list of dicts
-    with defaults for missing fields.
+    Tries json.JSONDecoder.raw_decode at each '[' position to handle
+    prose brackets before the JSON array and trailing text after it.
     """
-    for match in re.finditer(r"\[.*\]", response, re.DOTALL):
+    decoder = json.JSONDecoder()
+    for i, ch in enumerate(response):
+        if ch != "[":
+            continue
         try:
-            items = json.loads(match.group())
-            if not isinstance(items, list):
-                continue
-            results = []
-            for item in items:
-                if not isinstance(item, dict) or "id" not in item:
-                    continue
-                results.append({
-                    "id": item["id"],
-                    "valid": item.get("valid", True),
-                    "sufficient": item.get("sufficient", True),
-                    "necessary": item.get("necessary", True),
-                    "unnecessary_antecedents": item.get("unnecessary_antecedents", []),
-                    "comment": item.get("comment", ""),
-                })
-            if results:
-                return results
+            items, _ = decoder.raw_decode(response, i)
         except json.JSONDecodeError:
             continue
+        if not isinstance(items, list):
+            continue
+        results = []
+        for item in items:
+            if not isinstance(item, dict) or "id" not in item:
+                continue
+            results.append({
+                "id": item["id"],
+                "valid": item.get("valid", True),
+                "sufficient": item.get("sufficient", True),
+                "necessary": item.get("necessary", True),
+                "unnecessary_antecedents": item.get("unnecessary_antecedents", []),
+                "comment": item.get("comment", ""),
+            })
+        if results:
+            return results
     return []
 
 

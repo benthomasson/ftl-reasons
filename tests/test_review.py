@@ -175,6 +175,18 @@ class TestParseReviewResponse:
         assert len(results) == 1
         assert results[0]["id"] == "derived-ab"
 
+    def test_prose_brackets_before_json(self):
+        response = (
+            "I checked [see antecedents] and [the outlist] carefully.\n\n"
+            '[{"id": "derived-ab", "valid": false, "sufficient": true, '
+            '"necessary": true, "unnecessary_antecedents": [], '
+            '"comment": "does not follow"}]'
+        )
+        results = parse_review_response(response)
+        assert len(results) == 1
+        assert results[0]["id"] == "derived-ab"
+        assert results[0]["valid"] is False
+
     def test_non_list_json_skipped(self):
         response = '{"id": "derived-ab", "valid": true}'
         results = parse_review_response(response)
