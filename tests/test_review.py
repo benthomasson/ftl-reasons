@@ -1,6 +1,8 @@
 """Tests for the review module (derived belief validation)."""
 
 import json
+import sys
+from io import StringIO
 from unittest.mock import patch, call
 
 import pytest
@@ -12,6 +14,23 @@ from reasons_lib.review import (
     REVIEW_BATCH_SIZE,
 )
 from reasons_lib import api
+from reasons_lib.cli import main
+
+
+def run_cli(*args, db_path=None):
+    argv = ["reasons"]
+    if db_path:
+        argv += ["--db", db_path]
+    argv += list(args)
+    stdout, stderr = StringIO(), StringIO()
+    with patch.object(sys, "argv", argv), \
+         patch.object(sys, "stdout", stdout), \
+         patch.object(sys, "stderr", stderr):
+        try:
+            main()
+        except SystemExit as e:
+            return stdout.getvalue(), stderr.getvalue(), e.code
+    return stdout.getvalue(), stderr.getvalue(), 0
 
 
 def _make_nodes():
@@ -309,3 +328,110 @@ class TestReviewBeliefsApi:
         assert result["invalid"] == 1
         assert result["insufficient"] == 1
         assert result["unnecessary"] == 1
+
+    def test_visible_to_filter(self, db_path):
+        api.add_node("tagged-derived", "tagged belief",
+                      sl="premise-a,premise-b", label="tagged",
+                      access_tags=["secret"],
+                      db_path=db_path)
+        mock_response = json.dumps([
+            {"id": "derived-ab", "valid": True, "sufficient": True,
+             "necessary": True, "unnecessary_antecedents": [], "comment": "ok"},
+            {"id": "derived-abc", "valid": True, "sufficient": True,
+             "necessary": True, "unnecessary_antecedents": [], "comment": "ok"},
+        ])
+        mock_result = type("R", (), {"returncode": 0, "stdout": mock_response, "stderr": ""})()
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+            result = api.review_beliefs(visible_to=["public"], db_path=db_path)
+        # tagged-derived requires "secret" tag, so excluded; only 2 untagged derived remain
+        assert result["reviewed"] == 2
+
+
+class TestCmdReviewBeliefs:
+
+    @pytest.fixture
+    def db_path(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        api.add_node("premise-a", "A is true", db_path=db)
+        api.add_node("premise-b", "B is true", db_path=db)
+        api.add_node("derived-ab", "AB combined", sl="premise-a,premise-b",
+                      label="combined", db_path=db)
+        return db
+
+    def _mock_review(self, response_data):
+        mock_response = json.dumps(response_data)
+        return type("R", (), {"returncode": 0, "stdout": mock_response, "stderr": ""})()
+
+    def test_auto_retract_retracts_invalid(self, db_path):
+        mock_result = self._mock_review([
+            {"id": "derived-ab", "valid": False, "sufficient": True,
+             "necessary": True, "unnecessary_antecedents": [],
+             "comment": "conclusion does not follow"},
+        ])
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+            stdout, stderr, code = run_cli(
+                "review-beliefs", "--auto-retract", db_path=db_path)
+        assert "RETRACTED derived-ab" in stdout
+        # Verify it was actually retracted in the DB
+        result = api.show_node("derived-ab", db_path=db_path)
+        assert result["truth_value"] == "OUT"
+
+    def test_dry_run_prevents_retraction(self, db_path):
+        mock_result = self._mock_review([
+            {"id": "derived-ab", "valid": False, "sufficient": True,
+             "necessary": True, "unnecessary_antecedents": [],
+             "comment": "conclusion does not follow"},
+        ])
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+            stdout, stderr, code = run_cli(
+                "review-beliefs", "--auto-retract", "--dry-run", db_path=db_path)
+        assert "RETRACTED" not in stdout
+        # Verify it was NOT retracted
+        result = api.show_node("derived-ab", db_path=db_path)
+        assert result["truth_value"] == "IN"
+
+    def test_output_writes_findings_file(self, db_path, tmp_path):
+        output_file = str(tmp_path / "findings.md")
+        mock_result = self._mock_review([
+            {"id": "derived-ab", "valid": False, "sufficient": True,
+             "necessary": False, "unnecessary_antecedents": ["premise-b"],
+             "comment": "not valid and unnecessary antecedent"},
+        ])
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+            stdout, stderr, code = run_cli(
+                "review-beliefs", "-o", output_file, db_path=db_path)
+        assert f"Wrote findings to {output_file}" in stdout
+        with open(output_file) as f:
+            content = f.read()
+        assert "# Belief Review Findings" in content
+        assert "### derived-ab" in content
+        assert "- Valid: FAIL" in content
+        assert "- Sufficient: PASS" in content
+        assert "- Necessary: FAIL" in content
+        assert "- Unnecessary antecedents: premise-b" in content
+        assert "- Comment: not valid and unnecessary antecedent" in content
+
+    def test_displays_flags_for_issues(self, db_path):
+        mock_result = self._mock_review([
+            {"id": "derived-ab", "valid": False, "sufficient": False,
+             "necessary": False, "unnecessary_antecedents": ["premise-a"],
+             "comment": "all three axes fail"},
+        ])
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+            stdout, stderr, code = run_cli(
+                "review-beliefs", "--dry-run", db_path=db_path)
+        assert "INVALID" in stdout
+        assert "INSUFFICIENT" in stdout
+        assert "UNNECESSARY(premise-a)" in stdout
+        assert "all three axes fail" in stdout
+
+    def test_no_derived_beliefs_message(self, tmp_path):
+        db = str(tmp_path / "empty.db")
+        api.add_node("just-a-premise", "simple fact", db_path=db)
+        stdout, stderr, code = run_cli("review-beliefs", db_path=db)
+        assert "No derived beliefs to review." in stdout
