@@ -940,6 +940,76 @@ def cmd_list_negative(args):
           f"({result['candidates']} candidates from {result['total']} IN nodes)")
 
 
+def cmd_review_beliefs(args):
+    model = getattr(args, "model", None) or "claude"
+    result = api.review_beliefs(
+        belief_ids=args.ids or None,
+        model=model,
+        timeout=args.timeout,
+        min_depth=args.min_depth,
+        depends_on=args.depends_on,
+        sample=args.sample,
+        visible_to=_parse_visible_to(args),
+        db_path=args.db,
+    )
+
+    reviews = result["results"]
+    if not reviews:
+        print("No derived beliefs to review.")
+        return
+
+    invalid = [r for r in reviews if not r.get("valid", True)]
+    insufficient = [r for r in reviews if not r.get("sufficient", True)]
+    unnecessary = [r for r in reviews if not r.get("necessary", True)]
+
+    for r in reviews:
+        flags = []
+        if not r.get("valid", True):
+            flags.append("INVALID")
+        if not r.get("sufficient", True):
+            flags.append("INSUFFICIENT")
+        if not r.get("necessary", True):
+            unneeded = r.get("unnecessary_antecedents", [])
+            flag = "UNNECESSARY"
+            if unneeded:
+                flag += f"({', '.join(unneeded)})"
+            flags.append(flag)
+
+        if flags:
+            print(f"  [{' | '.join(flags)}] {r['id']}")
+            if r.get("comment"):
+                print(f"    {r['comment']}")
+
+    print(f"\nReviewed {result['reviewed']} of {result['total_derived']} derived beliefs")
+    print(f"  Invalid: {result['invalid']}  Insufficient: {result['insufficient']}"
+          f"  Unnecessary: {result['unnecessary']}")
+
+    if args.output:
+        with open(args.output, "w") as f:
+            f.write("# Belief Review Findings\n\n")
+            for r in reviews:
+                v = "PASS" if r.get("valid", True) else "FAIL"
+                s = "PASS" if r.get("sufficient", True) else "FAIL"
+                n = "PASS" if r.get("necessary", True) else "FAIL"
+                f.write(f"### {r['id']}\n")
+                f.write(f"- Valid: {v}\n- Sufficient: {s}\n- Necessary: {n}\n")
+                if r.get("unnecessary_antecedents"):
+                    f.write(f"- Unnecessary antecedents: {', '.join(r['unnecessary_antecedents'])}\n")
+                if r.get("comment"):
+                    f.write(f"- Comment: {r['comment']}\n")
+                f.write("\n")
+        print(f"\nWrote findings to {args.output}")
+
+    if args.auto_retract and not args.dry_run and invalid:
+        print(f"\nRetracting {len(invalid)} invalid belief(s)...")
+        for r in invalid:
+            try:
+                api.retract(r["id"], reason=f"review-beliefs: {r.get('comment', 'invalid')}", db_path=args.db)
+                print(f"  RETRACTED {r['id']}")
+            except Exception as e:
+                print(f"  ERROR retracting {r['id']}: {e}", file=sys.stderr)
+
+
 def cmd_namespaces(args):
     result = api.list_namespaces(db_path=args.db)
     if not result["namespaces"]:
@@ -1215,6 +1285,28 @@ def main():
 
     sub.add_parser("namespaces", help="List all agent namespaces in the database")
 
+    # review-beliefs
+    p = sub.add_parser("review-beliefs", help="Review derived beliefs for validity, sufficiency, and necessity")
+    p.add_argument("ids", nargs="*", help="Specific belief IDs to review (default: all derived)")
+    p.add_argument("-m", "--model", default=None,
+                   help="Model to use (default: claude). Use ollama:<model> for local models")
+    p.add_argument("--timeout", type=int, default=300,
+                   help="LLM timeout in seconds (default: 300)")
+    p.add_argument("--min-depth", type=int, default=None,
+                   help="Only review beliefs at this depth or deeper")
+    p.add_argument("--depends-on", default=None,
+                   help="Only review beliefs depending on this node")
+    p.add_argument("--sample", type=int, default=None,
+                   help="Randomly sample N beliefs to review")
+    p.add_argument("--dry-run", action="store_true",
+                   help="Report findings without taking action")
+    p.add_argument("--auto-retract", action="store_true",
+                   help="Retract beliefs found invalid")
+    p.add_argument("-o", "--output", default=None,
+                   help="Write findings to markdown file")
+    p.add_argument("--visible-to", metavar="TAG,TAG",
+                   help="Only review nodes whose access_tags are a subset of these tags")
+
     # list
     p = sub.add_parser("list", help="List nodes with filters")
     p.add_argument("--status", choices=["IN", "OUT"], help="Filter by truth value")
@@ -1273,6 +1365,7 @@ def main():
         "list": cmd_list,
         "list-gated": cmd_list_gated,
         "list-negative": cmd_list_negative,
+        "review-beliefs": cmd_review_beliefs,
         "namespaces": cmd_namespaces,
     }
     commands[args.command](args)
