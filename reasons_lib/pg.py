@@ -128,7 +128,7 @@ class PgApi:
     # ── Core mutations ──────────────────────────────────────────
 
     def add_node(self, node_id, text, sl="", cp="", unless="", label="",
-                 source="", access_tags=None):
+                 source="", source_url="", access_tags=None):
         pid = self.project_id
         now = datetime.now().isoformat(timespec="seconds")
         metadata = {}
@@ -144,9 +144,9 @@ class PgApi:
                 raise ValueError(f"Node '{node_id}' already exists")
 
             cur.execute(
-                "INSERT INTO rms_nodes (id, project_id, text, source, date, metadata) "
-                "VALUES (%s, %s, %s, %s, %s, %s)",
-                (node_id, pid, text, source, now, json.dumps(metadata)),
+                "INSERT INTO rms_nodes (id, project_id, text, source, source_url, date, metadata) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                (node_id, pid, text, source, source_url, now, json.dumps(metadata)),
             )
 
             justifications = self._parse_justifications(sl, cp, unless, label)
@@ -567,7 +567,7 @@ class PgApi:
         pid = self.project_id
         with self.conn.cursor() as cur:
             cur.execute(
-                "SELECT id, text, truth_value, source, source_hash, metadata "
+                "SELECT id, text, truth_value, source, source_url, source_hash, metadata "
                 "FROM rms_nodes WHERE id = %s AND project_id = %s",
                 (node_id, pid),
             )
@@ -575,7 +575,7 @@ class PgApi:
             if not row:
                 raise KeyError(f"Node '{node_id}' not found")
 
-            nid, text, tv, source, source_hash, meta = row
+            nid, text, tv, source, source_url, source_hash, meta = row
             if isinstance(meta, str):
                 meta = json.loads(meta)
 
@@ -604,6 +604,7 @@ class PgApi:
             "text": text,
             "truth_value": tv,
             "source": source,
+            "source_url": source_url or "",
             "source_hash": source_hash,
             "justifications": justifications,
             "dependents": dependents,

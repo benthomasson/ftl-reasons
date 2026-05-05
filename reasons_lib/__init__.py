@@ -35,6 +35,7 @@ class Node:
     justifications: list[Justification] = field(default_factory=list)
     dependents: set[str] = field(default_factory=set)  # reverse index
     source: str = ""
+    source_url: str = ""
     source_hash: str = ""
     date: str = ""
     metadata: dict = field(default_factory=dict)

@@ -44,6 +44,7 @@ def cmd_add(args):
             unless=args.unless or "",
             label=args.label or "",
             source=args.source or "",
+            source_url=args.source_url or "",
             namespace=getattr(args, "namespace", None),
             any_mode=getattr(args, "any", False),
             access_tags=access_tags,
@@ -227,6 +228,8 @@ def cmd_show(args):
     print(f"Status: {node['truth_value']}")
     if node["source"]:
         print(f"Source: {node['source']}")
+    if node.get("source_url"):
+        print(f"URL:    {node['source_url']}")
     if node["source_hash"]:
         print(f"Hash:   {node['source_hash']}")
 
@@ -971,6 +974,7 @@ def main():
     p.add_argument("--any", action="store_true", help="Expand SL into one justification per premise (OR instead of AND)")
     p.add_argument("--label", help="Justification label")
     p.add_argument("--source", help="Provenance (repo:path)")
+    p.add_argument("--source-url", help="URL for the source document")
     p.add_argument("-n", "--namespace", help="Namespace prefix (auto-creates ns:active premise)")
     p.add_argument("--access-tags", metavar="TAG,TAG", help="Data source provenance tags (comma-separated)")
 
