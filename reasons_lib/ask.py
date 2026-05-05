@@ -359,6 +359,17 @@ def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None
         print("Dual path: running FTS RAG...", file=sys.stderr)
         answer_fts = _fts_rag_answer(question, sources_db, model=model,
                                      timeout=timeout)
+        tms_empty = (answer_tms.strip() == NO_BELIEFS_MSG
+                     or "don't have enough beliefs" in answer_tms.lower())
+        fts_empty = (answer_fts.strip().startswith("No relevant documents"))
+        if tms_empty and not fts_empty:
+            print("Dual path: TMS empty, using FTS answer directly.", file=sys.stderr)
+            return answer_fts
+        if fts_empty and not tms_empty:
+            print("Dual path: FTS empty, using TMS answer directly.", file=sys.stderr)
+            return answer_tms
+        if tms_empty and fts_empty:
+            return NO_BELIEFS_MSG
         print("Dual path: merging answers...", file=sys.stderr)
         return _merge_answers(question, answer_tms, answer_fts, model=model,
                               timeout=timeout)
