@@ -1004,7 +1004,7 @@ def cmd_review_beliefs(args):
         print(f"\nRetracting {len(invalid)} invalid belief(s)...")
         for r in invalid:
             try:
-                api.retract(r["id"], reason=f"review-beliefs: {r.get('comment', 'invalid')}", db_path=args.db)
+                api.retract_node(r["id"], reason=f"review-beliefs: {r.get('comment', 'invalid')}", db_path=args.db)
                 print(f"  RETRACTED {r['id']}")
             except Exception as e:
                 print(f"  ERROR retracting {r['id']}: {e}", file=sys.stderr)
