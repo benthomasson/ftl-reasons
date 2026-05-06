@@ -568,3 +568,12 @@ class TestUpdateNode:
         assert node["text"] == "New derived text"
         assert node["truth_value"] == "IN"
         assert len(node["justifications"]) == 1
+
+    def test_updates_out_node(self, db_path):
+        api.retract_node("a", reason="testing", db_path=db_path)
+        result = api.update_node("a", text="Updated while OUT",
+                                  db_path=db_path)
+        assert "text" in result["updated_fields"]
+        node = api.show_node("a", db_path=db_path)
+        assert node["text"] == "Updated while OUT"
+        assert node["truth_value"] == "OUT"

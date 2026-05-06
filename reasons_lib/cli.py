@@ -318,11 +318,15 @@ def cmd_supersede(args):
 
 
 def cmd_update(args):
+    if not any([args.text, args.source, args.source_url]):
+        print("Error: at least one of --text, --source, or --source-url required",
+              file=sys.stderr)
+        sys.exit(1)
     try:
         result = api.update_node(
             args.node_id, text=args.text,
-            source=getattr(args, "source", None),
-            source_url=getattr(args, "source_url", None),
+            source=args.source,
+            source_url=args.source_url,
             db_path=args.db,
         )
     except KeyError as e:
@@ -1177,7 +1181,7 @@ def main():
     # update
     p = sub.add_parser("update", help="Update a belief's text or source in place")
     p.add_argument("node_id", help="Belief to update")
-    p.add_argument("text", help="New text for the belief")
+    p.add_argument("--text", default=None, help="New text for the belief")
     p.add_argument("--source", default=None, help="Update source path")
     p.add_argument("--source-url", default=None, help="Update source URL")
 
