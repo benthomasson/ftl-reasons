@@ -4,6 +4,7 @@ Sends batches of currently-held beliefs to an LLM to identify sets
 of beliefs that cannot all be true simultaneously (nogoods).
 """
 
+import random
 import re
 import sys
 
@@ -137,6 +138,9 @@ def detect_contradictions(nodes, belief_ids=None, model="claude", timeout=300,
 
     if not belief_ids:
         return []
+
+    belief_ids = list(belief_ids)
+    random.shuffle(belief_ids)
 
     valid_ids = set(belief_ids)
     all_results = []
