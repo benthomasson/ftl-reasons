@@ -1779,7 +1779,6 @@ def detect_contradictions(
     timeout: int = 300,
     sample: int | None = None,
     auto_apply: bool = False,
-    visible_to: list[str] | None = None,
     db_path: str = DEFAULT_DB,
 ) -> dict:
     """Detect contradictions between IN beliefs via LLM analysis.
@@ -1789,7 +1788,7 @@ def detect_contradictions(
     """
     from .contradictions import detect_contradictions as _detect
 
-    result = export_network(visible_to=visible_to, db_path=db_path)
+    result = export_network(db_path=db_path)
     nodes = result.get("nodes", {})
 
     candidates = {

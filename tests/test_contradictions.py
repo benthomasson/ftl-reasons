@@ -310,20 +310,6 @@ class TestDetectContradictionsApi:
             result = api.detect_contradictions(auto_apply=True, db_path=db_path)
         assert result["applied"] >= 1
 
-    def test_visible_to_filter(self, db_path):
-        api.add_node("secret-belief", "secret info",
-                      access_tags=["secret"], db_path=db_path)
-        mock_result = type("R", (), {
-            "returncode": 0,
-            "stdout": "No contradictions detected.",
-            "stderr": "",
-        })()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
-            result = api.detect_contradictions(
-                visible_to=["public"], db_path=db_path)
-        # secret-belief excluded, only 3 untagged beliefs checked
-        assert result["checked"] == 3
 
 
 class TestCmdContradictions:

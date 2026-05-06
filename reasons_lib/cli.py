@@ -1024,7 +1024,6 @@ def cmd_contradictions(args):
         timeout=args.timeout,
         sample=args.sample,
         auto_apply=auto_apply,
-        visible_to=_parse_visible_to(args),
         db_path=args.db,
     )
 
@@ -1380,8 +1379,6 @@ def main():
                    help="Auto-apply detected nogoods via dependency-directed backtracking")
     p.add_argument("-o", "--output", default=None,
                    help="Write proposals to markdown file")
-    p.add_argument("--visible-to", metavar="TAG,TAG",
-                   help="Only check nodes whose access_tags are a subset of these tags")
 
     # list
     p = sub.add_parser("list", help="List nodes with filters")
