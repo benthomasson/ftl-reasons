@@ -632,6 +632,34 @@ def supersede(old_id: str, new_id: str, db_path: str = DEFAULT_DB) -> dict:
         return net.supersede(old_id, new_id)
 
 
+def update_node(
+    node_id: str,
+    text: str | None = None,
+    source: str | None = None,
+    source_url: str | None = None,
+    db_path: str = DEFAULT_DB,
+) -> dict:
+    """Update a node's text, source, or source_url in place.
+
+    Returns: {"node_id": str, "updated_fields": list[str]}
+    """
+    with _with_network(db_path, write=True) as net:
+        if node_id not in net.nodes:
+            raise KeyError(f"Node '{node_id}' not found")
+        node = net.nodes[node_id]
+        updated = []
+        if text is not None:
+            node.text = text
+            updated.append("text")
+        if source is not None:
+            node.source = source
+            updated.append("source")
+        if source_url is not None:
+            node.source_url = source_url
+            updated.append("source_url")
+        return {"node_id": node_id, "updated_fields": updated}
+
+
 def challenge(
     target_id: str,
     reason: str,

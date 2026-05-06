@@ -317,6 +317,22 @@ def cmd_supersede(args):
         print(f"Changed: {', '.join(result['changed'])}")
 
 
+def cmd_update(args):
+    try:
+        result = api.update_node(
+            args.node_id, text=args.text,
+            source=getattr(args, "source", None),
+            source_url=getattr(args, "source_url", None),
+            db_path=args.db,
+        )
+    except KeyError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    fields = ", ".join(result["updated_fields"])
+    print(f"Updated {result['node_id']} ({fields})")
+
+
 def cmd_challenge(args):
     try:
         result = api.challenge(
@@ -1158,6 +1174,13 @@ def main():
     p.add_argument("old_id", help="Belief being superseded")
     p.add_argument("new_id", help="Belief that supersedes it")
 
+    # update
+    p = sub.add_parser("update", help="Update a belief's text or source in place")
+    p.add_argument("node_id", help="Belief to update")
+    p.add_argument("text", help="New text for the belief")
+    p.add_argument("--source", default=None, help="Update source path")
+    p.add_argument("--source-url", default=None, help="Update source URL")
+
     # challenge
     p = sub.add_parser("challenge", help="Challenge a node — target goes OUT")
     p.add_argument("target_id", help="Node to challenge")
@@ -1427,6 +1450,7 @@ def main():
         "convert-to-premise": cmd_convert_to_premise,
         "summarize": cmd_summarize,
         "supersede": cmd_supersede,
+        "update": cmd_update,
         "challenge": cmd_challenge,
         "defend": cmd_defend,
         "trace": cmd_trace,
