@@ -1,0 +1,385 @@
+"""Tests for the contradictions module (LLM-powered nogood detection)."""
+
+import sys
+from io import StringIO
+from unittest.mock import patch
+
+import pytest
+
+from reasons_lib.contradictions import (
+    format_beliefs_for_contradiction_check,
+    parse_contradiction_response,
+    detect_contradictions,
+    CONTRADICTION_BATCH_SIZE,
+)
+from reasons_lib import api
+from reasons_lib.cli import main
+
+
+def run_cli(*args, db_path=None):
+    argv = ["reasons"]
+    if db_path:
+        argv += ["--db", db_path]
+    argv += list(args)
+    stdout, stderr = StringIO(), StringIO()
+    with patch.object(sys, "argv", argv), \
+         patch.object(sys, "stdout", stdout), \
+         patch.object(sys, "stderr", stderr):
+        try:
+            main()
+        except SystemExit as e:
+            return stdout.getvalue(), stderr.getvalue(), e.code
+    return stdout.getvalue(), stderr.getvalue(), 0
+
+
+def _make_nodes():
+    return {
+        "premise-a": {
+            "text": "A is true",
+            "truth_value": "IN",
+            "justifications": [],
+        },
+        "premise-b": {
+            "text": "B is false",
+            "truth_value": "IN",
+            "justifications": [],
+        },
+        "premise-c": {
+            "text": "C is true",
+            "truth_value": "IN",
+            "justifications": [],
+        },
+        "out-node": {
+            "text": "This is OUT",
+            "truth_value": "OUT",
+            "justifications": [],
+        },
+    }
+
+
+class TestFormatBeliefsForContradictionCheck:
+
+    def test_formats_beliefs_as_list(self):
+        nodes = _make_nodes()
+        result = format_beliefs_for_contradiction_check(
+            ["premise-a", "premise-b"], nodes)
+        assert "- `premise-a`: A is true" in result
+        assert "- `premise-b`: B is false" in result
+
+    def test_truncates_long_text(self):
+        nodes = {"long": {
+            "text": "x" * 300,
+            "truth_value": "IN",
+        }}
+        result = format_beliefs_for_contradiction_check(["long"], nodes)
+        assert len(result.split(": ", 1)[1]) == 200
+        assert result.endswith("...")
+
+    def test_skips_missing_nodes(self):
+        nodes = _make_nodes()
+        result = format_beliefs_for_contradiction_check(
+            ["premise-a", "nonexistent"], nodes)
+        assert "premise-a" in result
+        assert "nonexistent" not in result
+
+
+class TestParseContradictionResponse:
+
+    def test_parses_nogood_sections(self):
+        response = (
+            "### NOGOOD scope-conflict\n"
+            "- Claims: premise-a, premise-b\n"
+            "- Analysis: A says true, B says false\n"
+            "- Severity: High\n"
+        )
+        results = parse_contradiction_response(response)
+        assert len(results) == 1
+        assert results[0]["id"] == "scope-conflict"
+        assert results[0]["claims"] == ["premise-a", "premise-b"]
+        assert results[0]["analysis"] == "A says true, B says false"
+        assert results[0]["severity"] == "High"
+
+    def test_requires_minimum_two_claims(self):
+        response = (
+            "### NOGOOD single-claim\n"
+            "- Claims: premise-a\n"
+            "- Analysis: just one\n"
+            "- Severity: Low\n"
+        )
+        results = parse_contradiction_response(response)
+        assert results == []
+
+    def test_filters_nonexistent_claim_ids(self):
+        response = (
+            "### NOGOOD bad-refs\n"
+            "- Claims: premise-a, fake-node, premise-b\n"
+            "- Analysis: mixed real and fake\n"
+            "- Severity: Medium\n"
+        )
+        valid = {"premise-a", "premise-b"}
+        results = parse_contradiction_response(response, valid_ids=valid)
+        assert len(results) == 1
+        assert results[0]["claims"] == ["premise-a", "premise-b"]
+
+    def test_filters_to_below_two_claims_drops_nogood(self):
+        response = (
+            "### NOGOOD all-fake\n"
+            "- Claims: fake-1, fake-2\n"
+            "- Analysis: none real\n"
+            "- Severity: Low\n"
+        )
+        valid = {"premise-a"}
+        results = parse_contradiction_response(response, valid_ids=valid)
+        assert results == []
+
+    def test_malformed_response_returns_empty(self):
+        response = "No contradictions detected."
+        results = parse_contradiction_response(response)
+        assert results == []
+
+    def test_extracts_severity(self):
+        response = (
+            "### NOGOOD sev-test\n"
+            "- Claims: premise-a, premise-b\n"
+            "- Analysis: test\n"
+            "- Severity: Medium\n"
+        )
+        results = parse_contradiction_response(response)
+        assert results[0]["severity"] == "Medium"
+
+    def test_multiple_nogoods(self):
+        response = (
+            "### NOGOOD first\n"
+            "- Claims: premise-a, premise-b\n"
+            "- Analysis: first conflict\n"
+            "- Severity: High\n"
+            "\n"
+            "### NOGOOD second\n"
+            "- Claims: premise-b, premise-c\n"
+            "- Analysis: second conflict\n"
+            "- Severity: Low\n"
+        )
+        valid = {"premise-a", "premise-b", "premise-c"}
+        results = parse_contradiction_response(response, valid_ids=valid)
+        assert len(results) == 2
+        assert results[0]["id"] == "first"
+        assert results[1]["id"] == "second"
+
+    def test_three_claims(self):
+        response = (
+            "### NOGOOD triple\n"
+            "- Claims: premise-a, premise-b, premise-c\n"
+            "- Analysis: three-way conflict\n"
+            "- Severity: High\n"
+        )
+        results = parse_contradiction_response(response)
+        assert len(results) == 1
+        assert len(results[0]["claims"]) == 3
+
+
+class TestDetectContradictions:
+
+    def test_batches_beliefs(self):
+        nodes = _make_nodes()
+        mock_result = type("R", (), {
+            "returncode": 0,
+            "stdout": "No contradictions detected.",
+            "stderr": "",
+        })()
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run", return_value=mock_result) as mock_run:
+            detect_contradictions(nodes, batch_size=2)
+        # 3 IN beliefs, batch_size=2 → 2 batches
+        assert mock_run.call_count == 2
+
+    def test_empty_network_returns_empty(self):
+        nodes = {
+            "out-only": {
+                "text": "everything is OUT",
+                "truth_value": "OUT",
+                "justifications": [],
+            },
+        }
+        results = detect_contradictions(nodes)
+        assert results == []
+
+    def test_timeout_passed_through(self):
+        nodes = _make_nodes()
+        mock_result = type("R", (), {
+            "returncode": 0,
+            "stdout": "No contradictions detected.",
+            "stderr": "",
+        })()
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run", return_value=mock_result) as mock_run:
+            detect_contradictions(nodes, belief_ids=["premise-a", "premise-b"],
+                                  timeout=600)
+        assert mock_run.call_args[1]["timeout"] == 600
+
+    def test_batch_failure_continues(self):
+        nodes = _make_nodes()
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run",
+                   side_effect=RuntimeError("LLM failed")):
+            results = detect_contradictions(nodes)
+        assert results == []
+
+    def test_filters_to_in_only(self):
+        nodes = _make_nodes()
+        mock_result = type("R", (), {
+            "returncode": 0,
+            "stdout": "No contradictions detected.",
+            "stderr": "",
+        })()
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run", return_value=mock_result) as mock_run:
+            detect_contradictions(nodes, batch_size=100)
+        # Only 3 IN beliefs (premise-a, premise-b, premise-c), out-node excluded
+        prompt = mock_run.call_args[1]["input"]
+        assert "out-node" not in prompt
+
+    def test_specific_ids_filtered(self):
+        nodes = _make_nodes()
+        mock_result = type("R", (), {
+            "returncode": 0,
+            "stdout": "No contradictions detected.",
+            "stderr": "",
+        })()
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run", return_value=mock_result) as mock_run:
+            detect_contradictions(nodes,
+                                  belief_ids=["premise-a", "out-node"],
+                                  batch_size=100)
+        # out-node is OUT, so only premise-a should be checked
+        assert mock_run.call_count == 1
+        prompt = mock_run.call_args[1]["input"]
+        assert "premise-a" in prompt
+        assert "out-node" not in prompt
+
+
+class TestDetectContradictionsApi:
+
+    @pytest.fixture
+    def db_path(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        api.add_node("belief-a", "X is always true", db_path=db)
+        api.add_node("belief-b", "X is never true", db_path=db)
+        api.add_node("belief-c", "Y is sometimes true", db_path=db)
+        return db
+
+    def test_filters_to_in_only(self, db_path):
+        api.retract_node("belief-c", reason="testing", db_path=db_path)
+        nogood_response = (
+            "### NOGOOD x-conflict\n"
+            "- Claims: belief-a, belief-b\n"
+            "- Analysis: direct contradiction\n"
+            "- Severity: High\n"
+        )
+        mock_result = type("R", (), {
+            "returncode": 0, "stdout": nogood_response, "stderr": ""
+        })()
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+            result = api.detect_contradictions(db_path=db_path)
+        assert result["checked"] == 2
+        assert result["found"] == 1
+
+    def test_sample_limits(self, db_path):
+        mock_result = type("R", (), {
+            "returncode": 0,
+            "stdout": "No contradictions detected.",
+            "stderr": "",
+        })()
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+            result = api.detect_contradictions(sample=2, db_path=db_path)
+        assert result["checked"] == 2
+
+    def test_auto_apply_calls_add_nogood(self, db_path):
+        nogood_response = (
+            "### NOGOOD x-conflict\n"
+            "- Claims: belief-a, belief-b\n"
+            "- Analysis: direct contradiction\n"
+            "- Severity: High\n"
+        )
+        mock_result = type("R", (), {
+            "returncode": 0, "stdout": nogood_response, "stderr": ""
+        })()
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+            result = api.detect_contradictions(auto_apply=True, db_path=db_path)
+        assert result["applied"] >= 1
+
+
+
+class TestCmdContradictions:
+
+    @pytest.fixture
+    def db_path(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        api.add_node("belief-a", "X is always true", db_path=db)
+        api.add_node("belief-b", "X is never true", db_path=db)
+        return db
+
+    def _mock_response(self, text):
+        return type("R", (), {
+            "returncode": 0, "stdout": text, "stderr": ""
+        })()
+
+    def test_no_contradictions_message(self, db_path):
+        mock_result = self._mock_response("No contradictions detected.")
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+            stdout, stderr, code = run_cli(
+                "contradictions", "--dry-run", db_path=db_path)
+        assert "No contradictions detected" in stdout
+
+    def test_displays_found_contradictions(self, db_path):
+        nogood_response = (
+            "### NOGOOD x-conflict\n"
+            "- Claims: belief-a, belief-b\n"
+            "- Analysis: direct negation\n"
+            "- Severity: High\n"
+        )
+        mock_result = self._mock_response(nogood_response)
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+            stdout, stderr, code = run_cli(
+                "contradictions", "--dry-run", db_path=db_path)
+        assert "[NOGOOD] x-conflict (High)" in stdout
+        assert "belief-a, belief-b" in stdout
+        assert "direct negation" in stdout
+
+    def test_output_writes_markdown(self, db_path, tmp_path):
+        output_file = str(tmp_path / "contradictions.md")
+        nogood_response = (
+            "### NOGOOD x-conflict\n"
+            "- Claims: belief-a, belief-b\n"
+            "- Analysis: direct negation\n"
+            "- Severity: High\n"
+        )
+        mock_result = self._mock_response(nogood_response)
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+            stdout, stderr, code = run_cli(
+                "contradictions", "-o", output_file, db_path=db_path)
+        assert f"Wrote findings to {output_file}" in stdout
+        with open(output_file) as f:
+            content = f.read()
+        assert "# Contradiction Detection Findings" in content
+        assert "### NOGOOD x-conflict" in content
+        assert "belief-a, belief-b" in content
+
+    def test_dry_run_prevents_apply(self, db_path):
+        nogood_response = (
+            "### NOGOOD x-conflict\n"
+            "- Claims: belief-a, belief-b\n"
+            "- Analysis: direct negation\n"
+            "- Severity: High\n"
+        )
+        mock_result = self._mock_response(nogood_response)
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+            stdout, stderr, code = run_cli(
+                "contradictions", "--auto-apply", "--dry-run", db_path=db_path)
+        assert "Applied: 0" in stdout

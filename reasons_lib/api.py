@@ -1773,6 +1773,68 @@ def review_beliefs(
     }
 
 
+def detect_contradictions(
+    belief_ids: list[str] | None = None,
+    model: str = "claude",
+    timeout: int = 300,
+    sample: int | None = None,
+    auto_apply: bool = False,
+    db_path: str = DEFAULT_DB,
+) -> dict:
+    """Detect contradictions between IN beliefs via LLM analysis.
+
+    Returns: {"contradictions": [...], "checked": int, "found": int,
+              "applied": int, "total_in": int}
+    """
+    from .contradictions import detect_contradictions as _detect
+
+    result = export_network(db_path=db_path)
+    nodes = result.get("nodes", {})
+
+    candidates = {
+        k: v for k, v in nodes.items()
+        if v.get("truth_value") == "IN"
+    }
+    total_in = len(candidates)
+
+    if belief_ids:
+        candidates = {k: v for k, v in candidates.items() if k in belief_ids}
+
+    if sample is not None and len(candidates) > sample:
+        import random
+        sampled_keys = random.sample(sorted(candidates.keys()), sample)
+        candidates = {k: candidates[k] for k in sampled_keys}
+
+    check_ids = sorted(candidates.keys())
+    contradictions = _detect(nodes, belief_ids=check_ids, model=model,
+                            timeout=timeout)
+
+    applied = 0
+    applied_details = []
+    if auto_apply:
+        for c in contradictions:
+            try:
+                nogood_result = add_nogood(c["claims"], db_path=db_path)
+                applied += 1
+                applied_details.append({
+                    "id": c["id"],
+                    "nogood_id": nogood_result.get("nogood_id"),
+                    "changed": nogood_result.get("changed", []),
+                })
+            except Exception as e:
+                print(f"  WARN: failed to apply {c['id']}: {e}",
+                      file=sys.stderr)
+
+    return {
+        "contradictions": contradictions,
+        "checked": len(check_ids),
+        "found": len(contradictions),
+        "applied": applied,
+        "applied_details": applied_details,
+        "total_in": total_in,
+    }
+
+
 def _rewrite_dependents(net, old_id: str, new_id: str):
     """Rewrite justifications that reference old_id to point at new_id.
 

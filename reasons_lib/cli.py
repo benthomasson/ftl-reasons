@@ -1015,6 +1015,57 @@ def cmd_review_beliefs(args):
                 print(f"  ERROR retracting {r['id']}: {e}", file=sys.stderr)
 
 
+def cmd_contradictions(args):
+    model = getattr(args, "model", None) or "claude"
+    auto_apply = args.auto_apply and not args.dry_run
+    result = api.detect_contradictions(
+        belief_ids=args.ids or None,
+        model=model,
+        timeout=args.timeout,
+        sample=args.sample,
+        auto_apply=auto_apply,
+        db_path=args.db,
+    )
+
+    contradictions = result["contradictions"]
+    if not contradictions:
+        print(f"No contradictions detected among {result['checked']} IN beliefs.")
+        return
+
+    for c in contradictions:
+        severity = c.get("severity", "")
+        sev_str = f" ({severity})" if severity else ""
+        print(f"  [NOGOOD] {c['id']}{sev_str}")
+        print(f"    Claims: {', '.join(c['claims'])}")
+        if c.get("analysis"):
+            print(f"    Analysis: {c['analysis']}")
+
+    print(f"\nChecked {result['checked']} of {result['total_in']} IN beliefs")
+    print(f"  Found: {result['found']}  Applied: {result['applied']}")
+
+    if args.output:
+        with open(args.output, "w") as f:
+            f.write("# Contradiction Detection Findings\n\n")
+            f.write(f"Checked {result['checked']} beliefs, "
+                    f"found {result['found']} contradictions.\n\n")
+            for c in contradictions:
+                f.write(f"### NOGOOD {c['id']}\n")
+                f.write(f"- Claims: {', '.join(c['claims'])}\n")
+                if c.get("analysis"):
+                    f.write(f"- Analysis: {c['analysis']}\n")
+                if c.get("severity"):
+                    f.write(f"- Severity: {c['severity']}\n")
+                f.write("\n")
+        print(f"\nWrote findings to {args.output}")
+
+    if auto_apply and result.get("applied_details"):
+        print(f"\nApplied {result['applied']} nogood(s):")
+        for d in result["applied_details"]:
+            changed = d.get("changed", [])
+            print(f"  {d.get('id', '?')}: nogood={d.get('nogood_id', '?')}, "
+                  f"changed {len(changed)} node(s)")
+
+
 def cmd_namespaces(args):
     result = api.list_namespaces(db_path=args.db)
     if not result["namespaces"]:
@@ -1313,6 +1364,22 @@ def main():
     p.add_argument("--visible-to", metavar="TAG,TAG",
                    help="Only review nodes whose access_tags are a subset of these tags")
 
+    # contradictions
+    p = sub.add_parser("contradictions", help="Detect contradictions between IN beliefs")
+    p.add_argument("ids", nargs="*", help="Specific belief IDs to check (default: all IN)")
+    p.add_argument("-m", "--model", default=None,
+                   help="Model to use (default: claude). Use ollama:<model> for local models")
+    p.add_argument("--timeout", type=int, default=300,
+                   help="LLM timeout in seconds (default: 300)")
+    p.add_argument("--sample", type=int, default=None,
+                   help="Randomly sample N beliefs to check")
+    p.add_argument("--dry-run", action="store_true",
+                   help="Show findings without applying nogoods")
+    p.add_argument("--auto-apply", action="store_true",
+                   help="Auto-apply detected nogoods via dependency-directed backtracking")
+    p.add_argument("-o", "--output", default=None,
+                   help="Write proposals to markdown file")
+
     # list
     p = sub.add_parser("list", help="List nodes with filters")
     p.add_argument("--status", choices=["IN", "OUT"], help="Filter by truth value")
@@ -1372,6 +1439,7 @@ def main():
         "list-gated": cmd_list_gated,
         "list-negative": cmd_list_negative,
         "review-beliefs": cmd_review_beliefs,
+        "contradictions": cmd_contradictions,
         "namespaces": cmd_namespaces,
     }
     commands[args.command](args)
