@@ -1236,3 +1236,33 @@ Also from nothing
         out, err, code = run_cli("accept", str(proposals), db_path=db_path)
         assert code == 0
         assert "No valid proposals" in out
+
+
+class TestCmdUpdate:
+
+    def test_update_text(self, db_path):
+        run_cli("add", "a", "Original text", db_path=db_path)
+        out, err, code = run_cli("update", "a", "--text", "New text", db_path=db_path)
+        assert code == 0
+        assert "Updated a" in out
+        assert "text" in out
+        out2, _, _ = run_cli("show", "a", db_path=db_path)
+        assert "New text" in out2
+
+    def test_update_nonexistent(self, db_path):
+        run_cli("init", db_path=db_path)
+        out, err, code = run_cli("update", "nope", "--text", "text", db_path=db_path)
+        assert code == 1
+        assert "not found" in err
+
+    def test_update_source_only(self, db_path):
+        run_cli("add", "a", "Some text", db_path=db_path)
+        out, err, code = run_cli("update", "a", "--source", "new/path.md", db_path=db_path)
+        assert code == 0
+        assert "source" in out
+
+    def test_no_flags_errors(self, db_path):
+        run_cli("add", "a", "Some text", db_path=db_path)
+        out, err, code = run_cli("update", "a", db_path=db_path)
+        assert code == 1
+        assert "at least one" in err

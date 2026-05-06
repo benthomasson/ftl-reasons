@@ -529,3 +529,51 @@ class TestListNegative:
         assert result["candidates"] == 120
         found_ids = {n["id"] for n in result["negative"]}
         assert found_ids == {"bug-010", "bug-020", "bug-060"}
+
+
+class TestUpdateNode:
+
+    @pytest.fixture
+    def db_path(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        api.add_node("a", "Original text", db_path=db)
+        api.add_node("b", "Premise B", db_path=db)
+        api.add_node("derived-ab", "AB combined", sl="a,b",
+                      label="combined", db_path=db)
+        return db
+
+    def test_updates_text(self, db_path):
+        result = api.update_node("a", text="Updated text", db_path=db_path)
+        assert result["node_id"] == "a"
+        assert "text" in result["updated_fields"]
+        node = api.show_node("a", db_path=db_path)
+        assert node["text"] == "Updated text"
+        assert node["truth_value"] == "IN"
+
+    def test_updates_source(self, db_path):
+        result = api.update_node("a", source="new/source.md", db_path=db_path)
+        assert "source" in result["updated_fields"]
+        node = api.show_node("a", db_path=db_path)
+        assert node["source"] == "new/source.md"
+
+    def test_nonexistent_raises(self, db_path):
+        with pytest.raises(KeyError):
+            api.update_node("nonexistent", text="x", db_path=db_path)
+
+    def test_preserves_justifications(self, db_path):
+        result = api.update_node("derived-ab", text="New derived text",
+                                  db_path=db_path)
+        assert "text" in result["updated_fields"]
+        node = api.show_node("derived-ab", db_path=db_path)
+        assert node["text"] == "New derived text"
+        assert node["truth_value"] == "IN"
+        assert len(node["justifications"]) == 1
+
+    def test_updates_out_node(self, db_path):
+        api.retract_node("a", reason="testing", db_path=db_path)
+        result = api.update_node("a", text="Updated while OUT",
+                                  db_path=db_path)
+        assert "text" in result["updated_fields"]
+        node = api.show_node("a", db_path=db_path)
+        assert node["text"] == "Updated while OUT"
+        assert node["truth_value"] == "OUT"
