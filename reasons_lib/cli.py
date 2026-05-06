@@ -1062,7 +1062,9 @@ def cmd_contradictions(args):
     if auto_apply and result.get("applied_details"):
         print(f"\nApplied {result['applied']} nogood(s):")
         for d in result["applied_details"]:
-            print(f"  {d.get('id', '?')}: {d.get('status', '?')}")
+            changed = d.get("changed", [])
+            print(f"  {d.get('id', '?')}: nogood={d.get('nogood_id', '?')}, "
+                  f"changed {len(changed)} node(s)")
 
 
 def cmd_namespaces(args):

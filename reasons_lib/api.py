@@ -1789,7 +1789,7 @@ def detect_contradictions(
     """
     from .contradictions import detect_contradictions as _detect
 
-    result = export_network(db_path=db_path)
+    result = export_network(visible_to=visible_to, db_path=db_path)
     nodes = result.get("nodes", {})
 
     candidates = {
@@ -1800,14 +1800,6 @@ def detect_contradictions(
 
     if belief_ids:
         candidates = {k: v for k, v in candidates.items() if k in belief_ids}
-
-    if visible_to is not None:
-        tags = set(visible_to)
-        candidates = {
-            k: v for k, v in candidates.items()
-            if not v.get("metadata", {}).get("access_tags")
-            or all(t in tags for t in v["metadata"]["access_tags"])
-        }
 
     if sample is not None and len(candidates) > sample:
         import random
@@ -1832,7 +1824,7 @@ def detect_contradictions(
                 })
             except Exception as e:
                 print(f"  WARN: failed to apply {c['id']}: {e}",
-                      file=__import__("sys").stderr)
+                      file=sys.stderr)
 
     return {
         "contradictions": contradictions,
