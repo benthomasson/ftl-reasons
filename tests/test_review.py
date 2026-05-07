@@ -480,3 +480,182 @@ class TestCmdReviewBeliefs:
         api.add_node("just-a-premise", "simple fact", db_path=db)
         stdout, stderr, code = run_cli("review-beliefs", db_path=db)
         assert "No derived beliefs to review." in stdout
+
+    def test_json_report_written(self, db_path, tmp_path):
+        report_dir = str(tmp_path / "reports")
+        mock_result = self._mock_review([
+            {"id": "derived-ab", "valid": True, "sufficient": True,
+             "necessary": True, "unnecessary_antecedents": [], "comment": "ok"},
+        ])
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+            stdout, stderr, code = run_cli(
+                "review-beliefs", "--report-dir", report_dir, db_path=db_path)
+        assert "Report:" in stdout
+
+        import os
+        reports = [f for f in os.listdir(report_dir) if f.endswith(".json")]
+        assert len(reports) == 1
+
+        with open(os.path.join(report_dir, reports[0])) as f:
+            report = json.load(f)
+        assert "timestamp" in report
+        assert report["reviewed"] == 1
+        assert "results" in report
+        assert len(report["results"]) == 1
+        assert report["results"][0]["id"] == "derived-ab"
+
+    def test_no_report_flag(self, db_path, tmp_path):
+        report_dir = str(tmp_path / "reports")
+        mock_result = self._mock_review([
+            {"id": "derived-ab", "valid": True, "sufficient": True,
+             "necessary": True, "unnecessary_antecedents": [], "comment": "ok"},
+        ])
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+            stdout, stderr, code = run_cli(
+                "review-beliefs", "--no-report", "--report-dir", report_dir,
+                db_path=db_path)
+        assert "Report:" not in stdout
+        import os
+        assert not os.path.exists(report_dir)
+
+
+class TestReviewBeliefsMetadata:
+
+    @pytest.fixture
+    def db_path(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        api.add_node("premise-a", "A is true", db_path=db)
+        api.add_node("premise-b", "B is true", db_path=db)
+        api.add_node("derived-ab", "AB combined", sl="premise-a,premise-b",
+                      label="combined", db_path=db)
+        api.add_node("premise-c", "C is true", db_path=db)
+        api.add_node("derived-abc", "ABC combined",
+                      sl="derived-ab,premise-c", label="deeper", db_path=db)
+        return db
+
+    def test_metadata_written_after_review(self, db_path):
+        mock_response = json.dumps([
+            {"id": "derived-ab", "valid": True, "sufficient": True,
+             "necessary": True, "unnecessary_antecedents": [], "comment": "ok"},
+            {"id": "derived-abc", "valid": False, "sufficient": True,
+             "necessary": True, "unnecessary_antecedents": [],
+             "comment": "does not follow"},
+        ])
+        mock_result = type("R", (), {"returncode": 0, "stdout": mock_response, "stderr": ""})()
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+            api.review_beliefs(db_path=db_path)
+
+        node_ab = api.show_node("derived-ab", db_path=db_path)
+        assert node_ab["metadata"]["last_reviewed"]
+        assert node_ab["metadata"]["review_result"] == "pass"
+
+        node_abc = api.show_node("derived-abc", db_path=db_path)
+        assert node_abc["metadata"]["last_reviewed"]
+        assert node_abc["metadata"]["review_result"] == "invalid"
+
+    def test_dry_run_skips_metadata(self, db_path):
+        mock_response = json.dumps([
+            {"id": "derived-ab", "valid": True, "sufficient": True,
+             "necessary": True, "unnecessary_antecedents": [], "comment": "ok"},
+        ])
+        mock_result = type("R", (), {"returncode": 0, "stdout": mock_response, "stderr": ""})()
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+            api.review_beliefs(dry_run=True, db_path=db_path)
+
+        node = api.show_node("derived-ab", db_path=db_path)
+        assert "last_reviewed" not in node["metadata"]
+
+    def test_review_result_classification_priority(self, db_path):
+        mock_response = json.dumps([
+            {"id": "derived-ab", "valid": False, "sufficient": False,
+             "necessary": False, "unnecessary_antecedents": ["premise-b"],
+             "comment": "all fail"},
+        ])
+        mock_result = type("R", (), {"returncode": 0, "stdout": mock_response, "stderr": ""})()
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+            api.review_beliefs(belief_ids=["derived-ab"], db_path=db_path)
+
+        node = api.show_node("derived-ab", db_path=db_path)
+        assert node["metadata"]["review_result"] == "invalid"
+
+    def test_insufficient_result_classification(self, db_path):
+        mock_response = json.dumps([
+            {"id": "derived-ab", "valid": True, "sufficient": False,
+             "necessary": True, "unnecessary_antecedents": [],
+             "comment": "not enough"},
+        ])
+        mock_result = type("R", (), {"returncode": 0, "stdout": mock_response, "stderr": ""})()
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+            api.review_beliefs(belief_ids=["derived-ab"], db_path=db_path)
+
+        node = api.show_node("derived-ab", db_path=db_path)
+        assert node["metadata"]["review_result"] == "insufficient"
+
+
+class TestListNodesReviewFilters:
+
+    @pytest.fixture
+    def db_path(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        api.add_node("premise-a", "A is true", db_path=db)
+        api.add_node("premise-b", "B is true", db_path=db)
+        api.add_node("derived-ab", "AB combined", sl="premise-a,premise-b",
+                      label="combined", db_path=db)
+        api.add_node("derived-cd", "CD combined", sl="premise-a,premise-b",
+                      label="combined2", db_path=db)
+        return db
+
+    def test_never_reviewed_filter(self, db_path):
+        result = api.list_nodes(never_reviewed=True, db_path=db_path)
+        ids = [n["id"] for n in result["nodes"]]
+        assert "derived-ab" in ids
+        assert "derived-cd" in ids
+        assert "premise-a" not in ids
+        assert "premise-b" not in ids
+
+    def test_never_reviewed_excludes_reviewed(self, db_path):
+        mock_response = json.dumps([
+            {"id": "derived-ab", "valid": True, "sufficient": True,
+             "necessary": True, "unnecessary_antecedents": [], "comment": "ok"},
+        ])
+        mock_result = type("R", (), {"returncode": 0, "stdout": mock_response, "stderr": ""})()
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+            api.review_beliefs(belief_ids=["derived-ab"], db_path=db_path)
+
+        result = api.list_nodes(never_reviewed=True, db_path=db_path)
+        ids = [n["id"] for n in result["nodes"]]
+        assert "derived-ab" not in ids
+        assert "derived-cd" in ids
+
+    def test_not_reviewed_since_includes_never_reviewed(self, db_path):
+        mock_response = json.dumps([
+            {"id": "derived-ab", "valid": True, "sufficient": True,
+             "necessary": True, "unnecessary_antecedents": [], "comment": "ok"},
+        ])
+        mock_result = type("R", (), {"returncode": 0, "stdout": mock_response, "stderr": ""})()
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+            api.review_beliefs(belief_ids=["derived-ab"], db_path=db_path)
+
+        result = api.list_nodes(not_reviewed_since=30, db_path=db_path)
+        ids = [n["id"] for n in result["nodes"]]
+        assert "derived-cd" in ids
+        assert "derived-ab" not in ids
+
+    def test_by_impact_sort(self, db_path):
+        result = api.list_nodes(by_impact=True, db_path=db_path)
+        counts = [n["dependent_count"] for n in result["nodes"]]
+        assert counts == sorted(counts, reverse=True)
+
+    def test_list_includes_review_fields(self, db_path):
+        result = api.list_nodes(db_path=db_path)
+        for node in result["nodes"]:
+            assert "last_reviewed" in node
+            assert "review_result" in node

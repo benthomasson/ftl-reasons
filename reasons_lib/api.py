@@ -1529,14 +1529,23 @@ def list_nodes(
     min_depth: int | None = None,
     max_depth: int | None = None,
     visible_to: list[str] | None = None,
+    not_reviewed_since: int | None = None,
+    never_reviewed: bool = False,
+    by_impact: bool = False,
     db_path: str = DEFAULT_DB,
 ) -> dict:
     """List nodes with optional filters.
 
     Returns: {"nodes": list[dict], "count": int}
     """
+    from datetime import datetime, timedelta
+
     with _with_network(db_path) as net:
         memo = {} if (min_depth is not None or max_depth is not None) else None
+        if not_reviewed_since is not None:
+            cutoff = datetime.now() - timedelta(days=not_reviewed_since)
+        else:
+            cutoff = None
         nodes = []
         for nid, node in sorted(net.nodes.items()):
             if namespace and not nid.startswith(f"{namespace}:"):
@@ -1557,6 +1566,21 @@ def list_nodes(
                     continue
                 if max_depth is not None and d > max_depth:
                     continue
+            if never_reviewed:
+                if not node.justifications:
+                    continue
+                if node.metadata.get("last_reviewed"):
+                    continue
+            if cutoff is not None:
+                if not node.justifications:
+                    continue
+                last = node.metadata.get("last_reviewed")
+                if last:
+                    try:
+                        if datetime.fromisoformat(last) >= cutoff:
+                            continue
+                    except ValueError:
+                        pass
             nodes.append({
                 "id": nid,
                 "text": node.text,
@@ -1564,7 +1588,11 @@ def list_nodes(
                 "justification_count": len(node.justifications),
                 "dependent_count": len(node.dependents),
                 "challenges": node.metadata.get("challenges", []),
+                "last_reviewed": node.metadata.get("last_reviewed"),
+                "review_result": node.metadata.get("review_result"),
             })
+        if by_impact:
+            nodes.sort(key=lambda n: -n["dependent_count"])
         return {"nodes": nodes, "count": len(nodes)}
 
 
@@ -1718,6 +1746,16 @@ def list_negative(
         }
 
 
+def _classify_review_result(result: dict) -> str:
+    if not result.get("valid", True):
+        return "invalid"
+    if not result.get("sufficient", True):
+        return "insufficient"
+    if not result.get("necessary", True):
+        return "unnecessary"
+    return "pass"
+
+
 def review_beliefs(
     belief_ids: list[str] | None = None,
     model: str = "claude",
@@ -1726,79 +1764,106 @@ def review_beliefs(
     depends_on: str | None = None,
     sample: int | None = None,
     visible_to: list[str] | None = None,
+    dry_run: bool = False,
     db_path: str = DEFAULT_DB,
 ) -> dict:
     """Review derived beliefs for validity, sufficiency, and necessity.
 
     Uses an LLM to evaluate whether each derived belief's reasoning
-    from antecedents to conclusion is sound.
+    from antecedents to conclusion is sound. Writes last_reviewed and
+    review_result metadata to each reviewed node (unless dry_run=True).
 
     Returns: {"results": [...], "reviewed": int, "invalid": int,
               "insufficient": int, "unnecessary": int, "total_derived": int}
     """
+    from datetime import datetime
+
     from .derive import _get_depth
     from .review import review_beliefs as _review
 
-    result = export_network(db_path=db_path)
-    nodes = result.get("nodes", {})
-
-    all_derived = {
-        k: v for k, v in nodes.items()
-        if v.get("truth_value") == "IN"
-        and v.get("justifications")
-        and len(v["justifications"]) > 0
-    }
-    total_derived = len(all_derived)
-
-    candidates = dict(all_derived)
-
-    if belief_ids:
-        candidates = {k: v for k, v in candidates.items() if k in belief_ids}
-
-    if visible_to is not None:
-        tags = set(visible_to)
-        candidates = {
-            k: v for k, v in candidates.items()
-            if not v.get("metadata", {}).get("access_tags")
-            or all(t in tags for t in v["metadata"]["access_tags"])
+    with _with_network(db_path, write=not dry_run) as net:
+        nodes = {
+            nid: {
+                "text": n.text,
+                "truth_value": n.truth_value,
+                "justifications": [
+                    {"type": j.type, "antecedents": j.antecedents, "outlist": j.outlist, "label": j.label}
+                    for j in n.justifications
+                ],
+                "source": n.source,
+                "source_url": n.source_url,
+                "source_hash": n.source_hash,
+                "date": n.date,
+                "metadata": {k: v for k, v in n.metadata.items() if not k.startswith("_")},
+            }
+            for nid, n in sorted(net.nodes.items())
         }
 
-    if min_depth is not None:
-        memo = {}
-        candidates = {
-            k: v for k, v in candidates.items()
-            if _get_depth(k, nodes, all_derived, memo) >= min_depth
+        all_derived = {
+            k: v for k, v in nodes.items()
+            if v.get("truth_value") == "IN"
+            and v.get("justifications")
+            and len(v["justifications"]) > 0
         }
+        total_derived = len(all_derived)
 
-    if depends_on:
-        candidates = {
-            k: v for k, v in candidates.items()
-            if any(
-                depends_on in j.get("antecedents", [])
-                for j in v.get("justifications", [])
-            )
+        candidates = dict(all_derived)
+
+        if belief_ids:
+            candidates = {k: v for k, v in candidates.items() if k in belief_ids}
+
+        if visible_to is not None:
+            tags = set(visible_to)
+            candidates = {
+                k: v for k, v in candidates.items()
+                if not v.get("metadata", {}).get("access_tags")
+                or all(t in tags for t in v["metadata"]["access_tags"])
+            }
+
+        if min_depth is not None:
+            memo = {}
+            candidates = {
+                k: v for k, v in candidates.items()
+                if _get_depth(k, nodes, all_derived, memo) >= min_depth
+            }
+
+        if depends_on:
+            candidates = {
+                k: v for k, v in candidates.items()
+                if any(
+                    depends_on in j.get("antecedents", [])
+                    for j in v.get("justifications", [])
+                )
+            }
+
+        if sample is not None and len(candidates) > sample:
+            import random
+            sampled_keys = random.sample(sorted(candidates.keys()), sample)
+            candidates = {k: candidates[k] for k in sampled_keys}
+
+        review_ids = sorted(candidates.keys())
+        results = _review(nodes, belief_ids=review_ids, model=model, timeout=timeout)
+
+        if not dry_run:
+            now = datetime.now().isoformat(timespec="seconds")
+            result_map = {r["id"]: r for r in results}
+            for nid in review_ids:
+                if nid in net.nodes and nid in result_map:
+                    net.nodes[nid].metadata["last_reviewed"] = now
+                    net.nodes[nid].metadata["review_result"] = _classify_review_result(result_map[nid])
+
+        invalid = sum(1 for r in results if not r.get("valid", True))
+        insufficient = sum(1 for r in results if not r.get("sufficient", True))
+        unnecessary = sum(1 for r in results if not r.get("necessary", True))
+
+        return {
+            "results": results,
+            "reviewed": len(review_ids),
+            "invalid": invalid,
+            "insufficient": insufficient,
+            "unnecessary": unnecessary,
+            "total_derived": total_derived,
         }
-
-    if sample is not None and len(candidates) > sample:
-        import random
-        sampled_keys = random.sample(sorted(candidates.keys()), sample)
-        candidates = {k: candidates[k] for k in sampled_keys}
-
-    review_ids = sorted(candidates.keys())
-    results = _review(nodes, belief_ids=review_ids, model=model, timeout=timeout)
-
-    invalid = sum(1 for r in results if not r.get("valid", True))
-    insufficient = sum(1 for r in results if not r.get("sufficient", True))
-    unnecessary = sum(1 for r in results if not r.get("necessary", True))
-
-    return {
-        "results": results,
-        "reviewed": len(review_ids),
-        "invalid": invalid,
-        "insufficient": insufficient,
-        "unnecessary": unnecessary,
-        "total_derived": total_derived,
-    }
 
 
 def detect_contradictions(
