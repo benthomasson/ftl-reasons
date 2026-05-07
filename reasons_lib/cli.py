@@ -918,6 +918,10 @@ def cmd_list(args):
         db_path=args.db,
     )
 
+    if args.never_reviewed and args.not_reviewed_since is not None:
+        print("Warning: --never-reviewed makes --not-reviewed-since a no-op",
+              file=sys.stderr)
+
     if not result["nodes"]:
         print("No matching nodes.")
         return
