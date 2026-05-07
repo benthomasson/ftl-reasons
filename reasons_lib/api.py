@@ -1781,89 +1781,75 @@ def review_beliefs(
     from .derive import _get_depth
     from .review import review_beliefs as _review
 
-    with _with_network(db_path, write=not dry_run) as net:
-        nodes = {
-            nid: {
-                "text": n.text,
-                "truth_value": n.truth_value,
-                "justifications": [
-                    {"type": j.type, "antecedents": j.antecedents, "outlist": j.outlist, "label": j.label}
-                    for j in n.justifications
-                ],
-                "source": n.source,
-                "source_url": n.source_url,
-                "source_hash": n.source_hash,
-                "date": n.date,
-                "metadata": {k: v for k, v in n.metadata.items() if not k.startswith("_")},
-            }
-            for nid, n in sorted(net.nodes.items())
+    result = export_network(db_path=db_path)
+    nodes = result.get("nodes", {})
+
+    all_derived = {
+        k: v for k, v in nodes.items()
+        if v.get("truth_value") == "IN"
+        and v.get("justifications")
+        and len(v["justifications"]) > 0
+    }
+    total_derived = len(all_derived)
+
+    candidates = dict(all_derived)
+
+    if belief_ids:
+        candidates = {k: v for k, v in candidates.items() if k in belief_ids}
+
+    if visible_to is not None:
+        tags = set(visible_to)
+        candidates = {
+            k: v for k, v in candidates.items()
+            if not v.get("metadata", {}).get("access_tags")
+            or all(t in tags for t in v["metadata"]["access_tags"])
         }
 
-        all_derived = {
-            k: v for k, v in nodes.items()
-            if v.get("truth_value") == "IN"
-            and v.get("justifications")
-            and len(v["justifications"]) > 0
+    if min_depth is not None:
+        memo = {}
+        candidates = {
+            k: v for k, v in candidates.items()
+            if _get_depth(k, nodes, all_derived, memo) >= min_depth
         }
-        total_derived = len(all_derived)
 
-        candidates = dict(all_derived)
+    if depends_on:
+        candidates = {
+            k: v for k, v in candidates.items()
+            if any(
+                depends_on in j.get("antecedents", [])
+                for j in v.get("justifications", [])
+            )
+        }
 
-        if belief_ids:
-            candidates = {k: v for k, v in candidates.items() if k in belief_ids}
+    if sample is not None and len(candidates) > sample:
+        import random
+        sampled_keys = random.sample(sorted(candidates.keys()), sample)
+        candidates = {k: candidates[k] for k in sampled_keys}
 
-        if visible_to is not None:
-            tags = set(visible_to)
-            candidates = {
-                k: v for k, v in candidates.items()
-                if not v.get("metadata", {}).get("access_tags")
-                or all(t in tags for t in v["metadata"]["access_tags"])
-            }
+    review_ids = sorted(candidates.keys())
+    results = _review(nodes, belief_ids=review_ids, model=model, timeout=timeout)
 
-        if min_depth is not None:
-            memo = {}
-            candidates = {
-                k: v for k, v in candidates.items()
-                if _get_depth(k, nodes, all_derived, memo) >= min_depth
-            }
-
-        if depends_on:
-            candidates = {
-                k: v for k, v in candidates.items()
-                if any(
-                    depends_on in j.get("antecedents", [])
-                    for j in v.get("justifications", [])
-                )
-            }
-
-        if sample is not None and len(candidates) > sample:
-            import random
-            sampled_keys = random.sample(sorted(candidates.keys()), sample)
-            candidates = {k: candidates[k] for k in sampled_keys}
-
-        review_ids = sorted(candidates.keys())
-        results = _review(nodes, belief_ids=review_ids, model=model, timeout=timeout)
-
-        if not dry_run:
-            now = datetime.now().isoformat(timespec="seconds")
-            result_map = {r["id"]: r for r in results}
+    if not dry_run and results:
+        now = datetime.now().isoformat(timespec="seconds")
+        result_map = {r["id"]: r for r in results}
+        with _with_network(db_path, write=True) as net:
             for nid in review_ids:
                 if nid in net.nodes and nid in result_map:
                     net.nodes[nid].metadata["last_reviewed"] = now
                     net.nodes[nid].metadata["review_result"] = _classify_review_result(result_map[nid])
 
-        invalid = sum(1 for r in results if not r.get("valid", True))
-        insufficient = sum(1 for r in results if not r.get("sufficient", True))
-        unnecessary = sum(1 for r in results if not r.get("necessary", True))
+    invalid = sum(1 for r in results if not r.get("valid", True))
+    insufficient = sum(1 for r in results if not r.get("sufficient", True))
+    unnecessary = sum(1 for r in results if not r.get("necessary", True))
 
-        return {
-            "results": results,
-            "reviewed": len(review_ids),
-            "invalid": invalid,
-            "insufficient": insufficient,
-            "unnecessary": unnecessary,
-            "total_derived": total_derived,
-        }
+    return {
+        "results": results,
+        "reviewed": len(review_ids),
+        "invalid": invalid,
+        "insufficient": insufficient,
+        "unnecessary": unnecessary,
+        "total_derived": total_derived,
+    }
 
 
 def detect_contradictions(
