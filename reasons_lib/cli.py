@@ -1034,6 +1034,7 @@ def cmd_review_beliefs(args):
             "timeout": args.timeout,
             "dry_run": args.dry_run,
             "filters": {
+                "belief_ids": args.ids or None,
                 "min_depth": args.min_depth,
                 "depends_on": args.depends_on,
                 "sample": args.sample,
