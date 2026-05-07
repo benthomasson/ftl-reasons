@@ -1026,10 +1026,10 @@ def cmd_review_beliefs(args):
     if not args.no_report:
         report_dir = Path(args.report_dir)
         report_dir.mkdir(parents=True, exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        report_path = report_dir / f"review-beliefs-{timestamp}.json"
+        ts = result["timestamp"]
+        report_path = report_dir / f"review-beliefs-{ts.replace(':', '')}.json"
         report = {
-            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "timestamp": ts,
             "model": model,
             "timeout": args.timeout,
             "dry_run": args.dry_run,

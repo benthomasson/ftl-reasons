@@ -1829,8 +1829,9 @@ def review_beliefs(
     review_ids = sorted(candidates.keys())
     results = _review(nodes, belief_ids=review_ids, model=model, timeout=timeout)
 
+    now = datetime.now().isoformat(timespec="seconds")
+
     if not dry_run and results:
-        now = datetime.now().isoformat(timespec="seconds")
         result_map = {r["id"]: r for r in results}
         with _with_network(db_path, write=True) as net:
             for nid in review_ids:
@@ -1849,6 +1850,7 @@ def review_beliefs(
         "insufficient": insufficient,
         "unnecessary": unnecessary,
         "total_derived": total_derived,
+        "timestamp": now,
     }
 
 
