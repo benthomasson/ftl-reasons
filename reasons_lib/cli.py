@@ -1042,6 +1042,7 @@ def cmd_review_beliefs(args):
                 "min_depth": args.min_depth,
                 "depends_on": args.depends_on,
                 "sample": args.sample,
+                "visible_to": _parse_visible_to(args),
             },
             "reviewed": result["reviewed"],
             "total_derived": result["total_derived"],
