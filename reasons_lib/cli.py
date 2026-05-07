@@ -912,18 +912,32 @@ def cmd_list(args):
         min_depth=args.min_depth,
         max_depth=args.max_depth,
         visible_to=_parse_visible_to(args),
+        not_reviewed_since=args.not_reviewed_since,
+        never_reviewed=args.never_reviewed,
+        by_impact=args.by_impact,
         db_path=args.db,
     )
+
+    if args.never_reviewed and args.not_reviewed_since is not None:
+        print("Warning: --never-reviewed makes --not-reviewed-since a no-op",
+              file=sys.stderr)
 
     if not result["nodes"]:
         print("No matching nodes.")
         return
 
+    show_review = args.never_reviewed or args.not_reviewed_since is not None
     for node in result["nodes"]:
         marker = "+" if node["truth_value"] == "IN" else "-"
         jinfo = f"  ({node['justification_count']} justification{'s' if node['justification_count'] != 1 else ''})" if node["justification_count"] else "  (premise)"
         deps = f"  [{node['dependent_count']} dependents]" if node["dependent_count"] else ""
-        print(f"  [{marker}] {node['id']}{jinfo}{deps}")
+        review_info = ""
+        if show_review:
+            if node.get("last_reviewed"):
+                review_info = f"  (reviewed: {node['last_reviewed']}, {node.get('review_result', '?')})"
+            elif node.get("justification_count", 0) > 0:
+                review_info = "  (never reviewed)"
+        print(f"  [{marker}] {node['id']}{jinfo}{deps}{review_info}")
 
     print(f"\n{result['count']} node{'s' if result['count'] != 1 else ''}")
 
@@ -966,6 +980,9 @@ def cmd_list_negative(args):
 
 
 def cmd_review_beliefs(args):
+    import json
+    from datetime import datetime
+
     model = getattr(args, "model", None) or "claude"
     result = api.review_beliefs(
         belief_ids=args.ids or None,
@@ -975,6 +992,7 @@ def cmd_review_beliefs(args):
         depends_on=args.depends_on,
         sample=args.sample,
         visible_to=_parse_visible_to(args),
+        dry_run=args.dry_run,
         db_path=args.db,
     )
 
@@ -1008,6 +1026,35 @@ def cmd_review_beliefs(args):
     print(f"\nReviewed {result['reviewed']} of {result['total_derived']} derived beliefs")
     print(f"  Invalid: {result['invalid']}  Insufficient: {result['insufficient']}"
           f"  Unnecessary: {result['unnecessary']}")
+
+    if not args.no_report:
+        report_dir = Path(args.report_dir)
+        report_dir.mkdir(parents=True, exist_ok=True)
+        ts = result["timestamp"]
+        report_path = report_dir / f"review-beliefs-{ts.replace(':', '')}.json"
+        report = {
+            "timestamp": ts,
+            "model": model,
+            "timeout": args.timeout,
+            "dry_run": args.dry_run,
+            "filters": {
+                "belief_ids": args.ids or None,
+                "min_depth": args.min_depth,
+                "depends_on": args.depends_on,
+                "sample": args.sample,
+                "visible_to": _parse_visible_to(args),
+            },
+            "reviewed": result["reviewed"],
+            "total_derived": result["total_derived"],
+            "summary": {
+                "invalid": result["invalid"],
+                "insufficient": result["insufficient"],
+                "unnecessary": result["unnecessary"],
+            },
+            "results": result["results"],
+        }
+        report_path.write_text(json.dumps(report, indent=2))
+        print(f"  Report: {report_path}")
 
     if args.output:
         with open(args.output, "w") as f:
@@ -1390,6 +1437,10 @@ def main():
                    help="Write findings to markdown file")
     p.add_argument("--visible-to", metavar="TAG,TAG",
                    help="Only review nodes whose access_tags are a subset of these tags")
+    p.add_argument("--report-dir", default="reviews",
+                   help="Directory for JSON reports (default: reviews/)")
+    p.add_argument("--no-report", action="store_true",
+                   help="Skip JSON report generation")
 
     # contradictions
     p = sub.add_parser("contradictions", help="Detect contradictions between IN beliefs")
@@ -1419,6 +1470,12 @@ def main():
     p.add_argument("--max-depth", type=int, default=None,
                    help="Only show beliefs at this depth or shallower")
     p.add_argument("--visible-to", metavar="TAG,TAG", help="Only show nodes whose access_tags are a subset of these tags")
+    p.add_argument("--not-reviewed-since", type=int, default=None, metavar="DAYS",
+                   help="Derived beliefs not reviewed in the last N days (or never)")
+    p.add_argument("--never-reviewed", action="store_true",
+                   help="Derived beliefs that have never been reviewed")
+    p.add_argument("--by-impact", action="store_true",
+                   help="Sort output by dependent count (descending)")
 
     args = parser.parse_args()
     if not args.command:

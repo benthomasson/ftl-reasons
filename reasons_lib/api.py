@@ -1529,14 +1529,23 @@ def list_nodes(
     min_depth: int | None = None,
     max_depth: int | None = None,
     visible_to: list[str] | None = None,
+    not_reviewed_since: int | None = None,
+    never_reviewed: bool = False,
+    by_impact: bool = False,
     db_path: str = DEFAULT_DB,
 ) -> dict:
     """List nodes with optional filters.
 
     Returns: {"nodes": list[dict], "count": int}
     """
+    from datetime import datetime, timedelta
+
     with _with_network(db_path) as net:
         memo = {} if (min_depth is not None or max_depth is not None) else None
+        if not_reviewed_since is not None:
+            cutoff = datetime.now() - timedelta(days=not_reviewed_since)
+        else:
+            cutoff = None
         nodes = []
         for nid, node in sorted(net.nodes.items()):
             if namespace and not nid.startswith(f"{namespace}:"):
@@ -1557,6 +1566,21 @@ def list_nodes(
                     continue
                 if max_depth is not None and d > max_depth:
                     continue
+            if never_reviewed:
+                if not node.justifications:
+                    continue
+                if node.metadata.get("last_reviewed"):
+                    continue
+            if cutoff is not None:
+                if not node.justifications:
+                    continue
+                last = node.metadata.get("last_reviewed")
+                if last:
+                    try:
+                        if datetime.fromisoformat(last) >= cutoff:
+                            continue
+                    except ValueError:
+                        pass
             nodes.append({
                 "id": nid,
                 "text": node.text,
@@ -1564,7 +1588,11 @@ def list_nodes(
                 "justification_count": len(node.justifications),
                 "dependent_count": len(node.dependents),
                 "challenges": node.metadata.get("challenges", []),
+                "last_reviewed": node.metadata.get("last_reviewed"),
+                "review_result": node.metadata.get("review_result"),
             })
+        if by_impact:
+            nodes.sort(key=lambda n: -n["dependent_count"])
         return {"nodes": nodes, "count": len(nodes)}
 
 
@@ -1718,6 +1746,16 @@ def list_negative(
         }
 
 
+def _classify_review_result(result: dict) -> str:
+    if not result.get("valid", True):
+        return "invalid"
+    if not result.get("sufficient", True):
+        return "insufficient"
+    if not result.get("necessary", True):
+        return "unnecessary"
+    return "pass"
+
+
 def review_beliefs(
     belief_ids: list[str] | None = None,
     model: str = "claude",
@@ -1726,16 +1764,20 @@ def review_beliefs(
     depends_on: str | None = None,
     sample: int | None = None,
     visible_to: list[str] | None = None,
+    dry_run: bool = False,
     db_path: str = DEFAULT_DB,
 ) -> dict:
     """Review derived beliefs for validity, sufficiency, and necessity.
 
     Uses an LLM to evaluate whether each derived belief's reasoning
-    from antecedents to conclusion is sound.
+    from antecedents to conclusion is sound. Writes last_reviewed and
+    review_result metadata to each reviewed node (unless dry_run=True).
 
     Returns: {"results": [...], "reviewed": int, "invalid": int,
               "insufficient": int, "unnecessary": int, "total_derived": int}
     """
+    from datetime import datetime
+
     from .derive import _get_depth
     from .review import review_beliefs as _review
 
@@ -1787,6 +1829,16 @@ def review_beliefs(
     review_ids = sorted(candidates.keys())
     results = _review(nodes, belief_ids=review_ids, model=model, timeout=timeout)
 
+    now = datetime.now().isoformat(timespec="seconds")
+
+    if not dry_run and results:
+        result_map = {r["id"]: r for r in results}
+        with _with_network(db_path, write=True) as net:
+            for nid in review_ids:
+                if nid in net.nodes and nid in result_map:
+                    net.nodes[nid].metadata["last_reviewed"] = now
+                    net.nodes[nid].metadata["review_result"] = _classify_review_result(result_map[nid])
+
     invalid = sum(1 for r in results if not r.get("valid", True))
     insufficient = sum(1 for r in results if not r.get("sufficient", True))
     unnecessary = sum(1 for r in results if not r.get("necessary", True))
@@ -1798,6 +1850,7 @@ def review_beliefs(
         "insufficient": insufficient,
         "unnecessary": unnecessary,
         "total_derived": total_derived,
+        "timestamp": now,
     }
 
 
