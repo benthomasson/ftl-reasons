@@ -382,8 +382,11 @@ def _sync_claims(network, agent_name, claims, source_path, nogoods):
             node.metadata["imported_from"] = source_path
 
             if is_out and not claim["raw_justifications"]:
-                if not _justifications_match(node.justifications, []):
-                    _update_node_justifications(network, node_id, [])
+                new_justs = _build_justifications(
+                    claim, prefix, inactive_id, agent_name
+                )
+                if not _justifications_match(node.justifications, new_justs):
+                    _update_node_justifications(network, node_id, new_justs)
                     changed = True
                 retract_after.append(node_id)
             elif is_out:

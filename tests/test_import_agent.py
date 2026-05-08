@@ -253,8 +253,9 @@ New security posture that supersedes v1
     v2 = api.show_node("sec-agent:security-v2", db_path=db)
     assert v2["truth_value"] == "IN"
     assert v1["truth_value"] == "OUT"
-    # v1 is OUT in source → imported as bare premise (no justification)
-    assert v1["justifications"] == []
+    # v1 is OUT in source → retracted but keeps inactive gate justification
+    assert len(v1["justifications"]) == 1
+    assert "sec-agent:inactive" in v1["justifications"][0]["outlist"]
 
 
 def test_import_agent_json(db, tmp_path):
@@ -305,10 +306,11 @@ def test_import_agent_json(db, tmp_path):
     # blocker-c is OUT → outlist satisfied → derived-b is IN
     assert node["truth_value"] == "IN"
 
-    # blocker-c is OUT in source → bare premise, retracted
+    # blocker-c is OUT in source → retracted but keeps inactive gate justification
     blocker = api.show_node("json-agent:blocker-c", db_path=db)
     assert blocker["truth_value"] == "OUT"
-    assert blocker["justifications"] == []
+    assert len(blocker["justifications"]) == 1
+    assert "json-agent:inactive" in blocker["justifications"][0]["outlist"]
 
 
 def test_import_agent_json_outlist_blocks(db, tmp_path):
