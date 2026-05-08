@@ -179,7 +179,7 @@ def _build_beliefs_section(nodes, derived, agents=None, max_beliefs=300,
         n_clusters: Override automatic cluster count.
 
     Returns:
-        (section_text, cluster_stats) if cluster=True, else section_text.
+        (section_text, cluster_stats) — cluster_stats is None when cluster=False.
     """
     lines = []
     rng = random.Random(seed) if sample else None
@@ -315,7 +315,7 @@ def _build_beliefs_section(nodes, derived, agents=None, max_beliefs=300,
                     lines.append(f"- `{belief_id}`: {text}")
                     count += 1
 
-    return "\n".join(lines)
+    return "\n".join(lines), None
 
 
 def _build_derived_section(nodes, derived):
@@ -488,17 +488,12 @@ def build_prompt(nodes, domain=None, topic=None, budget=300, sample=False,
             parts.append(f"  - {name}: {len(agents[name])} beliefs")
         agents_stats = "\n".join(parts)
 
-    cluster_stats = None
-    result = _build_beliefs_section(
+    beliefs_section, cluster_stats = _build_beliefs_section(
         nodes, derived, agents, max_beliefs=budget,
         sample=sample, seed=seed,
         cluster=cluster, cluster_cache=cluster_cache,
         embedding_model=embedding_model, n_clusters=n_clusters,
     )
-    if cluster:
-        beliefs_section, cluster_stats = result
-    else:
-        beliefs_section = result
     derived_section = _build_derived_section(nodes, derived)
 
     prompt = DERIVE_PROMPT.format(

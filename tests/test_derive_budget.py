@@ -73,7 +73,7 @@ class TestCountLinearNotQuadratic:
             {"agent-a": [f"b{i}" for i in range(6)]},
             local_beliefs=[f"local-{i}" for i in range(20)],
         )
-        output = _build_beliefs_section(nodes, derived, agents, max_beliefs=20)
+        output, _ = _build_beliefs_section(nodes, derived, agents, max_beliefs=20)
         local_shown = _count_local_shown(output)
         assert local_shown > 5, "Bug regression: locals starved to floor"
         assert local_shown == 15
@@ -84,7 +84,7 @@ class TestCountLinearNotQuadratic:
             {"agent-a": [f"b{i}" for i in range(10)]},
             local_beliefs=[f"local-{i}" for i in range(50)],
         )
-        output = _build_beliefs_section(nodes, derived, agents, max_beliefs=20)
+        output, _ = _build_beliefs_section(nodes, derived, agents, max_beliefs=20)
         agent_shown = _count_agent_shown(output, "agent-a")
         local_shown = _count_local_shown(output)
         total_used = agent_shown + local_shown
@@ -104,7 +104,7 @@ class TestMultiAgent:
             },
             local_beliefs=[f"local-{i}" for i in range(30)],
         )
-        output = _build_beliefs_section(nodes, derived, agents, max_beliefs=20)
+        output, _ = _build_beliefs_section(nodes, derived, agents, max_beliefs=20)
         a_shown = _count_agent_shown(output, "agent-a")
         b_shown = _count_agent_shown(output, "agent-b")
         local_shown = _count_local_shown(output)
@@ -120,7 +120,7 @@ class TestMultiAgent:
             },
             local_beliefs=[f"local-{i}" for i in range(30)],
         )
-        output = _build_beliefs_section(nodes, derived, agents, max_beliefs=30)
+        output, _ = _build_beliefs_section(nodes, derived, agents, max_beliefs=30)
         total_agent = sum(
             _count_agent_shown(output, a) for a in ["alpha", "beta", "gamma"]
         )
@@ -143,7 +143,7 @@ class TestBudgetFloor:
             {"agent-a": [f"b{i}" for i in range(50)]},
             local_beliefs=[f"local-{i}" for i in range(10)],
         )
-        output = _build_beliefs_section(nodes, derived, agents, max_beliefs=20)
+        output, _ = _build_beliefs_section(nodes, derived, agents, max_beliefs=20)
         local_shown = _count_local_shown(output)
         assert local_shown >= 5
 
@@ -158,7 +158,7 @@ class TestBudgetFloor:
             {"agent-a": [f"b{i}" for i in range(200)]},
             local_beliefs=[f"local-{i}" for i in range(10)],
         )
-        output = _build_beliefs_section(nodes, derived, agents, max_beliefs=20)
+        output, _ = _build_beliefs_section(nodes, derived, agents, max_beliefs=20)
         local_shown = _count_local_shown(output)
         assert local_shown == 5
 
@@ -173,7 +173,7 @@ class TestEdgeCases:
             {"agent-a": ["only-one"]},
             local_beliefs=[f"local-{i}" for i in range(10)],
         )
-        output = _build_beliefs_section(nodes, derived, agents, max_beliefs=20)
+        output, _ = _build_beliefs_section(nodes, derived, agents, max_beliefs=20)
         agent_shown = _count_agent_shown(output, "agent-a")
         local_shown = _count_local_shown(output)
         assert agent_shown == 1
@@ -184,7 +184,7 @@ class TestEdgeCases:
         nodes = {f"belief-{i}": {"truth_value": "IN", "text": f"Belief {i}"}
                  for i in range(10)}
         derived = {}
-        output = _build_beliefs_section(nodes, derived, agents=None, max_beliefs=20)
+        output, _ = _build_beliefs_section(nodes, derived, agents=None, max_beliefs=20)
         assert "Agent:" not in output
         assert "belief-" in output
 
@@ -194,18 +194,18 @@ class TestEdgeCases:
             {"agent-a": [f"b{i}" for i in range(5)]},
             local_beliefs=[],
         )
-        output = _build_beliefs_section(nodes, derived, agents, max_beliefs=20)
+        output, _ = _build_beliefs_section(nodes, derived, agents, max_beliefs=20)
         assert "Local beliefs" not in output
         assert "Agent: agent-a" in output
 
     def test_empty_network(self):
         """Zero beliefs: no crash, produces output."""
-        output = _build_beliefs_section({}, {}, agents=None, max_beliefs=20)
+        output, _ = _build_beliefs_section({}, {}, agents=None, max_beliefs=20)
         assert isinstance(output, str)
 
     def test_empty_network_with_agents(self):
         """Agents dict provided but no matching nodes."""
-        output = _build_beliefs_section(
+        output, _ = _build_beliefs_section(
             {}, {}, agents={"agent-a": ["agent-a:missing"]}, max_beliefs=20,
         )
         assert isinstance(output, str)
@@ -223,7 +223,7 @@ class TestEdgeCases:
         }
         derived = {"agent-a:derived-1": nodes["agent-a:derived-1"]}
         agents = {"agent-a": ["agent-a:premise-1", "agent-a:premise-2", "agent-a:derived-1"]}
-        output = _build_beliefs_section(nodes, derived, agents, max_beliefs=20)
+        output, _ = _build_beliefs_section(nodes, derived, agents, max_beliefs=20)
         assert "Agent: agent-a" in output
 
 
@@ -237,7 +237,7 @@ class TestSampling:
             {"agent-a": [f"b{i}" for i in range(6)]},
             local_beliefs=[f"local-{i}" for i in range(20)],
         )
-        output = _build_beliefs_section(
+        output, _ = _build_beliefs_section(
             nodes, derived, agents, max_beliefs=20, sample=True, seed=42,
         )
         local_shown = _count_local_shown(output)
@@ -249,10 +249,10 @@ class TestSampling:
             {"agent-a": [f"b{i}" for i in range(20)]},
             local_beliefs=[f"local-{i}" for i in range(20)],
         )
-        out1 = _build_beliefs_section(
+        out1, _ = _build_beliefs_section(
             nodes, derived, agents, max_beliefs=15, sample=True, seed=99,
         )
-        out2 = _build_beliefs_section(
+        out2, _ = _build_beliefs_section(
             nodes, derived, agents, max_beliefs=15, sample=True, seed=99,
         )
         assert out1 == out2

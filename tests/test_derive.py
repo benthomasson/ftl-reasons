@@ -917,3 +917,13 @@ def test_build_prompt_with_cluster(simple_network):
     assert "n_clusters" in stats
     assert "embedding_model" in stats
     assert len(prompt) > 0
+
+
+@skip_no_cluster
+def test_build_prompt_cluster_with_agents(agent_network):
+    nodes = api.export_network(db_path=agent_network)["nodes"]
+    prompt, stats = build_prompt(nodes, cluster=True, budget=10, seed=42)
+    assert stats.get("cluster") is True
+    assert stats["agents"] == 2
+    assert "Agent: agent-a" in prompt
+    assert "Agent: agent-b" in prompt
