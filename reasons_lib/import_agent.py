@@ -307,6 +307,7 @@ def _import_claims(network, agent_name, claims, source_path, nogoods):
             retract_after.append(node_id)
         elif claim["is_out"]:
             network.nodes[node_id].metadata["_retracted"] = True
+            network.nodes[node_id].truth_value = "OUT"
 
     nogoods_imported = _import_nogoods(network, prefix, nogoods)
 
@@ -405,6 +406,9 @@ def _sync_claims(network, agent_name, claims, source_path, nogoods):
                 if not node.metadata.get("_retracted"):
                     node.metadata["_retracted"] = True
                     changed = True
+                if node.truth_value != "OUT":
+                    node.truth_value = "OUT"
+                    changed = True
             else:
                 new_justs = _build_justifications(
                     claim, prefix, inactive_id, agent_name
@@ -455,6 +459,7 @@ def _sync_claims(network, agent_name, claims, source_path, nogoods):
                 # matching the existing-node sync path which relies on
                 # _retracted to keep OUT-with-justifications nodes locked.
                 network.nodes[node_id].metadata["_retracted"] = True
+                network.nodes[node_id].truth_value = "OUT"
 
     beliefs_removed = 0
     removed_ids = local_agent_ids - remote_ids

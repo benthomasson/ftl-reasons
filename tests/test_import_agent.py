@@ -450,6 +450,41 @@ def test_retracted_json_belief_survives_propagate(db, tmp_path):
     assert b["truth_value"] == "OUT", "dependent of retracted premise resurrected"
 
 
+def test_out_with_satisfied_justifications_stays_out(db, tmp_path):
+    """Regression: OUT node whose justifications are satisfied must not be IN after import."""
+    import json
+
+    data = {
+        "nodes": {
+            "fact-a": {
+                "text": "A fact",
+                "truth_value": "IN",
+                "justifications": [],
+            },
+            "derived-out": {
+                "text": "Derived from A but marked OUT in source",
+                "truth_value": "OUT",
+                "justifications": [{
+                    "type": "SL",
+                    "antecedents": ["fact-a"],
+                    "label": "would be satisfied",
+                }],
+            },
+        },
+        "nogoods": [],
+    }
+
+    p = tmp_path / "network.json"
+    p.write_text(json.dumps(data))
+
+    api.import_agent("sat-agent", str(p), db_path=db)
+
+    node = api.show_node("sat-agent:derived-out", db_path=db)
+    assert node["truth_value"] == "OUT", (
+        "OUT node with satisfied justifications was resurrected to IN"
+    )
+
+
 def test_import_agent_registers_repo(db, beliefs_file):
     api.import_agent("test-agent", beliefs_file, db_path=db)
     repos = api.list_repos(db_path=db)["repos"]
