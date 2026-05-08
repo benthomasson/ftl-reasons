@@ -305,6 +305,8 @@ def _import_claims(network, agent_name, claims, source_path, nogoods):
 
         if claim["is_out"] and not claim["raw_justifications"]:
             retract_after.append(node_id)
+        elif claim["is_out"]:
+            network.nodes[node_id].metadata["_retracted"] = True
 
     nogoods_imported = _import_nogoods(network, prefix, nogoods)
 
@@ -391,14 +393,17 @@ def _sync_claims(network, agent_name, claims, source_path, nogoods):
                 retract_after.append(node_id)
             elif is_out:
                 # Preserve justifications so the node can resurrect when the
-                # remote flips it to IN. _retracted stays set intentionally —
-                # both _propagate() and recompute_all() respect it, so the
-                # node stays OUT until the remote explicitly sends IN.
+                # remote flips it to IN. _retracted is set so both _propagate()
+                # and recompute_all() skip the node — it stays OUT until the
+                # remote explicitly sends IN (the else branch clears _retracted).
                 new_justs = _build_justifications(
                     claim, prefix, inactive_id, agent_name
                 )
                 if not _justifications_match(node.justifications, new_justs):
                     _update_node_justifications(network, node_id, new_justs)
+                    changed = True
+                if not node.metadata.get("_retracted"):
+                    node.metadata["_retracted"] = True
                     changed = True
             else:
                 new_justs = _build_justifications(
