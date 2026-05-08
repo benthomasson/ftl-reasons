@@ -518,6 +518,109 @@ class TestSyncAgentRevocation:
         assert node["truth_value"] == "OUT"
 
 
+class TestSyncOutWithJustifications:
+    """Sync tests for OUT nodes that preserve justifications (JSON path)."""
+
+    def test_sync_in_to_out_preserves_justifications(self, db, tmp_path):
+        """JSON sync: IN→OUT transition preserves justifications and forces OUT."""
+        initial = {
+            "nodes": {
+                "fact": {"text": "A fact", "truth_value": "IN", "justifications": []},
+                "derived": {
+                    "text": "Derived from fact",
+                    "truth_value": "IN",
+                    "justifications": [{"type": "SL", "antecedents": ["fact"]}],
+                },
+            },
+            "nogoods": [],
+        }
+        p = tmp_path / "network.json"
+        p.write_text(json.dumps(initial))
+        api.import_agent("owj-agent", str(p), db_path=db)
+
+        node = api.show_node("owj-agent:derived", db_path=db)
+        assert node["truth_value"] == "IN"
+
+        updated = {
+            "nodes": {
+                "fact": {"text": "A fact", "truth_value": "IN", "justifications": []},
+                "derived": {
+                    "text": "Derived from fact",
+                    "truth_value": "OUT",
+                    "justifications": [{"type": "SL", "antecedents": ["fact"]}],
+                },
+            },
+            "nogoods": [],
+        }
+        p.write_text(json.dumps(updated))
+        result = api.sync_agent("owj-agent", str(p), db_path=db)
+
+        node = api.show_node("owj-agent:derived", db_path=db)
+        assert node["truth_value"] == "OUT"
+        assert len(node["justifications"]) >= 1
+
+    def test_sync_out_to_in_clears_retracted(self, db, tmp_path):
+        """JSON sync: OUT→IN transition clears _retracted and resurrects."""
+        initial = {
+            "nodes": {
+                "fact": {"text": "A fact", "truth_value": "IN", "justifications": []},
+                "gated": {
+                    "text": "Gated belief",
+                    "truth_value": "OUT",
+                    "justifications": [{"type": "SL", "antecedents": ["fact"]}],
+                },
+            },
+            "nogoods": [],
+        }
+        p = tmp_path / "network.json"
+        p.write_text(json.dumps(initial))
+        api.import_agent("res-agent", str(p), db_path=db)
+
+        node = api.show_node("res-agent:gated", db_path=db)
+        assert node["truth_value"] == "OUT"
+
+        updated = {
+            "nodes": {
+                "fact": {"text": "A fact", "truth_value": "IN", "justifications": []},
+                "gated": {
+                    "text": "Gated belief",
+                    "truth_value": "IN",
+                    "justifications": [{"type": "SL", "antecedents": ["fact"]}],
+                },
+            },
+            "nogoods": [],
+        }
+        p.write_text(json.dumps(updated))
+        result = api.sync_agent("res-agent", str(p), db_path=db)
+
+        node = api.show_node("res-agent:gated", db_path=db)
+        assert node["truth_value"] == "IN"
+
+    def test_sync_out_with_justifications_idempotent(self, db, tmp_path):
+        """JSON sync: re-syncing OUT-with-justifications is a no-op."""
+        data = {
+            "nodes": {
+                "fact": {"text": "A fact", "truth_value": "IN", "justifications": []},
+                "derived": {
+                    "text": "Derived from fact",
+                    "truth_value": "OUT",
+                    "justifications": [{"type": "SL", "antecedents": ["fact"]}],
+                },
+            },
+            "nogoods": [],
+        }
+        p = tmp_path / "network.json"
+        p.write_text(json.dumps(data))
+        api.import_agent("idem-agent", str(p), db_path=db)
+
+        result1 = api.sync_agent("idem-agent", str(p), db_path=db)
+        result2 = api.sync_agent("idem-agent", str(p), db_path=db)
+
+        assert result2["beliefs_updated"] == 0
+        assert result2["beliefs_added"] == 0
+        assert result2["beliefs_removed"] == 0
+
+
 class TestSyncRegistersRepo:
 
     def test_sync_registers_repo(self, initial_import):

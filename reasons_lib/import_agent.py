@@ -528,8 +528,10 @@ def import_agent(
     'agent_name:inactive' (IN when active is OUT). Imported beliefs have
     inactive in their outlist — retracting active cascades everything OUT.
 
-    Beliefs that are OUT/STALE in the source are imported as bare premises
-    with no justification, so recompute_all cannot resurrect them.
+    Beliefs that are OUT/STALE in the source are marked with _retracted
+    metadata so recompute_all cannot resurrect them. JSON imports preserve
+    justifications on OUT nodes (enabling future resurrection when the remote
+    flips to IN); markdown imports strip them (bare premise path).
     """
     claims = _normalize_markdown(beliefs_text, only_in)
     nogoods = _normalize_nogoods_markdown(nogoods_text)
