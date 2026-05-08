@@ -141,17 +141,14 @@ def _normalize_json(data, only_in=False):
         is_out = ndata.get("truth_value") == "OUT"
         meta = dict(ndata.get("metadata", {}))
 
-        if is_out:
-            raw_justs = []
-        else:
-            raw_justs = []
-            for j in ndata.get("justifications", []):
-                raw_justs.append({
-                    "type": j.get("type", "SL"),
-                    "antecedents": list(j.get("antecedents", [])),
-                    "outlist": [o for o in j.get("outlist", []) if o in node_ids],
-                    "label": j.get("label"),
-                })
+        raw_justs = []
+        for j in ndata.get("justifications", []):
+            raw_justs.append({
+                "type": j.get("type", "SL"),
+                "antecedents": list(j.get("antecedents", [])),
+                "outlist": [o for o in j.get("outlist", []) if o in node_ids],
+                "label": j.get("label"),
+            })
 
         normalized.append({
             "id": nid,
@@ -219,9 +216,6 @@ def _topo_sort_claims(claims):
 
 def _build_justifications(claim, prefix, inactive_id, agent_name):
     """Build Justification objects from a normalized claim."""
-    if claim["is_out"]:
-        return []
-
     justs = []
     for rj in claim["raw_justifications"]:
         antecedents = [f"{prefix}{a}" for a in rj["antecedents"]]
@@ -309,8 +303,11 @@ def _import_claims(network, agent_name, claims, source_path, nogoods):
         )
         imported += 1
 
-        if claim["is_out"]:
+        if claim["is_out"] and not claim["raw_justifications"]:
             retract_after.append(node_id)
+        elif claim["is_out"]:
+            network.nodes[node_id].metadata["_retracted"] = True
+            network.nodes[node_id].truth_value = "OUT"
 
     nogoods_imported = _import_nogoods(network, prefix, nogoods)
 
@@ -387,11 +384,31 @@ def _sync_claims(network, agent_name, claims, source_path, nogoods):
                     node.metadata[k] = v
             node.metadata["imported_from"] = source_path
 
-            if is_out:
-                if not _justifications_match(node.justifications, []):
-                    _update_node_justifications(network, node_id, [])
+            if is_out and not claim["raw_justifications"]:
+                new_justs = _build_justifications(
+                    claim, prefix, inactive_id, agent_name
+                )
+                if not _justifications_match(node.justifications, new_justs):
+                    _update_node_justifications(network, node_id, new_justs)
                     changed = True
                 retract_after.append(node_id)
+            elif is_out:
+                # Preserve justifications so the node can resurrect when the
+                # remote flips it to IN. _retracted is set so both _propagate()
+                # and recompute_all() skip the node — it stays OUT until the
+                # remote explicitly sends IN (the else branch clears _retracted).
+                new_justs = _build_justifications(
+                    claim, prefix, inactive_id, agent_name
+                )
+                if not _justifications_match(node.justifications, new_justs):
+                    _update_node_justifications(network, node_id, new_justs)
+                    changed = True
+                if not node.metadata.get("_retracted"):
+                    node.metadata["_retracted"] = True
+                    changed = True
+                if node.truth_value != "OUT":
+                    node.truth_value = "OUT"
+                    changed = True
             else:
                 new_justs = _build_justifications(
                     claim, prefix, inactive_id, agent_name
@@ -435,8 +452,14 @@ def _sync_claims(network, agent_name, claims, source_path, nogoods):
             )
             beliefs_added += 1
 
-            if is_out:
+            if is_out and not claim["raw_justifications"]:
                 retract_after.append(node_id)
+            elif is_out:
+                # Set _retracted directly instead of using retract_after,
+                # matching the existing-node sync path which relies on
+                # _retracted to keep OUT-with-justifications nodes locked.
+                network.nodes[node_id].metadata["_retracted"] = True
+                network.nodes[node_id].truth_value = "OUT"
 
     beliefs_removed = 0
     removed_ids = local_agent_ids - remote_ids
@@ -505,8 +528,10 @@ def import_agent(
     'agent_name:inactive' (IN when active is OUT). Imported beliefs have
     inactive in their outlist — retracting active cascades everything OUT.
 
-    Beliefs that are OUT/STALE in the source are imported as bare premises
-    with no justification, so recompute_all cannot resurrect them.
+    Beliefs that are OUT/STALE in the source are marked with _retracted
+    metadata so recompute_all cannot resurrect them. JSON imports preserve
+    justifications on OUT nodes (enabling future resurrection when the remote
+    flips to IN); markdown imports strip them (bare premise path).
     """
     claims = _normalize_markdown(beliefs_text, only_in)
     nogoods = _normalize_nogoods_markdown(nogoods_text)

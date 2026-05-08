@@ -253,8 +253,9 @@ New security posture that supersedes v1
     v2 = api.show_node("sec-agent:security-v2", db_path=db)
     assert v2["truth_value"] == "IN"
     assert v1["truth_value"] == "OUT"
-    # v1 is OUT in source → imported as bare premise (no justification)
-    assert v1["justifications"] == []
+    # v1 is OUT in source → retracted but keeps inactive gate justification
+    assert len(v1["justifications"]) == 1
+    assert "sec-agent:inactive" in v1["justifications"][0]["outlist"]
 
 
 def test_import_agent_json(db, tmp_path):
@@ -305,10 +306,11 @@ def test_import_agent_json(db, tmp_path):
     # blocker-c is OUT → outlist satisfied → derived-b is IN
     assert node["truth_value"] == "IN"
 
-    # blocker-c is OUT in source → bare premise, retracted
+    # blocker-c is OUT in source → retracted but keeps inactive gate justification
     blocker = api.show_node("json-agent:blocker-c", db_path=db)
     assert blocker["truth_value"] == "OUT"
-    assert blocker["justifications"] == []
+    assert len(blocker["justifications"]) == 1
+    assert "json-agent:inactive" in blocker["justifications"][0]["outlist"]
 
 
 def test_import_agent_json_outlist_blocks(db, tmp_path):
@@ -446,6 +448,41 @@ def test_retracted_json_belief_survives_propagate(db, tmp_path):
 
     b = api.show_node("jfix-agent:derived-b", db_path=db)
     assert b["truth_value"] == "OUT", "dependent of retracted premise resurrected"
+
+
+def test_out_with_satisfied_justifications_stays_out(db, tmp_path):
+    """Regression: OUT node whose justifications are satisfied must not be IN after import."""
+    import json
+
+    data = {
+        "nodes": {
+            "fact-a": {
+                "text": "A fact",
+                "truth_value": "IN",
+                "justifications": [],
+            },
+            "derived-out": {
+                "text": "Derived from A but marked OUT in source",
+                "truth_value": "OUT",
+                "justifications": [{
+                    "type": "SL",
+                    "antecedents": ["fact-a"],
+                    "label": "would be satisfied",
+                }],
+            },
+        },
+        "nogoods": [],
+    }
+
+    p = tmp_path / "network.json"
+    p.write_text(json.dumps(data))
+
+    api.import_agent("sat-agent", str(p), db_path=db)
+
+    node = api.show_node("sat-agent:derived-out", db_path=db)
+    assert node["truth_value"] == "OUT", (
+        "OUT node with satisfied justifications was resurrected to IN"
+    )
 
 
 def test_import_agent_registers_repo(db, beliefs_file):
