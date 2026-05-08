@@ -775,3 +775,122 @@ def test_dedup_plan_user_can_edit_kept(db):
     assert node["truth_value"] == "IN"
     node = api.show_node("gl108-validation-disabled", db_path=db)
     assert node["truth_value"] == "OUT"
+
+
+# --- Derive report tests ---
+
+import json
+import sys
+from io import StringIO
+from unittest.mock import patch
+from reasons_lib.cli import main
+
+
+def _run_cli(*args, db_path=None):
+    argv = ["reasons"]
+    if db_path:
+        argv += ["--db", db_path]
+    argv += list(args)
+    stdout, stderr = StringIO(), StringIO()
+    with patch.object(sys, "argv", argv), \
+         patch.object(sys, "stdout", stdout), \
+         patch.object(sys, "stderr", stderr):
+        try:
+            main()
+        except SystemExit as e:
+            return stdout.getvalue(), stderr.getvalue(), e.code
+    return stdout.getvalue(), stderr.getvalue(), 0
+
+
+def _mock_derive_response(proposals):
+    """Build a mock LLM response with DERIVE blocks."""
+    blocks = []
+    for p in proposals:
+        ants = ", ".join(p["antecedents"])
+        blocks.append(
+            f"### DERIVE {p['id']}\n"
+            f"{p['text']}\n"
+            f"- Antecedents: {ants}\n"
+            f"- Label: test derivation"
+        )
+    text = "\n\n".join(blocks)
+    return type("R", (), {"returncode": 0, "stdout": text, "stderr": ""})()
+
+
+def test_derive_report_written(simple_network, tmp_path):
+    report_dir = str(tmp_path / "reports")
+    mock_result = _mock_derive_response([
+        {"id": "new-belief", "text": "A new derived belief",
+         "antecedents": ["fact-a", "fact-b"]},
+    ])
+    with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+         patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        stdout, stderr, code = _run_cli(
+            "derive", "--auto", "--report-dir", report_dir,
+            db_path=simple_network)
+
+    assert code == 0
+    import os
+    reports = [f for f in os.listdir(report_dir) if f.startswith("derive-")]
+    assert len(reports) == 1
+
+    with open(os.path.join(report_dir, reports[0])) as f:
+        report = json.load(f)
+    assert report["status"] == "complete"
+    assert report["model"] == "claude"
+    assert len(report["rounds"]) == 1
+    assert report["rounds"][0]["proposals_found"] >= 1
+    assert report["rounds"][0]["added"] >= 1
+    assert report["total_added"] >= 1
+
+
+def test_derive_no_report_flag(simple_network, tmp_path):
+    report_dir = str(tmp_path / "reports")
+    mock_result = _mock_derive_response([
+        {"id": "new-belief-2", "text": "Another belief",
+         "antecedents": ["fact-a"]},
+    ])
+    with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+         patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        stdout, stderr, code = _run_cli(
+            "derive", "--auto", "--no-report", "--report-dir", report_dir,
+            db_path=simple_network)
+
+    assert code == 0
+    assert "Report:" not in stdout
+    import os
+    assert not os.path.exists(report_dir)
+
+
+def test_derive_exhaust_report_has_rounds(simple_network, tmp_path):
+    report_dir = str(tmp_path / "reports")
+    call_count = [0]
+
+    def mock_run(*a, **kw):
+        call_count[0] += 1
+        if call_count[0] == 1:
+            return _mock_derive_response([
+                {"id": "round1-belief", "text": "From round 1",
+                 "antecedents": ["fact-a"]},
+            ])
+        # Second round: no proposals (saturated)
+        return type("R", (), {"returncode": 0, "stdout": "No proposals.", "stderr": ""})()
+
+    with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+         patch("reasons_lib.llm.subprocess.run", side_effect=mock_run):
+        stdout, stderr, code = _run_cli(
+            "derive", "--exhaust", "--report-dir", report_dir,
+            db_path=simple_network)
+
+    assert code == 0
+    import os
+    reports = [f for f in os.listdir(report_dir) if f.startswith("derive-")]
+    assert len(reports) == 1
+
+    with open(os.path.join(report_dir, reports[0])) as f:
+        report = json.load(f)
+    assert report["status"] == "complete"
+    assert report["exhaust"] is True
+    assert len(report["rounds"]) == 2
+    assert report["rounds"][0]["added"] >= 1
+    assert report["rounds"][1]["added"] == 0
