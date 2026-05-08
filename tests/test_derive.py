@@ -829,6 +829,7 @@ def test_derive_report_written(simple_network, tmp_path):
             "derive", "--auto", "--report-dir", report_dir,
             db_path=simple_network)
 
+    assert code == 0
     import os
     reports = [f for f in os.listdir(report_dir) if f.startswith("derive-")]
     assert len(reports) == 1
@@ -855,6 +856,7 @@ def test_derive_no_report_flag(simple_network, tmp_path):
             "derive", "--auto", "--no-report", "--report-dir", report_dir,
             db_path=simple_network)
 
+    assert code == 0
     assert "Report:" not in stdout
     import os
     assert not os.path.exists(report_dir)
@@ -880,6 +882,7 @@ def test_derive_exhaust_report_has_rounds(simple_network, tmp_path):
             "derive", "--exhaust", "--report-dir", report_dir,
             db_path=simple_network)
 
+    assert code == 0
     import os
     reports = [f for f in os.listdir(report_dir) if f.startswith("derive-")]
     assert len(reports) == 1

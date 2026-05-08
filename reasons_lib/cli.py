@@ -861,7 +861,8 @@ def _derive_one_round(args, round_num=None, report_state=None):
         output_path = Path(args.output)
         write_proposals_file(valid, output_path)
         print(f"\n{prefix}Wrote {output_path} ({len(valid)} proposals)")
-        round_result["added"] = len(valid)
+        round_result["added"] = 0
+        round_result["proposed"] = len(valid)
         if report_state is not None:
             report_state["rounds"].append(round_result)
             _write_derive_report(report_state, "partial")
