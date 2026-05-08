@@ -1011,6 +1011,7 @@ def cmd_review_beliefs(args):
                 "visible_to": _parse_visible_to(args),
             },
             "reviewed": len(results),
+            "total_derived": None,
             "summary": {
                 "invalid": invalid,
                 "insufficient": insufficient,
