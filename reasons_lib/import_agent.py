@@ -387,6 +387,10 @@ def _sync_claims(network, agent_name, claims, source_path, nogoods):
                     changed = True
                 retract_after.append(node_id)
             elif is_out:
+                # Preserve justifications so the node can resurrect when the
+                # remote flips it to IN. _retracted stays set intentionally —
+                # both _propagate() and recompute_all() respect it, so the
+                # node stays OUT until the remote explicitly sends IN.
                 new_justs = _build_justifications(
                     claim, prefix, inactive_id, agent_name
                 )
