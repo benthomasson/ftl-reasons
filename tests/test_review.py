@@ -500,10 +500,64 @@ class TestCmdReviewBeliefs:
         with open(os.path.join(report_dir, reports[0])) as f:
             report = json.load(f)
         assert "timestamp" in report
+        assert report["status"] == "complete"
         assert report["reviewed"] == 1
         assert "results" in report
         assert len(report["results"]) == 1
         assert report["results"][0]["id"] == "derived-ab"
+
+    def test_partial_report_on_batch(self, db_path, tmp_path):
+        """on_batch callback writes partial report after each batch."""
+        report_dir = str(tmp_path / "reports")
+        batch_results = []
+
+        def capture_on_batch(results):
+            batch_results.append(list(results))
+
+        mock_response = json.dumps([
+            {"id": "derived-ab", "valid": True, "sufficient": True,
+             "necessary": True, "unnecessary_antecedents": [], "comment": "ok"},
+        ])
+        mock_result = type("R", (), {
+            "returncode": 0, "stdout": mock_response, "stderr": ""
+        })()
+
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+            api.review_beliefs(
+                model="claude", on_batch=capture_on_batch, db_path=db_path)
+
+        assert len(batch_results) == 1
+        assert batch_results[0][0]["id"] == "derived-ab"
+
+    def test_partial_report_file_written_during_review(self, db_path, tmp_path):
+        """Report file written with status=partial during batch processing."""
+        report_dir = str(tmp_path / "reports")
+        report_files_during = []
+
+        def check_report_during_batch(results):
+            import os
+            if os.path.exists(report_dir):
+                files = [f for f in os.listdir(report_dir) if f.endswith(".json")]
+                if files:
+                    with open(os.path.join(report_dir, files[0])) as f:
+                        report_files_during.append(json.load(f))
+
+        mock_result = self._mock_review([
+            {"id": "derived-ab", "valid": True, "sufficient": True,
+             "necessary": True, "unnecessary_antecedents": [], "comment": "ok"},
+        ])
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+            stdout, stderr, code = run_cli(
+                "review-beliefs", "--report-dir", report_dir, db_path=db_path)
+
+        import os
+        reports = [f for f in os.listdir(report_dir) if f.endswith(".json")]
+        assert len(reports) == 1
+        with open(os.path.join(report_dir, reports[0])) as f:
+            final_report = json.load(f)
+        assert final_report["status"] == "complete"
 
     def test_no_report_flag(self, db_path, tmp_path):
         report_dir = str(tmp_path / "reports")

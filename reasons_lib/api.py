@@ -1765,6 +1765,7 @@ def review_beliefs(
     sample: int | None = None,
     visible_to: list[str] | None = None,
     dry_run: bool = False,
+    on_batch: callable | None = None,
     db_path: str = DEFAULT_DB,
 ) -> dict:
     """Review derived beliefs for validity, sufficiency, and necessity.
@@ -1827,7 +1828,8 @@ def review_beliefs(
         candidates = {k: candidates[k] for k in sampled_keys}
 
     review_ids = sorted(candidates.keys())
-    results = _review(nodes, belief_ids=review_ids, model=model, timeout=timeout)
+    results = _review(nodes, belief_ids=review_ids, model=model, timeout=timeout,
+                      on_batch=on_batch)
 
     now = datetime.now().isoformat(timespec="seconds")
 
