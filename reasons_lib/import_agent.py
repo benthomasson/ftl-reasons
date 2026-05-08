@@ -440,8 +440,13 @@ def _sync_claims(network, agent_name, claims, source_path, nogoods):
             )
             beliefs_added += 1
 
-            if is_out:
+            if is_out and not claim["raw_justifications"]:
                 retract_after.append(node_id)
+            elif is_out:
+                # Set _retracted directly instead of using retract_after,
+                # matching the existing-node sync path which relies on
+                # _retracted to keep OUT-with-justifications nodes locked.
+                network.nodes[node_id].metadata["_retracted"] = True
 
     beliefs_removed = 0
     removed_ids = local_agent_ids - remote_ids
