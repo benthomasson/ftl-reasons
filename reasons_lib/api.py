@@ -11,6 +11,7 @@ import json
 import re
 import sqlite3
 import sys
+from collections.abc import Callable
 from itertools import combinations
 from pathlib import Path
 
@@ -1765,7 +1766,7 @@ def review_beliefs(
     sample: int | None = None,
     visible_to: list[str] | None = None,
     dry_run: bool = False,
-    on_batch: callable | None = None,
+    on_batch: Callable | None = None,
     db_path: str = DEFAULT_DB,
 ) -> dict:
     """Review derived beliefs for validity, sufficiency, and necessity.

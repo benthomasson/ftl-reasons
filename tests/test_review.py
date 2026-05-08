@@ -530,19 +530,9 @@ class TestCmdReviewBeliefs:
         assert len(batch_results) == 1
         assert batch_results[0][0]["id"] == "derived-ab"
 
-    def test_partial_report_file_written_during_review(self, db_path, tmp_path):
-        """Report file written with status=partial during batch processing."""
+    def test_report_status_complete_after_cli_run(self, db_path, tmp_path):
+        """CLI run produces final report with status=complete."""
         report_dir = str(tmp_path / "reports")
-        report_files_during = []
-
-        def check_report_during_batch(results):
-            import os
-            if os.path.exists(report_dir):
-                files = [f for f in os.listdir(report_dir) if f.endswith(".json")]
-                if files:
-                    with open(os.path.join(report_dir, files[0])) as f:
-                        report_files_during.append(json.load(f))
-
         mock_result = self._mock_review([
             {"id": "derived-ab", "valid": True, "sufficient": True,
              "necessary": True, "unnecessary_antecedents": [], "comment": "ok"},
@@ -558,6 +548,7 @@ class TestCmdReviewBeliefs:
         with open(os.path.join(report_dir, reports[0])) as f:
             final_report = json.load(f)
         assert final_report["status"] == "complete"
+        assert "total_derived" in final_report
 
     def test_no_report_flag(self, db_path, tmp_path):
         report_dir = str(tmp_path / "reports")
