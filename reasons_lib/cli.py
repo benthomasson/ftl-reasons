@@ -721,7 +721,8 @@ def cmd_deduplicate(args):
         print(f"  reasons deduplicate --accept {output}")
 
 
-def _derive_one_round(args, round_num=None, report_state=None):
+def _derive_one_round(args, round_num=None, report_state=None,
+                      cluster_cache=None):
     """Run a single derive round. Returns number of beliefs added (0 = saturated).
 
     Used by cmd_derive for both single-round and --exhaust mode.
@@ -756,6 +757,8 @@ def _derive_one_round(args, round_num=None, report_state=None):
         budget=args.budget, sample=args.sample, seed=args.seed,
         min_depth=args.min_depth, max_depth_filter=args.max_depth,
         premises_only=args.premises, has_dependents=args.has_dependents,
+        cluster=args.cluster, cluster_cache=cluster_cache,
+        embedding_model=args.embedding_model, n_clusters=args.n_clusters,
     )
 
     print(f"{prefix}Network: {stats['total_in']} IN beliefs, "
@@ -767,7 +770,10 @@ def _derive_one_round(args, round_num=None, report_state=None):
         lo = stats.get("min_depth", 0)
         hi = stats.get("max_depth_filter", "∞")
         print(f"{prefix}Depth filter: {lo}–{hi}", file=sys.stderr)
-    if stats.get("sample"):
+    if stats.get("cluster"):
+        print(f"{prefix}Clustering: {stats['n_clusters']} clusters, "
+              f"model={stats['embedding_model']}", file=sys.stderr)
+    elif stats.get("sample"):
         print(f"{prefix}Sampling: {stats['budget']} beliefs (random)", file=sys.stderr)
     elif stats.get("budget", 300) != 300:
         print(f"{prefix}Budget: {stats['budget']} beliefs", file=sys.stderr)
@@ -891,6 +897,23 @@ def _write_derive_report(report_state, status):
 def cmd_derive(args):
     from datetime import datetime
 
+    if args.cluster and args.sample:
+        print("Error: --cluster and --sample are mutually exclusive.",
+              file=sys.stderr)
+        sys.exit(1)
+
+    cluster_cache = None
+    if args.cluster:
+        try:
+            from .cluster import ClusterCache
+            print("Loading embedding model...", file=sys.stderr)
+            cluster_cache = ClusterCache(
+                model_name=args.embedding_model or "all-MiniLM-L6-v2"
+            )
+        except ImportError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+
     report_state = None
     if not args.no_report:
         ts = datetime.now().isoformat(timespec="seconds")
@@ -913,6 +936,8 @@ def cmd_derive(args):
                 "has_dependents": args.has_dependents,
                 "budget": args.budget,
                 "sample": args.sample,
+                "cluster": args.cluster,
+                "embedding_model": args.embedding_model,
             },
             "rounds": [],
         }
@@ -925,7 +950,8 @@ def cmd_derive(args):
             print(f"Round {round_num}/{max_rounds}", file=sys.stderr)
             print(f"{'=' * 40}", file=sys.stderr)
             added = _derive_one_round(args, round_num=round_num,
-                                      report_state=report_state)
+                                      report_state=report_state,
+                                      cluster_cache=cluster_cache)
             if added < 0:
                 print(f"\nExhaust stopped: error in round {round_num}.",
                       file=sys.stderr)
@@ -939,7 +965,8 @@ def cmd_derive(args):
             print(f"\nExhaust complete: hit max rounds ({max_rounds}). "
                   f"Total added: {total_added}.", file=sys.stderr)
     else:
-        added = _derive_one_round(args, report_state=report_state)
+        added = _derive_one_round(args, report_state=report_state,
+                                  cluster_cache=cluster_cache)
         if added < 0:
             sys.exit(1)
 
@@ -1418,6 +1445,13 @@ def main():
                    help="Directory for JSON reports (default: reviews/)")
     p.add_argument("--no-report", action="store_true",
                    help="Suppress JSON report generation")
+    p.add_argument("--cluster", action="store_true",
+                   help="Use semantic clustering to sample across domains")
+    p.add_argument("--embedding-model", default=None,
+                   help="Sentence-transformers model for --cluster "
+                        "(default: all-MiniLM-L6-v2)")
+    p.add_argument("--n-clusters", type=int, default=None,
+                   help="Override automatic cluster count for --cluster")
 
     # accept
     p = sub.add_parser("accept", help="Accept proposals from a derive proposals file")

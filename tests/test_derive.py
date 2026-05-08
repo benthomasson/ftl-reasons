@@ -894,3 +894,26 @@ def test_derive_exhaust_report_has_rounds(simple_network, tmp_path):
     assert len(report["rounds"]) == 2
     assert report["rounds"][0]["added"] >= 1
     assert report["rounds"][1]["added"] == 0
+
+
+# --- Cluster integration tests ---
+
+try:
+    from reasons_lib.cluster import HAS_CLUSTER_DEPS
+except ImportError:
+    HAS_CLUSTER_DEPS = False
+
+skip_no_cluster = pytest.mark.skipif(
+    not HAS_CLUSTER_DEPS,
+    reason="sentence-transformers and scikit-learn not installed"
+)
+
+
+@skip_no_cluster
+def test_build_prompt_with_cluster(simple_network):
+    nodes = api.export_network(db_path=simple_network)["nodes"]
+    prompt, stats = build_prompt(nodes, cluster=True, budget=10, seed=42)
+    assert stats.get("cluster") is True
+    assert "n_clusters" in stats
+    assert "embedding_model" in stats
+    assert len(prompt) > 0

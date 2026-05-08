@@ -164,18 +164,74 @@ def _sample_beliefs(belief_ids, budget, rng=None):
 
 
 def _build_beliefs_section(nodes, derived, agents=None, max_beliefs=300,
-                           sample=False, seed=None):
+                           sample=False, seed=None,
+                           cluster=False, cluster_cache=None,
+                           embedding_model=None, n_clusters=None):
     """Build a compact beliefs section for the derive prompt.
 
     Args:
         max_beliefs: Maximum number of beliefs to include (budget).
         sample: If True, randomly sample beliefs instead of alphabetical truncation.
         seed: Random seed for reproducible sampling.
+        cluster: If True, use semantic clustering to sample across domains.
+        cluster_cache: Optional ClusterCache for embedding reuse across rounds.
+        embedding_model: Sentence-transformers model name for clustering.
+        n_clusters: Override automatic cluster count.
+
+    Returns:
+        (section_text, cluster_stats) if cluster=True, else section_text.
     """
     lines = []
     rng = random.Random(seed) if sample else None
     in_nodes = {k: v for k, v in nodes.items()
                 if v.get("truth_value") == "IN" and k not in derived}
+
+    if cluster:
+        from .cluster import cluster_beliefs as _cluster
+        belief_texts = {k: v["text"] for k, v in in_nodes.items()}
+        selected_ids, cluster_stats = _cluster(
+            belief_texts, max_beliefs, seed=seed, n_clusters=n_clusters,
+            cache=cluster_cache, model_name=embedding_model or "all-MiniLM-L6-v2",
+        )
+        selected_set = set(selected_ids)
+
+        if agents:
+            for agent_name in sorted(agents, key=lambda a: -len(agents[a])):
+                agent_sel = sorted(k for k in selected_ids
+                                   if k.startswith(f"{agent_name}:"))
+                agent_total = sum(1 for k in in_nodes if k.startswith(f"{agent_name}:"))
+                if not agent_sel:
+                    continue
+                lines.append(f"\n### Agent: {agent_name} ({agent_total} beliefs, "
+                             f"showing {len(agent_sel)})")
+                for belief_id in agent_sel:
+                    text = in_nodes[belief_id]["text"][:120]
+                    lines.append(f"- `{belief_id}`: {text}")
+            local_sel = sorted(k for k in selected_ids if ":" not in k)
+            if local_sel:
+                local_total = sum(1 for k in in_nodes if ":" not in k)
+                lines.append(f"\n### Local beliefs ({local_total} beliefs, "
+                             f"showing {len(local_sel)})")
+                for belief_id in local_sel:
+                    text = in_nodes[belief_id]["text"][:120]
+                    lines.append(f"- `{belief_id}`: {text}")
+        else:
+            groups = defaultdict(list)
+            for k in selected_ids:
+                prefix = k.split("-")[0] if "-" in k else k
+                groups[prefix].append(k)
+            all_groups = defaultdict(list)
+            for k in in_nodes:
+                prefix = k.split("-")[0] if "-" in k else k
+                all_groups[prefix].append(k)
+            for prefix in sorted(groups, key=lambda p: -len(all_groups.get(p, []))):
+                lines.append(f"\n### {prefix} ({len(all_groups.get(prefix, []))} beliefs, "
+                             f"showing {len(groups[prefix])})")
+                for belief_id in sorted(groups[prefix]):
+                    text = in_nodes[belief_id]["text"][:120]
+                    lines.append(f"- `{belief_id}`: {text}")
+
+        return "\n".join(lines), cluster_stats
 
     if agents:
         # Allocate budget proportionally across agents
@@ -344,7 +400,9 @@ def parse_proposals(response):
 
 def build_prompt(nodes, domain=None, topic=None, budget=300, sample=False,
                  seed=None, min_depth=None, max_depth_filter=None,
-                 premises_only=False, has_dependents=False):
+                 premises_only=False, has_dependents=False,
+                 cluster=False, cluster_cache=None, embedding_model=None,
+                 n_clusters=None):
     """Build the full derive prompt from a network's nodes dict.
 
     Args:
@@ -356,6 +414,10 @@ def build_prompt(nodes, domain=None, topic=None, budget=300, sample=False,
         seed: Random seed for reproducible sampling.
         min_depth: Only include beliefs at this depth or deeper.
         max_depth_filter: Only include beliefs at this depth or shallower.
+        cluster: If True, use semantic clustering to sample across domains.
+        cluster_cache: Optional ClusterCache for embedding reuse across rounds.
+        embedding_model: Sentence-transformers model name for clustering.
+        n_clusters: Override automatic cluster count.
 
     Returns: (prompt_text, stats_dict)
     """
@@ -427,10 +489,17 @@ def build_prompt(nodes, domain=None, topic=None, budget=300, sample=False,
             parts.append(f"  - {name}: {len(agents[name])} beliefs")
         agents_stats = "\n".join(parts)
 
-    beliefs_section = _build_beliefs_section(
+    cluster_stats = None
+    result = _build_beliefs_section(
         nodes, derived, agents, max_beliefs=budget,
         sample=sample, seed=seed,
+        cluster=cluster, cluster_cache=cluster_cache,
+        embedding_model=embedding_model, n_clusters=n_clusters,
     )
+    if cluster:
+        beliefs_section, cluster_stats = result
+    else:
+        beliefs_section = result
     derived_section = _build_derived_section(nodes, derived)
 
     prompt = DERIVE_PROMPT.format(
@@ -459,6 +528,11 @@ def build_prompt(nodes, domain=None, topic=None, budget=300, sample=False,
         stats["max_depth_filter"] = max_depth_filter
     stats["budget"] = budget
     stats["sample"] = sample
+    if cluster and cluster_stats:
+        stats["cluster"] = True
+        stats["n_clusters"] = cluster_stats["n_clusters"]
+        stats["cluster_sizes"] = cluster_stats["cluster_sizes"]
+        stats["embedding_model"] = cluster_stats["embedding_model"]
 
     return prompt, stats
 
