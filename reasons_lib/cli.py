@@ -984,6 +984,48 @@ def cmd_review_beliefs(args):
     from datetime import datetime
 
     model = getattr(args, "model", None) or "claude"
+    ts = datetime.now().isoformat(timespec="seconds")
+    write_report = not args.no_report
+
+    report_path = None
+    if write_report:
+        report_dir = Path(args.report_dir)
+        report_dir.mkdir(parents=True, exist_ok=True)
+        report_path = report_dir / f"review-beliefs-{ts.replace(':', '')}.json"
+
+    def _build_report(results, status):
+        invalid = sum(1 for r in results if not r.get("valid", True))
+        insufficient = sum(1 for r in results if not r.get("sufficient", True))
+        unnecessary = sum(1 for r in results if not r.get("necessary", True))
+        return {
+            "timestamp": ts,
+            "status": status,
+            "model": model,
+            "timeout": args.timeout,
+            "dry_run": args.dry_run,
+            "filters": {
+                "belief_ids": args.ids or None,
+                "min_depth": args.min_depth,
+                "depends_on": args.depends_on,
+                "sample": args.sample,
+                "visible_to": _parse_visible_to(args),
+            },
+            "reviewed": len(results),
+            "total_derived": None,
+            "summary": {
+                "invalid": invalid,
+                "insufficient": insufficient,
+                "unnecessary": unnecessary,
+            },
+            "results": results,
+        }
+
+    def _write_report(results, status):
+        if report_path is not None:
+            report_path.write_text(json.dumps(_build_report(results, status), indent=2))
+
+    on_batch = (lambda results: _write_report(results, "partial")) if write_report else None
+
     result = api.review_beliefs(
         belief_ids=args.ids or None,
         model=model,
@@ -993,6 +1035,7 @@ def cmd_review_beliefs(args):
         sample=args.sample,
         visible_to=_parse_visible_to(args),
         dry_run=args.dry_run,
+        on_batch=on_batch,
         db_path=args.db,
     )
 
@@ -1027,32 +1070,9 @@ def cmd_review_beliefs(args):
     print(f"  Invalid: {result['invalid']}  Insufficient: {result['insufficient']}"
           f"  Unnecessary: {result['unnecessary']}")
 
-    if not args.no_report:
-        report_dir = Path(args.report_dir)
-        report_dir.mkdir(parents=True, exist_ok=True)
-        ts = result["timestamp"]
-        report_path = report_dir / f"review-beliefs-{ts.replace(':', '')}.json"
-        report = {
-            "timestamp": ts,
-            "model": model,
-            "timeout": args.timeout,
-            "dry_run": args.dry_run,
-            "filters": {
-                "belief_ids": args.ids or None,
-                "min_depth": args.min_depth,
-                "depends_on": args.depends_on,
-                "sample": args.sample,
-                "visible_to": _parse_visible_to(args),
-            },
-            "reviewed": result["reviewed"],
-            "total_derived": result["total_derived"],
-            "summary": {
-                "invalid": result["invalid"],
-                "insufficient": result["insufficient"],
-                "unnecessary": result["unnecessary"],
-            },
-            "results": result["results"],
-        }
+    if report_path is not None:
+        report = _build_report(reviews, "complete")
+        report["total_derived"] = result["total_derived"]
         report_path.write_text(json.dumps(report, indent=2))
         print(f"  Report: {report_path}")
 

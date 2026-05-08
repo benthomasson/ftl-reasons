@@ -136,7 +136,7 @@ def parse_review_response(response):
 
 
 def review_beliefs(nodes, belief_ids=None, model="claude", timeout=300,
-                   batch_size=REVIEW_BATCH_SIZE):
+                   batch_size=REVIEW_BATCH_SIZE, on_batch=None):
     """Review derived beliefs for validity, sufficiency, and necessity.
 
     Args:
@@ -185,6 +185,8 @@ def review_beliefs(nodes, belief_ids=None, model="claude", timeout=300,
             response = invoke_model(prompt, model=model, timeout=timeout)
             results = parse_review_response(response)
             all_results.extend(results)
+            if on_batch is not None:
+                on_batch(all_results)
         except Exception as e:
             print(f"  WARN: batch {batch_num} failed: {e}", file=sys.stderr)
 
