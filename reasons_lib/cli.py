@@ -721,10 +721,11 @@ def cmd_deduplicate(args):
         print(f"  reasons deduplicate --accept {output}")
 
 
-def _derive_one_round(args, round_num=None):
+def _derive_one_round(args, round_num=None, report_state=None):
     """Run a single derive round. Returns number of beliefs added (0 = saturated).
 
     Used by cmd_derive for both single-round and --exhaust mode.
+    If report_state is provided, appends round results and writes the report.
     """
     import subprocess
 
@@ -803,6 +804,14 @@ def _derive_one_round(args, round_num=None):
 
     if not proposals:
         print(f"{prefix}No new proposals — network saturated.", file=sys.stderr)
+        if report_state is not None:
+            report_state["rounds"].append({
+                "round": round_num or 1,
+                "network_stats": stats,
+                "proposals_found": 0, "valid": 0,
+                "skipped": [], "applied": [], "added": 0,
+            })
+            _write_derive_report(report_state, "partial")
         return 0
 
     valid, skipped = validate_proposals(proposals, nodes)
@@ -813,7 +822,20 @@ def _derive_one_round(args, round_num=None):
     print(f"\n{prefix}{len(valid)} valid proposals "
           f"({len(skipped)} skipped)", file=sys.stderr)
 
+    round_result = {
+        "round": round_num or 1,
+        "network_stats": stats,
+        "proposals_found": len(proposals),
+        "valid": len(valid),
+        "skipped": [{"id": p["id"], "reason": reason} for p, reason in skipped],
+        "applied": [],
+        "added": 0,
+    }
+
     if not valid:
+        if report_state is not None:
+            report_state["rounds"].append(round_result)
+            _write_derive_report(report_state, "partial")
         return 0
 
     if args.auto or args.exhaust:
@@ -822,20 +844,78 @@ def _derive_one_round(args, round_num=None):
         for p, result in results:
             if isinstance(result, dict):
                 print(f"  Added {p['id']} [{result['truth_value']}]")
+                round_result["applied"].append({
+                    "id": p["id"], "truth_value": result["truth_value"],
+                })
                 added += 1
             else:
                 print(f"  FAIL {p['id']}: {result}", file=sys.stderr)
+        round_result["added"] = added
         if added:
             print(f"\n{prefix}Added {added} derived beliefs.", file=sys.stderr)
+        if report_state is not None:
+            report_state["rounds"].append(round_result)
+            _write_derive_report(report_state, "partial")
         return added
     else:
         output_path = Path(args.output)
         write_proposals_file(valid, output_path)
         print(f"\n{prefix}Wrote {output_path} ({len(valid)} proposals)")
+        round_result["added"] = len(valid)
+        if report_state is not None:
+            report_state["rounds"].append(round_result)
+            _write_derive_report(report_state, "partial")
         return len(valid)
 
 
+def _write_derive_report(report_state, status):
+    """Write derive JSON report to disk."""
+    import json
+    if report_state.get("report_path") is None:
+        return
+    total = sum(r["added"] for r in report_state["rounds"])
+    report = {
+        "timestamp": report_state["ts"],
+        "status": status,
+        "model": report_state["model"],
+        "timeout": report_state["timeout"],
+        "exhaust": report_state["exhaust"],
+        "filters": report_state["filters"],
+        "rounds": report_state["rounds"],
+        "total_added": total,
+    }
+    report_state["report_path"].write_text(json.dumps(report, indent=2))
+
+
 def cmd_derive(args):
+    from datetime import datetime
+
+    report_state = None
+    if not args.no_report:
+        ts = datetime.now().isoformat(timespec="seconds")
+        report_dir = Path(args.report_dir)
+        report_dir.mkdir(parents=True, exist_ok=True)
+        report_path = report_dir / f"derive-{ts.replace(':', '')}.json"
+        model = args.model or "claude"
+        report_state = {
+            "report_path": report_path,
+            "ts": ts,
+            "model": model,
+            "timeout": args.timeout,
+            "exhaust": args.exhaust,
+            "filters": {
+                "domain": args.domain,
+                "topic": args.topic,
+                "min_depth": args.min_depth,
+                "max_depth": args.max_depth,
+                "premises": args.premises,
+                "has_dependents": args.has_dependents,
+                "budget": args.budget,
+                "sample": args.sample,
+            },
+            "rounds": [],
+        }
+
     if args.exhaust:
         max_rounds = args.max_rounds
         total_added = 0
@@ -843,7 +923,8 @@ def cmd_derive(args):
             print(f"\n{'=' * 40}", file=sys.stderr)
             print(f"Round {round_num}/{max_rounds}", file=sys.stderr)
             print(f"{'=' * 40}", file=sys.stderr)
-            added = _derive_one_round(args, round_num=round_num)
+            added = _derive_one_round(args, round_num=round_num,
+                                      report_state=report_state)
             if added < 0:
                 print(f"\nExhaust stopped: error in round {round_num}.",
                       file=sys.stderr)
@@ -851,14 +932,19 @@ def cmd_derive(args):
             if added == 0:
                 print(f"\nExhaust complete: saturated after {round_num} rounds. "
                       f"Total added: {total_added}.", file=sys.stderr)
-                return
+                break
             total_added += added
-        print(f"\nExhaust complete: hit max rounds ({max_rounds}). "
-              f"Total added: {total_added}.", file=sys.stderr)
+        else:
+            print(f"\nExhaust complete: hit max rounds ({max_rounds}). "
+                  f"Total added: {total_added}.", file=sys.stderr)
     else:
-        added = _derive_one_round(args)
+        added = _derive_one_round(args, report_state=report_state)
         if added < 0:
             sys.exit(1)
+
+    if report_state is not None:
+        _write_derive_report(report_state, "complete")
+        print(f"  Report: {report_state['report_path']}")
 
 
 def cmd_accept(args):
@@ -1327,6 +1413,10 @@ def main():
                    help="Repeat derive until no new proposals (implies --auto)")
     p.add_argument("--max-rounds", type=int, default=10,
                    help="Maximum rounds for --exhaust (default: 10)")
+    p.add_argument("--report-dir", default="reviews/",
+                   help="Directory for JSON reports (default: reviews/)")
+    p.add_argument("--no-report", action="store_true",
+                   help="Suppress JSON report generation")
 
     # accept
     p = sub.add_parser("accept", help="Accept proposals from a derive proposals file")
