@@ -141,17 +141,14 @@ def _normalize_json(data, only_in=False):
         is_out = ndata.get("truth_value") == "OUT"
         meta = dict(ndata.get("metadata", {}))
 
-        if is_out:
-            raw_justs = []
-        else:
-            raw_justs = []
-            for j in ndata.get("justifications", []):
-                raw_justs.append({
-                    "type": j.get("type", "SL"),
-                    "antecedents": list(j.get("antecedents", [])),
-                    "outlist": [o for o in j.get("outlist", []) if o in node_ids],
-                    "label": j.get("label"),
-                })
+        raw_justs = []
+        for j in ndata.get("justifications", []):
+            raw_justs.append({
+                "type": j.get("type", "SL"),
+                "antecedents": list(j.get("antecedents", [])),
+                "outlist": [o for o in j.get("outlist", []) if o in node_ids],
+                "label": j.get("label"),
+            })
 
         normalized.append({
             "id": nid,
@@ -219,9 +216,6 @@ def _topo_sort_claims(claims):
 
 def _build_justifications(claim, prefix, inactive_id, agent_name):
     """Build Justification objects from a normalized claim."""
-    if claim["is_out"]:
-        return []
-
     justs = []
     for rj in claim["raw_justifications"]:
         antecedents = [f"{prefix}{a}" for a in rj["antecedents"]]
@@ -309,7 +303,7 @@ def _import_claims(network, agent_name, claims, source_path, nogoods):
         )
         imported += 1
 
-        if claim["is_out"]:
+        if claim["is_out"] and not claim["raw_justifications"]:
             retract_after.append(node_id)
 
     nogoods_imported = _import_nogoods(network, prefix, nogoods)
@@ -387,11 +381,18 @@ def _sync_claims(network, agent_name, claims, source_path, nogoods):
                     node.metadata[k] = v
             node.metadata["imported_from"] = source_path
 
-            if is_out:
+            if is_out and not claim["raw_justifications"]:
                 if not _justifications_match(node.justifications, []):
                     _update_node_justifications(network, node_id, [])
                     changed = True
                 retract_after.append(node_id)
+            elif is_out:
+                new_justs = _build_justifications(
+                    claim, prefix, inactive_id, agent_name
+                )
+                if not _justifications_match(node.justifications, new_justs):
+                    _update_node_justifications(network, node_id, new_justs)
+                    changed = True
             else:
                 new_justs = _build_justifications(
                     claim, prefix, inactive_id, agent_name
