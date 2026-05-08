@@ -193,7 +193,6 @@ def _build_beliefs_section(nodes, derived, agents=None, max_beliefs=300,
             belief_texts, max_beliefs, seed=seed, n_clusters=n_clusters,
             cache=cluster_cache, model_name=embedding_model or "all-MiniLM-L6-v2",
         )
-        selected_set = set(selected_ids)
 
         if agents:
             for agent_name in sorted(agents, key=lambda a: -len(agents[a])):

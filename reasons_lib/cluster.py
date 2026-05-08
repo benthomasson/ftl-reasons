@@ -111,7 +111,7 @@ def cluster_beliefs(beliefs, budget, seed=None, n_clusters=None,
         k = min(k, budget // 3, 20)
         k = max(k, 2)
     else:
-        k = max(n_clusters, 2)
+        k = max(n_clusters, 1)
 
     k = min(k, len(beliefs))
 

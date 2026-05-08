@@ -938,6 +938,7 @@ def cmd_derive(args):
                 "sample": args.sample,
                 "cluster": args.cluster,
                 "embedding_model": args.embedding_model,
+                "n_clusters": args.n_clusters,
             },
             "rounds": [],
         }
