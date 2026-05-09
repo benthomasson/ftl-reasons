@@ -79,6 +79,27 @@ def cmd_add_justification(args):
         sys.exit(1)
 
 
+def cmd_remove_justification(args):
+    try:
+        result = api.remove_justification(
+            node_id=args.node_id,
+            index=args.index,
+            db_path=args.db,
+        )
+        removed = result["removed"]
+        ants = ", ".join(removed["antecedents"])
+        label = f" [{removed['label']}]" if removed["label"] else ""
+        print(f"Removed justification {args.index} from {result['node_id']}")
+        print(f"  Was: {removed['type']}({ants}){label}")
+        print(f"  Truth value: {result['old_truth_value']} → {result['new_truth_value']}")
+        print(f"  Remaining justifications: {result['remaining']}")
+        if result["changed"]:
+            print(f"  Cascade: {', '.join(result['changed'])}")
+    except (KeyError, ValueError, IndexError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
 def _print_cascade(result):
     """Print cascade results, splitting went_out from went_in."""
     went_out = result.get("went_out", [])
@@ -1316,6 +1337,11 @@ def main():
     p.add_argument("--label", help="Justification label")
     p.add_argument("-n", "--namespace", help="Namespace prefix")
 
+    # remove-justification
+    p = sub.add_parser("remove-justification", help="Remove a justification by index")
+    p.add_argument("node_id", help="Node to remove justification from")
+    p.add_argument("index", type=int, help="0-based justification index (see 'show' output)")
+
     # retract
     p = sub.add_parser("retract", help="Retract a node (mark OUT + cascade)")
     p.add_argument("node_id", help="Node to retract")
@@ -1632,6 +1658,7 @@ def main():
         "init": cmd_init,
         "add": cmd_add,
         "add-justification": cmd_add_justification,
+        "remove-justification": cmd_remove_justification,
         "retract": cmd_retract,
         "assert": cmd_assert,
         "what-if": cmd_what_if,
