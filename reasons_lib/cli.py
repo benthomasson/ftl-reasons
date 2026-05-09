@@ -6,6 +6,7 @@ and formats the result dict for terminal output.
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -16,7 +17,7 @@ from . import api
 
 def cmd_init(args):
     try:
-        result = api.init_db(db_path=args.db, force=args.force)
+        result = api.init_db(force=args.force, **_backend_kwargs(args))
         print(f"Initialized RMS database: {result['db_path']}")
     except FileExistsError as e:
         print(f"{e}", file=sys.stderr)
@@ -48,7 +49,7 @@ def cmd_add(args):
             namespace=getattr(args, "namespace", None),
             any_mode=getattr(args, "any", False),
             access_tags=access_tags,
-            db_path=args.db,
+            **_backend_kwargs(args),
         )
         print(f"Added {result['node_id']} [{result['truth_value']}] ({result['type']})")
         _warn_multi_premise(result.get("premise_count", 0), getattr(args, "any", False))
@@ -67,7 +68,7 @@ def cmd_add_justification(args):
             label=args.label or "",
             namespace=getattr(args, "namespace", None),
             any_mode=getattr(args, "any", False),
-            db_path=args.db,
+            **_backend_kwargs(args),
         )
         print(f"Added justification to {result['node_id']}")
         print(f"  Truth value: {result['old_truth_value']} → {result['new_truth_value']}")
@@ -84,7 +85,7 @@ def cmd_remove_justification(args):
         result = api.remove_justification(
             node_id=args.node_id,
             index=args.index,
-            db_path=args.db,
+            **_backend_kwargs(args),
         )
         removed = result["removed"]
         ants = ", ".join(removed["antecedents"])
@@ -127,7 +128,7 @@ def _print_restoration_hints(hints):
 
 def cmd_retract(args):
     try:
-        result = api.retract_node(args.node_id, reason=args.reason or "", db_path=args.db)
+        result = api.retract_node(args.node_id, reason=args.reason or "", **_backend_kwargs(args))
     except KeyError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
@@ -143,7 +144,7 @@ def cmd_retract(args):
 
 def cmd_assert(args):
     try:
-        result = api.assert_node(args.node_id, db_path=args.db)
+        result = api.assert_node(args.node_id, **_backend_kwargs(args))
     except KeyError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
@@ -201,12 +202,12 @@ def cmd_what_if(args):
     action = args.action
     try:
         if action == "retract":
-            result = api.what_if_retract(args.node_id, db_path=args.db)
+            result = api.what_if_retract(args.node_id, **_backend_kwargs(args))
             if result.get("already_out"):
                 print(f"{args.node_id} is already OUT — nothing to simulate.")
                 return
         else:
-            result = api.what_if_assert(args.node_id, db_path=args.db)
+            result = api.what_if_assert(args.node_id, **_backend_kwargs(args))
             if result.get("already_in"):
                 print(f"{args.node_id} is already IN — nothing to simulate.")
                 return
@@ -218,7 +219,7 @@ def cmd_what_if(args):
 
 
 def cmd_status(args):
-    result = api.get_status(visible_to=_parse_visible_to(args), db_path=args.db)
+    result = api.get_status(visible_to=_parse_visible_to(args), **_backend_kwargs(args))
 
     if not result["nodes"]:
         print("No nodes in the network.")
@@ -236,7 +237,7 @@ def cmd_status(args):
 def cmd_show(args):
     visible_to = _parse_visible_to(args)
     try:
-        node = api.show_node(args.node_id, visible_to=visible_to, db_path=args.db)
+        node = api.show_node(args.node_id, visible_to=visible_to, **_backend_kwargs(args))
     except KeyError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
@@ -272,7 +273,7 @@ def cmd_show(args):
 
 def cmd_explain(args):
     try:
-        result = api.explain_node(args.node_id, visible_to=_parse_visible_to(args), db_path=args.db)
+        result = api.explain_node(args.node_id, visible_to=_parse_visible_to(args), **_backend_kwargs(args))
     except KeyError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
@@ -301,7 +302,7 @@ def cmd_explain(args):
 
 def cmd_convert_to_premise(args):
     try:
-        result = api.convert_to_premise(args.node_id, db_path=args.db)
+        result = api.convert_to_premise(args.node_id, **_backend_kwargs(args))
     except KeyError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
@@ -312,6 +313,7 @@ def cmd_convert_to_premise(args):
 
 
 def cmd_summarize(args):
+    _require_sqlite(args, "summarize")
     over = [n.strip() for n in args.over.split(",")]
     try:
         result = api.summarize(
@@ -327,6 +329,7 @@ def cmd_summarize(args):
 
 
 def cmd_supersede(args):
+    _require_sqlite(args, "supersede")
     try:
         result = api.supersede(args.old_id, args.new_id, db_path=args.db)
     except KeyError as e:
@@ -348,7 +351,7 @@ def cmd_update(args):
             args.node_id, text=args.text,
             source=args.source,
             source_url=args.source_url,
-            db_path=args.db,
+            **_backend_kwargs(args),
         )
     except KeyError as e:
         print(f"Error: {e}", file=sys.stderr)
@@ -363,7 +366,7 @@ def cmd_challenge(args):
         result = api.challenge(
             args.target_id, args.reason,
             challenge_id=args.id,
-            db_path=args.db,
+            **_backend_kwargs(args),
         )
     except (KeyError, ValueError) as e:
         print(f"Error: {e}", file=sys.stderr)
@@ -379,7 +382,7 @@ def cmd_defend(args):
         result = api.defend(
             args.target_id, args.challenge_id, args.reason,
             defense_id=args.id,
-            db_path=args.db,
+            **_backend_kwargs(args),
         )
     except (KeyError, ValueError) as e:
         print(f"Error: {e}", file=sys.stderr)
@@ -392,7 +395,7 @@ def cmd_defend(args):
 
 def cmd_nogood(args):
     try:
-        result = api.add_nogood(args.node_ids, db_path=args.db)
+        result = api.add_nogood(args.node_ids, **_backend_kwargs(args))
     except KeyError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
@@ -405,6 +408,7 @@ def cmd_nogood(args):
 
 
 def cmd_trace_access_tags(args):
+    _require_sqlite(args, "trace-access-tags")
     try:
         result = api.trace_access_tags(args.node_id, visible_to=_parse_visible_to(args), db_path=args.db)
     except KeyError as e:
@@ -423,7 +427,7 @@ def cmd_trace_access_tags(args):
 
 def cmd_trace(args):
     try:
-        result = api.trace_assumptions(args.node_id, visible_to=_parse_visible_to(args), db_path=args.db)
+        result = api.trace_assumptions(args.node_id, visible_to=_parse_visible_to(args), **_backend_kwargs(args))
     except KeyError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
@@ -437,13 +441,14 @@ def cmd_trace(args):
 
     print(f"{args.node_id} rests on {len(result['premises'])} premise(s):")
     for pid in result["premises"]:
-        node = api.show_node(pid, db_path=args.db)
+        node = api.show_node(pid, **_backend_kwargs(args))
         marker = "+" if node["truth_value"] == "IN" else "-"
         deps = f"  ({len(node['dependents'])} dependents)" if node["dependents"] else ""
         print(f"  [{marker}] {pid}: {node['text'][:80]}{deps}")
 
 
 def cmd_propagate(args):
+    _require_sqlite(args, "propagate")
     result = api.propagate(db_path=args.db)
     changed = result["changed"]
     if changed:
@@ -453,7 +458,7 @@ def cmd_propagate(args):
 
 
 def cmd_log(args):
-    result = api.get_log(last=args.last, db_path=args.db)
+    result = api.get_log(last=args.last, **_backend_kwargs(args))
 
     if not result["entries"]:
         print("No propagation events.")
@@ -464,11 +469,13 @@ def cmd_log(args):
 
 
 def cmd_add_repo(args):
+    _require_sqlite(args, "add-repo")
     result = api.add_repo(args.name, args.path, db_path=args.db)
     print(f"Added repo {result['name']}: {result['path']}")
 
 
 def cmd_repos(args):
+    _require_sqlite(args, "repos")
     result = api.list_repos(db_path=args.db)
     if not result["repos"]:
         print("No repos registered.")
@@ -479,6 +486,7 @@ def cmd_repos(args):
 
 
 def cmd_import_agent(args):
+    _require_sqlite(args, "import-agent")
     try:
         result = api.import_agent(
             agent_name=args.agent_name,
@@ -509,6 +517,7 @@ def cmd_import_agent(args):
 
 
 def cmd_sync_agent(args):
+    _require_sqlite(args, "sync-agent")
     try:
         result = api.sync_agent(
             agent_name=args.agent_name,
@@ -541,6 +550,7 @@ def cmd_sync_agent(args):
 
 
 def cmd_import_beliefs(args):
+    _require_sqlite(args, "import-beliefs")
     try:
         result = api.import_beliefs(
             beliefs_file=args.beliefs_file,
@@ -559,6 +569,7 @@ def cmd_import_beliefs(args):
 
 
 def cmd_import_json(args):
+    _require_sqlite(args, "import-json")
     try:
         result = api.import_json(args.json_file, db_path=args.db)
     except FileNotFoundError as e:
@@ -571,7 +582,7 @@ def cmd_import_json(args):
 
 
 def cmd_export(args):
-    data = api.export_network(visible_to=_parse_visible_to(args), db_path=args.db)
+    data = api.export_network(visible_to=_parse_visible_to(args), **_backend_kwargs(args))
     output = json.dumps(data, indent=2)
     if args.output:
         Path(args.output).write_text(output)
@@ -581,7 +592,7 @@ def cmd_export(args):
 
 
 def cmd_export_markdown(args):
-    md = api.export_markdown(visible_to=_parse_visible_to(args), db_path=args.db)
+    md = api.export_markdown(visible_to=_parse_visible_to(args), **_backend_kwargs(args))
     if args.output:
         Path(args.output).write_text(md)
         print(f"Written to {args.output}")
@@ -590,6 +601,7 @@ def cmd_export_markdown(args):
 
 
 def cmd_hash_sources(args):
+    _require_sqlite(args, "hash-sources")
     result = api.hash_sources(force=args.force, db_path=args.db)
 
     if not result["hashed"]:
@@ -613,6 +625,7 @@ def cmd_hash_sources(args):
 
 
 def cmd_check_stale(args):
+    _require_sqlite(args, "check-stale")
     result = api.check_stale(upgrade_hashes=args.upgrade_hashes, db_path=args.db)
 
     if result.get("upgraded"):
@@ -650,7 +663,7 @@ def cmd_compact(args):
         budget=args.budget,
         truncate=not args.no_truncate,
         visible_to=_parse_visible_to(args),
-        db_path=args.db,
+        **_backend_kwargs(args),
     )
     print(summary)
 
@@ -662,18 +675,38 @@ def _parse_visible_to(args):
     return None
 
 
+def _backend_kwargs(args):
+    pg = getattr(args, "pg", None) or os.environ.get("REASONS_PG_CONNINFO")
+    pid = getattr(args, "project_id", None) or os.environ.get("REASONS_PROJECT_ID")
+    if pg:
+        if not pid:
+            print("Error: --project-id is required with --pg", file=sys.stderr)
+            sys.exit(1)
+        return {"pg_conninfo": pg, "project_id": pid}
+    return {"db_path": args.db}
+
+
+def _require_sqlite(args, command_name):
+    pg = getattr(args, "pg", None) or os.environ.get("REASONS_PG_CONNINFO")
+    if pg:
+        print(f"Error: {command_name} is not supported with --pg", file=sys.stderr)
+        sys.exit(1)
+
+
 def cmd_search(args):
     fmt = getattr(args, "format", "markdown")
-    result = api.search(args.query, visible_to=_parse_visible_to(args), db_path=args.db, format=fmt)
+    result = api.search(args.query, visible_to=_parse_visible_to(args), format=fmt, **_backend_kwargs(args))
     print(result)
 
 
 def cmd_lookup(args):
+    _require_sqlite(args, "lookup")
     result = api.lookup(args.query, visible_to=_parse_visible_to(args), db_path=args.db)
     print(result)
 
 
 def cmd_ask(args):
+    _require_sqlite(args, "ask")
     from .ask import ask
     result = ask(
         question=args.question,
@@ -691,6 +724,7 @@ def cmd_ask(args):
 
 
 def cmd_deduplicate(args):
+    _require_sqlite(args, "deduplicate")
     if args.accept:
         accept_path = Path(args.accept)
         if not accept_path.exists():
@@ -916,6 +950,7 @@ def _write_derive_report(report_state, status):
 
 
 def cmd_derive(args):
+    _require_sqlite(args, "derive")
     from datetime import datetime
 
     if args.cluster and args.sample:
@@ -998,6 +1033,7 @@ def cmd_derive(args):
 
 
 def cmd_accept(args):
+    _require_sqlite(args, "accept")
     from .derive import parse_proposals, validate_proposals, apply_proposals
 
     proposals_path = Path(args.file)
@@ -1051,7 +1087,7 @@ def cmd_list(args):
         not_reviewed_since=args.not_reviewed_since,
         never_reviewed=args.never_reviewed,
         by_impact=args.by_impact,
-        db_path=args.db,
+        **_backend_kwargs(args),
     )
 
     if args.never_reviewed and args.not_reviewed_since is not None:
@@ -1081,7 +1117,7 @@ def cmd_list(args):
 def cmd_list_gated(args):
     result = api.list_gated(
         visible_to=_parse_visible_to(args),
-        db_path=args.db,
+        **_backend_kwargs(args),
     )
 
     if not result["blockers"]:
@@ -1098,6 +1134,7 @@ def cmd_list_gated(args):
 
 
 def cmd_list_negative(args):
+    _require_sqlite(args, "list-negative")
     result = api.list_negative(
         visible_to=_parse_visible_to(args),
         model=getattr(args, "model", None) or "claude",
@@ -1116,6 +1153,7 @@ def cmd_list_negative(args):
 
 
 def cmd_review_beliefs(args):
+    _require_sqlite(args, "review-beliefs")
     import json
     from datetime import datetime
 
@@ -1239,6 +1277,7 @@ def cmd_review_beliefs(args):
 
 
 def cmd_contradictions(args):
+    _require_sqlite(args, "detect-contradictions")
     model = getattr(args, "model", None) or "claude"
     auto_apply = args.auto_apply and not args.dry_run
     result = api.detect_contradictions(
@@ -1290,6 +1329,7 @@ def cmd_contradictions(args):
 
 
 def cmd_namespaces(args):
+    _require_sqlite(args, "namespaces")
     result = api.list_namespaces(db_path=args.db)
     if not result["namespaces"]:
         print("No namespaces found. Use --namespace/-n with 'add' or 'import-agent' to create one.")
@@ -1307,6 +1347,10 @@ def main():
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {_pkg_version('ftl-reasons')}")
     parser.add_argument("--db", default=api.DEFAULT_DB, help="Path to database (default: reasons.db)")
+    parser.add_argument("--pg", default=None, metavar="CONNINFO",
+                        help="PostgreSQL connection string (or set REASONS_PG_CONNINFO)")
+    parser.add_argument("--project-id", default=None,
+                        help="Project ID for PostgreSQL (or set REASONS_PROJECT_ID)")
     sub = parser.add_subparsers(dest="command")
 
     # init
