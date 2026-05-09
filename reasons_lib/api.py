@@ -1228,6 +1228,8 @@ def export_markdown(visible_to: list[str] | None = None, db_path: str = DEFAULT_
             node.truth_value = ndata.get("truth_value", "OUT")
             node.source = ndata.get("source", "")
             node.source_url = ndata.get("source_url", "")
+            node.source_hash = ndata.get("source_hash", "")
+            node.date = ndata.get("date", "")
             node.metadata = ndata.get("metadata", {})
             for jdata in ndata.get("justifications", []):
                 j = Justification(
@@ -1238,6 +1240,14 @@ def export_markdown(visible_to: list[str] | None = None, db_path: str = DEFAULT_
                 )
                 node.justifications.append(j)
             net.nodes[nid] = node
+        for nid, node in net.nodes.items():
+            for j in node.justifications:
+                for ant_id in j.antecedents:
+                    if ant_id in net.nodes:
+                        net.nodes[ant_id].dependents.add(nid)
+                for out_id in j.outlist:
+                    if out_id in net.nodes:
+                        net.nodes[out_id].dependents.add(nid)
         for ngdata in data.get("nogoods", []):
             net.nogoods.append(Nogood(
                 id=ngdata.get("id", ""),
@@ -1425,6 +1435,8 @@ def search(query: str, visible_to: list[str] | None = None, db_path: str = DEFAU
     Returns: formatted string with matched nodes and neighbors
     """
     if pg_conninfo:
+        if depth != 1:
+            raise NotImplementedError("depth is not supported with PostgreSQL")
         return _pg_dispatch(pg_conninfo, project_id, "search",
                             query=query, visible_to=visible_to, format=format)
     with _with_network(db_path) as net:
