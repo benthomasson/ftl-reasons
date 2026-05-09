@@ -609,6 +609,14 @@ def convert_to_premise(node_id: str, db_path: str = DEFAULT_DB) -> dict:
         return net.convert_to_premise(node_id)
 
 
+def remove_justification(
+    node_id: str, index: int, db_path: str = DEFAULT_DB
+) -> dict:
+    """Remove a single justification by index and propagate."""
+    with _with_network(db_path, write=True) as net:
+        return net.remove_justification(node_id, index)
+
+
 def summarize(
     summary_id: str,
     text: str,

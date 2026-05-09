@@ -643,6 +643,70 @@ class Network:
             "changed": changed,
         }
 
+    def remove_justification(self, node_id: str, index: int) -> dict:
+        """Remove a single justification by index and propagate."""
+        if node_id not in self.nodes:
+            raise KeyError(f"Node '{node_id}' not found")
+
+        node = self.nodes[node_id]
+
+        if not node.justifications:
+            raise ValueError(f"Node '{node_id}' is a premise (no justifications)")
+
+        if index < 0 or index >= len(node.justifications):
+            raise IndexError(
+                f"Justification index {index} out of range "
+                f"(node has {len(node.justifications)})"
+            )
+
+        if len(node.justifications) == 1:
+            raise ValueError(
+                f"Node '{node_id}' has only one justification; "
+                f"use 'convert-to-premise' or 'retract' instead"
+            )
+
+        old_value = node.truth_value
+        removed = node.justifications.pop(index)
+
+        # Clean up dependents for antecedents/outlist that no longer appear
+        # in any remaining justification
+        remaining_refs = set()
+        for j in node.justifications:
+            remaining_refs.update(j.antecedents)
+            remaining_refs.update(j.outlist)
+
+        for ant_id in removed.antecedents:
+            if ant_id not in remaining_refs and ant_id in self.nodes:
+                self.nodes[ant_id].dependents.discard(node_id)
+        for out_id in removed.outlist:
+            if out_id not in remaining_refs and out_id in self.nodes:
+                self.nodes[out_id].dependents.discard(node_id)
+
+        new_value = self._compute_truth(node)
+        changed = []
+
+        if old_value != new_value:
+            node.truth_value = new_value
+            changed.append(node_id)
+            changed.extend(self._propagate(node_id))
+
+        self._log("remove-justification", node_id, new_value)
+
+        removed_dict = {
+            "type": removed.type,
+            "antecedents": removed.antecedents,
+            "outlist": removed.outlist,
+            "label": removed.label,
+        }
+        return {
+            "node_id": node_id,
+            "old_truth_value": old_value,
+            "new_truth_value": new_value,
+            "removed": removed_dict,
+            "remaining": len(node.justifications),
+            "changed": changed,
+        }
+
     def summarize(
         self,
         summary_id: str,
