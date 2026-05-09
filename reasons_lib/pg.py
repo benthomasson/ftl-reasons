@@ -814,6 +814,235 @@ class PgApi:
         gated_count = sum(len(b["gated"]) for b in blockers.values())
         return {"blockers": blockers, "gated_count": gated_count, "blocker_count": len(blockers)}
 
+    def export_network(self, visible_to=None):
+        pid = self.project_id
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, text, truth_value, source, source_url, source_hash, "
+                "date, metadata FROM rms_nodes WHERE project_id = %s ORDER BY id",
+                (pid,),
+            )
+            nodes = {}
+            for row in cur.fetchall():
+                nid, text, tv, source, source_url, source_hash, date, meta = row
+                if isinstance(meta, str):
+                    meta = json.loads(meta)
+                if visible_to is not None and not self._is_visible(meta, visible_to):
+                    continue
+                nodes[nid] = {
+                    "text": text,
+                    "truth_value": tv,
+                    "justifications": [],
+                    "source": source or "",
+                    "source_url": source_url or "",
+                    "source_hash": source_hash or "",
+                    "date": date or "",
+                    "metadata": {k: v for k, v in meta.items() if not k.startswith("_")},
+                }
+
+            if nodes:
+                cur.execute(
+                    "SELECT node_id, type, antecedents, outlist, label "
+                    "FROM rms_justifications WHERE project_id = %s "
+                    "AND node_id = ANY(%s) ORDER BY id",
+                    (pid, list(nodes.keys())),
+                )
+                for row in cur.fetchall():
+                    nid, jtype, ants, outs, label = row
+                    if isinstance(ants, str):
+                        ants = json.loads(ants)
+                    if isinstance(outs, str):
+                        outs = json.loads(outs)
+                    if nid in nodes:
+                        nodes[nid]["justifications"].append({
+                            "type": jtype,
+                            "antecedents": ants,
+                            "outlist": outs,
+                            "label": label or "",
+                        })
+
+            cur.execute(
+                "SELECT id, nodes, discovered, resolution FROM rms_nogoods "
+                "WHERE project_id = %s ORDER BY id",
+                (pid,),
+            )
+            nogoods = []
+            for row in cur.fetchall():
+                ng_id, ng_nodes, discovered, resolution = row
+                if isinstance(ng_nodes, str):
+                    ng_nodes = json.loads(ng_nodes)
+                if visible_to is not None:
+                    if not all(n in nodes for n in ng_nodes):
+                        continue
+                nogoods.append({
+                    "id": ng_id,
+                    "nodes": ng_nodes,
+                    "discovered": discovered or "",
+                    "resolution": resolution or "",
+                })
+
+        return {"nodes": nodes, "nogoods": nogoods, "repos": {}}
+
+    def remove_justification(self, node_id, index):
+        pid = self.project_id
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT truth_value FROM rms_nodes WHERE id = %s AND project_id = %s",
+                (node_id, pid),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise KeyError(f"Node '{node_id}' not found")
+            old_value = row[0]
+
+            cur.execute(
+                "SELECT id, type, antecedents, outlist, label "
+                "FROM rms_justifications WHERE node_id = %s AND project_id = %s "
+                "ORDER BY id",
+                (node_id, pid),
+            )
+            justs = cur.fetchall()
+
+            if not justs:
+                raise ValueError(f"Node '{node_id}' is a premise (no justifications)")
+
+            if index < 0 or index >= len(justs):
+                raise IndexError(
+                    f"Justification index {index} out of range "
+                    f"(node has {len(justs)})"
+                )
+
+            if len(justs) == 1:
+                raise ValueError(
+                    f"Node '{node_id}' has only one justification; "
+                    f"use 'convert-to-premise' or 'retract' instead"
+                )
+
+            target = justs[index]
+            j_id, jtype, ants, outs, label = target
+            if isinstance(ants, str):
+                ants = json.loads(ants)
+            if isinstance(outs, str):
+                outs = json.loads(outs)
+
+            cur.execute(
+                "DELETE FROM rms_justifications WHERE id = %s",
+                (j_id,),
+            )
+
+            new_value = self._compute_truth(cur, node_id)
+            changed = []
+            if old_value != new_value:
+                cur.execute(
+                    "UPDATE rms_nodes SET truth_value = %s "
+                    "WHERE id = %s AND project_id = %s",
+                    (new_value, node_id, pid),
+                )
+                changed.append(node_id)
+                went_out, went_in = self._propagate(cur, node_id)
+                changed.extend(went_out)
+                changed.extend(went_in)
+
+            self._log(cur, "remove-justification", node_id, new_value)
+
+        self.conn.commit()
+        return {
+            "node_id": node_id,
+            "old_truth_value": old_value,
+            "new_truth_value": new_value,
+            "removed": {"type": jtype, "antecedents": ants, "outlist": outs, "label": label or ""},
+            "remaining": len(justs) - 1,
+            "changed": changed,
+        }
+
+    def update_node(self, node_id, text=None, source=None, source_url=None):
+        pid = self.project_id
+        updates = []
+        params = []
+        updated_fields = []
+
+        if text is not None:
+            updates.append("text = %s")
+            params.append(text)
+            updated_fields.append("text")
+        if source is not None:
+            updates.append("source = %s")
+            params.append(source)
+            updated_fields.append("source")
+        if source_url is not None:
+            updates.append("source_url = %s")
+            params.append(source_url)
+            updated_fields.append("source_url")
+
+        if not updates:
+            return {"node_id": node_id, "updated_fields": []}
+
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM rms_nodes WHERE id = %s AND project_id = %s",
+                (node_id, pid),
+            )
+            if not cur.fetchone():
+                raise KeyError(f"Node '{node_id}' not found")
+
+            params.extend([node_id, pid])
+            cur.execute(
+                f"UPDATE rms_nodes SET {', '.join(updates)} "
+                f"WHERE id = %s AND project_id = %s",
+                params,
+            )
+
+        self.conn.commit()
+        return {"node_id": node_id, "updated_fields": updated_fields}
+
+    def convert_to_premise(self, node_id):
+        pid = self.project_id
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT truth_value FROM rms_nodes WHERE id = %s AND project_id = %s",
+                (node_id, pid),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise KeyError(f"Node '{node_id}' not found")
+            old_value = row[0]
+
+            cur.execute(
+                "SELECT COUNT(*) FROM rms_justifications "
+                "WHERE node_id = %s AND project_id = %s",
+                (node_id, pid),
+            )
+            old_count = cur.fetchone()[0]
+
+            cur.execute(
+                "DELETE FROM rms_justifications "
+                "WHERE node_id = %s AND project_id = %s",
+                (node_id, pid),
+            )
+
+            changed = []
+            if old_value != "IN":
+                cur.execute(
+                    "UPDATE rms_nodes SET truth_value = 'IN' "
+                    "WHERE id = %s AND project_id = %s",
+                    (node_id, pid),
+                )
+                changed.append(node_id)
+                self._log(cur, "convert-to-premise", node_id, "IN")
+                went_out, went_in = self._propagate(cur, node_id)
+                changed.extend(went_out)
+                changed.extend(went_in)
+            else:
+                self._log(cur, "convert-to-premise", node_id, "IN (unchanged)")
+
+        self.conn.commit()
+        return {
+            "node_id": node_id,
+            "old_justifications": old_count,
+            "truth_value": "IN",
+            "changed": changed,
+        }
+
     def get_log(self, last=None):
         pid = self.project_id
         with self.conn.cursor() as cur:
