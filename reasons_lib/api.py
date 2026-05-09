@@ -66,11 +66,21 @@ def _with_network(db_path: str, write: bool = False):
     return _Ctx()
 
 
-def init_db(db_path: str = DEFAULT_DB, force: bool = False) -> dict:
+def _pg_dispatch(pg_conninfo, project_id, method_name, **kwargs):
+    """Dispatch a call to the PostgreSQL backend."""
+    from .pg import PgApi
+    with PgApi(pg_conninfo, project_id) as pg:
+        return getattr(pg, method_name)(**kwargs)
+
+
+def init_db(db_path: str = DEFAULT_DB, force: bool = False,
+            pg_conninfo=None, project_id=None) -> dict:
     """Initialize a new RMS database.
 
     Returns: {"db_path": str, "created": bool}
     """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "init_db")
     p = Path(db_path)
     if p.exists() and not force:
         raise FileExistsError(f"Database already exists: {db_path}")
@@ -145,6 +155,7 @@ def add_node(
     any_mode: bool = False,
     access_tags: list[str] | None = None,
     db_path: str = DEFAULT_DB,
+    pg_conninfo=None, project_id=None,
 ) -> dict:
     """Add a node to the network.
 
@@ -163,6 +174,13 @@ def add_node(
 
     Returns: {"node_id": str, "truth_value": str, "type": str, "premise_count": int}
     """
+    if pg_conninfo:
+        if namespace or any_mode:
+            raise NotImplementedError("namespace and any_mode are not supported with PostgreSQL")
+        return _pg_dispatch(pg_conninfo, project_id, "add_node",
+                            node_id=node_id, text=text, sl=sl, cp=cp, unless=unless,
+                            label=label, source=source, source_url=source_url,
+                            access_tags=access_tags)
     outlist = [o.strip() for o in unless.split(",") if o.strip()] if unless else []
     justifications = []
     if sl:
@@ -244,21 +262,14 @@ def add_justification(
     namespace: str | None = None,
     any_mode: bool = False,
     db_path: str = DEFAULT_DB,
+    pg_conninfo=None, project_id=None,
 ) -> dict:
-    """Add a new justification to an existing node.
-
-    Args:
-        node_id: Node to add justification to
-        sl: Comma-separated antecedent IDs for SL justification
-        cp: Comma-separated antecedent IDs for CP justification
-        unless: Comma-separated outlist IDs (must be OUT for justification to hold)
-        label: Justification label
-        namespace: Optional namespace prefix
-        any_mode: If True, expand SL into one justification per antecedent (OR)
-        db_path: Path to RMS database
-
-    Returns: {"node_id", "old_truth_value", "new_truth_value", "changed", "premise_count"}
-    """
+    """Add a new justification to an existing node."""
+    if pg_conninfo:
+        if namespace or any_mode:
+            raise NotImplementedError("namespace and any_mode are not supported with PostgreSQL")
+        return _pg_dispatch(pg_conninfo, project_id, "add_justification",
+                            node_id=node_id, sl=sl, cp=cp, unless=unless, label=label)
     outlist = [o.strip() for o in unless.split(",") if o.strip()] if unless else []
 
     if sl:
@@ -295,7 +306,8 @@ def add_justification(
         return result
 
 
-def retract_node(node_id: str, reason: str = "", db_path: str = DEFAULT_DB) -> dict:
+def retract_node(node_id: str, reason: str = "", db_path: str = DEFAULT_DB,
+                 pg_conninfo=None, project_id=None) -> dict:
     """Retract a node and cascade.
 
     Args:
@@ -305,6 +317,9 @@ def retract_node(node_id: str, reason: str = "", db_path: str = DEFAULT_DB) -> d
 
     Returns: {"changed", "went_out", "went_in", "restoration_hints"}
     """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "retract_node",
+                            node_id=node_id, reason=reason)
     with _with_network(db_path, write=True) as net:
         before = {nid: n.truth_value for nid, n in net.nodes.items()}
         changed = net.retract(node_id, reason=reason)
@@ -330,7 +345,8 @@ def retract_node(node_id: str, reason: str = "", db_path: str = DEFAULT_DB) -> d
         return {"changed": changed, "went_out": went_out, "went_in": went_in, "restoration_hints": hints}
 
 
-def what_if_retract(node_id: str, db_path: str = DEFAULT_DB) -> dict:
+def what_if_retract(node_id: str, db_path: str = DEFAULT_DB,
+                   pg_conninfo=None, project_id=None) -> dict:
     """Simulate retracting a node without mutating the database.
 
     Loads the network read-only, performs the retraction in memory,
@@ -340,6 +356,10 @@ def what_if_retract(node_id: str, db_path: str = DEFAULT_DB) -> dict:
 
     Returns: {"node_id": str, "retracted": list[dict], "restored": list[dict], ...}
     """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "what_if_retract",
+                            node_id=node_id)
+
     with _with_network(db_path, write=False) as net:
         if node_id not in net.nodes:
             raise KeyError(f"Node '{node_id}' not found")
@@ -390,7 +410,8 @@ def what_if_retract(node_id: str, db_path: str = DEFAULT_DB) -> dict:
         }
 
 
-def what_if_assert(node_id: str, db_path: str = DEFAULT_DB) -> dict:
+def what_if_assert(node_id: str, db_path: str = DEFAULT_DB,
+                  pg_conninfo=None, project_id=None) -> dict:
     """Simulate asserting (restoring) a node without mutating the database.
 
     Shows what would change if a currently-OUT node were asserted back to IN.
@@ -399,6 +420,10 @@ def what_if_assert(node_id: str, db_path: str = DEFAULT_DB) -> dict:
 
     Returns: {"node_id": str, "retracted": list[dict], "restored": list[dict], ...}
     """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "what_if_assert",
+                            node_id=node_id)
+
     with _with_network(db_path, write=False) as net:
         if node_id not in net.nodes:
             raise KeyError(f"Node '{node_id}' not found")
@@ -467,11 +492,16 @@ def _cascade_depth(net, target_id: str, retracted_id: str) -> int:
     return 0
 
 
-def assert_node(node_id: str, db_path: str = DEFAULT_DB) -> dict:
+def assert_node(node_id: str, db_path: str = DEFAULT_DB,
+                pg_conninfo=None, project_id=None) -> dict:
     """Assert a node and cascade restoration.
 
     Returns: {"changed": list[str], "went_out": list[str], "went_in": list[str]}
     """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "assert_node",
+                            node_id=node_id)
+
     with _with_network(db_path, write=True) as net:
         before = {nid: n.truth_value for nid, n in net.nodes.items()}
         changed = net.assert_node(node_id)
@@ -486,11 +516,16 @@ def propagate(db_path: str = DEFAULT_DB) -> dict:
     return {"changed": changed}
 
 
-def get_status(visible_to: list[str] | None = None, db_path: str = DEFAULT_DB) -> dict:
+def get_status(visible_to: list[str] | None = None, db_path: str = DEFAULT_DB,
+               pg_conninfo=None, project_id=None) -> dict:
     """Get all nodes with truth values.
 
     Returns: {"nodes": list[dict], "in_count": int, "total": int}
     """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "get_status",
+                            visible_to=visible_to)
+
     with _with_network(db_path) as net:
         nodes = []
         for nid, node in sorted(net.nodes.items()):
@@ -506,12 +541,17 @@ def get_status(visible_to: list[str] | None = None, db_path: str = DEFAULT_DB) -
         return {"nodes": nodes, "in_count": in_count, "total": len(nodes)}
 
 
-def show_node(node_id: str, visible_to: list[str] | None = None, db_path: str = DEFAULT_DB) -> dict:
+def show_node(node_id: str, visible_to: list[str] | None = None, db_path: str = DEFAULT_DB,
+              pg_conninfo=None, project_id=None) -> dict:
     """Get full details for a node.
 
     Returns: dict with id, text, truth_value, source, justifications, dependents
     Raises PermissionError if node's access_tags are not a subset of visible_to.
     """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "show_node",
+                            node_id=node_id, visible_to=visible_to)
+
     with _with_network(db_path) as net:
         if node_id not in net.nodes:
             raise KeyError(f"Node '{node_id}' not found")
@@ -536,12 +576,17 @@ def show_node(node_id: str, visible_to: list[str] | None = None, db_path: str = 
         }
 
 
-def explain_node(node_id: str, visible_to: list[str] | None = None, db_path: str = DEFAULT_DB) -> dict:
+def explain_node(node_id: str, visible_to: list[str] | None = None, db_path: str = DEFAULT_DB,
+                 pg_conninfo=None, project_id=None) -> dict:
     """Explain why a node is IN or OUT.
 
     Returns: {"steps": list[dict]}
     Raises PermissionError if node's access_tags are not a subset of visible_to.
     """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "explain_node",
+                            node_id=node_id, visible_to=visible_to)
+
     with _with_network(db_path) as net:
         if node_id not in net.nodes:
             raise KeyError(f"Node '{node_id}' not found")
@@ -553,13 +598,18 @@ def explain_node(node_id: str, visible_to: list[str] | None = None, db_path: str
         return {"steps": steps}
 
 
-def trace_assumptions(node_id: str, visible_to: list[str] | None = None, db_path: str = DEFAULT_DB) -> dict:
+def trace_assumptions(node_id: str, visible_to: list[str] | None = None, db_path: str = DEFAULT_DB,
+                      pg_conninfo=None, project_id=None) -> dict:
     """Trace backward to find all premises a node rests on.
 
     Returns: {"node_id": str, "premises": list[str]}
     Raises PermissionError if node's access_tags are not a subset of visible_to.
     Filters returned premises by visible_to.
     """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "trace_assumptions",
+                            node_id=node_id, visible_to=visible_to)
+
     with _with_network(db_path) as net:
         if node_id not in net.nodes:
             raise KeyError(f"Node '{node_id}' not found")
@@ -590,29 +640,42 @@ def trace_access_tags(node_id: str, visible_to: list[str] | None = None, db_path
         return {"node_id": node_id, "access_tags": tags}
 
 
-def find_culprits(node_ids: list[str], db_path: str = DEFAULT_DB) -> dict:
+def find_culprits(node_ids: list[str], db_path: str = DEFAULT_DB,
+                  pg_conninfo=None, project_id=None) -> dict:
     """Find premises that could be retracted to resolve a contradiction.
 
     Returns: {"culprits": list[dict]}
     """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "find_culprits",
+                            node_ids=node_ids)
     with _with_network(db_path) as net:
         culprits = net.find_culprits(node_ids)
         return {"culprits": culprits}
 
 
-def convert_to_premise(node_id: str, db_path: str = DEFAULT_DB) -> dict:
+def convert_to_premise(node_id: str, db_path: str = DEFAULT_DB,
+                       pg_conninfo=None, project_id=None) -> dict:
     """Strip justifications from a node, making it a premise (IN by default).
 
     Returns: {"node_id": str, "old_justifications": int, "truth_value": str, "changed": list[str]}
     """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "convert_to_premise",
+                            node_id=node_id)
+
     with _with_network(db_path, write=True) as net:
         return net.convert_to_premise(node_id)
 
 
 def remove_justification(
-    node_id: str, index: int, db_path: str = DEFAULT_DB
+    node_id: str, index: int, db_path: str = DEFAULT_DB,
+    pg_conninfo=None, project_id=None,
 ) -> dict:
     """Remove a single justification by index and propagate."""
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "remove_justification",
+                            node_id=node_id, index=index)
     with _with_network(db_path, write=True) as net:
         return net.remove_justification(node_id, index)
 
@@ -647,11 +710,16 @@ def update_node(
     source: str | None = None,
     source_url: str | None = None,
     db_path: str = DEFAULT_DB,
+    pg_conninfo=None, project_id=None,
 ) -> dict:
     """Update a node's text, source, or source_url in place.
 
     Returns: {"node_id": str, "updated_fields": list[str]}
     """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "update_node",
+                            node_id=node_id, text=text, source=source,
+                            source_url=source_url)
     with _with_network(db_path, write=True) as net:
         if node_id not in net.nodes:
             raise KeyError(f"Node '{node_id}' not found")
@@ -674,11 +742,16 @@ def challenge(
     reason: str,
     challenge_id: str | None = None,
     db_path: str = DEFAULT_DB,
+    pg_conninfo=None, project_id=None,
 ) -> dict:
     """Challenge a node — creates a challenge node and the target goes OUT.
 
     Returns: {"challenge_id": str, "target_id": str, "changed": list[str]}
     """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "challenge",
+                            target_id=target_id, reason=reason,
+                            challenge_id=challenge_id)
     with _with_network(db_path, write=True) as net:
         return net.challenge(target_id, reason, challenge_id=challenge_id)
 
@@ -689,20 +762,30 @@ def defend(
     reason: str,
     defense_id: str | None = None,
     db_path: str = DEFAULT_DB,
+    pg_conninfo=None, project_id=None,
 ) -> dict:
     """Defend a node against a challenge — neutralises the challenge, target restored.
 
     Returns: {"defense_id": str, "challenge_id": str, "target_id": str, "changed": list[str]}
     """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "defend",
+                            target_id=target_id, challenge_id=challenge_id,
+                            reason=reason, defense_id=defense_id)
     with _with_network(db_path, write=True) as net:
         return net.defend(target_id, challenge_id, reason, defense_id=defense_id)
 
 
-def add_nogood(node_ids: list[str], db_path: str = DEFAULT_DB) -> dict:
+def add_nogood(node_ids: list[str], db_path: str = DEFAULT_DB,
+               pg_conninfo=None, project_id=None) -> dict:
     """Record a contradiction and use backtracking to resolve.
 
     Returns: {"nogood_id": str, "nodes": list[str], "changed": list[str], "backtracked_to": str | None}
     """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "add_nogood",
+                            node_ids=node_ids)
+
     with _with_network(db_path, write=True) as net:
         # Find culprits before retraction for reporting
         all_in = all(
@@ -728,11 +811,16 @@ def get_belief_set(db_path: str = DEFAULT_DB) -> list[str]:
         return net.get_belief_set()
 
 
-def get_log(last: int | None = None, db_path: str = DEFAULT_DB) -> dict:
+def get_log(last: int | None = None, db_path: str = DEFAULT_DB,
+            pg_conninfo=None, project_id=None) -> dict:
     """Get propagation history.
 
     Returns: {"entries": list[dict]}
     """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "get_log",
+                            last=last)
+
     with _with_network(db_path) as net:
         entries = net.log
         if last:
@@ -740,11 +828,16 @@ def get_log(last: int | None = None, db_path: str = DEFAULT_DB) -> dict:
         return {"entries": entries}
 
 
-def export_network(visible_to: list[str] | None = None, db_path: str = DEFAULT_DB) -> dict:
+def export_network(visible_to: list[str] | None = None, db_path: str = DEFAULT_DB,
+                   pg_conninfo=None, project_id=None) -> dict:
     """Export the entire network as a dict.
 
     Returns: {"nodes": dict, "nogoods": list}
     """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "export_network",
+                            visible_to=visible_to)
+
     with _with_network(db_path) as net:
         return {
             "nodes": {
@@ -1116,12 +1209,43 @@ def list_repos(db_path: str = DEFAULT_DB) -> dict:
         return {"repos": dict(net.repos)}
 
 
-def export_markdown(visible_to: list[str] | None = None, db_path: str = DEFAULT_DB) -> str:
+def export_markdown(visible_to: list[str] | None = None, db_path: str = DEFAULT_DB,
+                    pg_conninfo=None, project_id=None) -> str:
     """Export the network as beliefs.md-compatible markdown.
 
     Returns: the markdown string
     """
     from .export_markdown import export_markdown as _export
+
+    if pg_conninfo:
+        data = export_network(visible_to=visible_to, pg_conninfo=pg_conninfo,
+                              project_id=project_id)
+        from . import Node, Justification, Nogood
+        from .network import Network
+        net = Network()
+        for nid, ndata in data.get("nodes", {}).items():
+            node = Node(nid, ndata.get("text", ""))
+            node.truth_value = ndata.get("truth_value", "OUT")
+            node.source = ndata.get("source", "")
+            node.source_url = ndata.get("source_url", "")
+            node.metadata = ndata.get("metadata", {})
+            for jdata in ndata.get("justifications", []):
+                j = Justification(
+                    type=jdata.get("type", "SL"),
+                    antecedents=jdata.get("antecedents", []),
+                    outlist=jdata.get("outlist", []),
+                    label=jdata.get("label", ""),
+                )
+                node.justifications.append(j)
+            net.nodes[nid] = node
+        for ngdata in data.get("nogoods", []):
+            net.nogoods.append(Nogood(
+                id=ngdata.get("id", ""),
+                nodes=ngdata.get("nodes", []),
+                discovered=ngdata.get("discovered", ""),
+                resolution=ngdata.get("resolution", ""),
+            ))
+        return _export(net)
 
     with _with_network(db_path) as net:
         if visible_to is not None:
@@ -1200,11 +1324,15 @@ def hash_sources(
         return {"hashed": results, "count": len(results)}
 
 
-def compact(budget: int = 500, truncate: bool = True, visible_to: list[str] | None = None, db_path: str = DEFAULT_DB) -> str:
+def compact(budget: int = 500, truncate: bool = True, visible_to: list[str] | None = None, db_path: str = DEFAULT_DB,
+            pg_conninfo=None, project_id=None) -> str:
     """Generate a token-budgeted belief state summary.
 
     Returns: the compact summary string
     """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "compact",
+                            budget=budget, truncate=truncate, visible_to=visible_to)
     from .compact import compact as _compact
 
     with _with_network(db_path) as net:
@@ -1277,7 +1405,8 @@ def lookup(query: str, visible_to: list[str] | None = None, db_path: str = DEFAU
 
 
 def search(query: str, visible_to: list[str] | None = None, db_path: str = DEFAULT_DB,
-           format: str = "markdown", depth: int = 1) -> str:
+           format: str = "markdown", depth: int = 1,
+           pg_conninfo=None, project_id=None) -> str:
     """Search nodes using full-text search with neighbor expansion.
 
     Uses SQLite FTS5 for ranked all-terms matching. Returns matched nodes
@@ -1295,6 +1424,9 @@ def search(query: str, visible_to: list[str] | None = None, db_path: str = DEFAU
 
     Returns: formatted string with matched nodes and neighbors
     """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "search",
+                            query=query, visible_to=visible_to, format=format)
     with _with_network(db_path) as net:
         matched_ids = _fts_search(query, db_path)
 
@@ -1542,11 +1674,33 @@ def list_nodes(
     never_reviewed: bool = False,
     by_impact: bool = False,
     db_path: str = DEFAULT_DB,
+    pg_conninfo=None, project_id=None,
 ) -> dict:
     """List nodes with optional filters.
 
     Returns: {"nodes": list[dict], "count": int}
     """
+    if pg_conninfo:
+        unsupported = []
+        if challenged:
+            unsupported.append("challenged")
+        if min_depth is not None:
+            unsupported.append("min_depth")
+        if max_depth is not None:
+            unsupported.append("max_depth")
+        if not_reviewed_since is not None:
+            unsupported.append("not_reviewed_since")
+        if never_reviewed:
+            unsupported.append("never_reviewed")
+        if by_impact:
+            unsupported.append("by_impact")
+        if unsupported:
+            raise NotImplementedError(
+                f"{', '.join(unsupported)} not supported with PostgreSQL")
+        return _pg_dispatch(pg_conninfo, project_id, "list_nodes",
+                            status=status, premises_only=premises_only,
+                            has_dependents=has_dependents, namespace=namespace,
+                            visible_to=visible_to)
     from datetime import datetime, timedelta
 
     with _with_network(db_path) as net:
