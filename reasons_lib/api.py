@@ -1774,12 +1774,16 @@ def list_nodes(
 def list_gated(
     visible_to: list[str] | None = None,
     db_path: str = DEFAULT_DB,
+    pg_conninfo=None, project_id=None,
 ) -> dict:
     """Find OUT nodes blocked by IN outlist nodes (active gates).
 
     Returns: {"blockers": {blocker_id: {"text": str, "gated": [{"id": str, "text": str}]}},
               "gated_count": int, "blocker_count": int}
     """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "list_gated",
+                            visible_to=visible_to)
     with _with_network(db_path) as net:
         blockers: dict[str, dict] = {}
         for nid, node in sorted(net.nodes.items()):

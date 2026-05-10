@@ -18,7 +18,10 @@ from . import api
 def cmd_init(args):
     try:
         result = api.init_db(force=args.force, **_backend_kwargs(args))
-        print(f"Initialized RMS database: {result['db_path']}")
+        if "db_path" in result:
+            print(f"Initialized RMS database: {result['db_path']}")
+        else:
+            print(f"Initialized PostgreSQL project: {result['project_id']}")
     except FileExistsError as e:
         print(f"{e}", file=sys.stderr)
         print("Use --force to reinitialize.", file=sys.stderr)
