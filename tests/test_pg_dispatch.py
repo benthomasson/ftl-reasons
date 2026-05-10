@@ -5,7 +5,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from reasons_lib.api import _pg_dispatch
+from reasons_lib.api import _pg_dispatch, export_markdown
 from reasons_lib.cli import _backend_kwargs, _require_sqlite
 
 
@@ -82,3 +82,109 @@ class TestRequireSqlite:
         with patch.dict("os.environ", {"REASONS_PG_CONNINFO": "postgresql://env"}):
             with pytest.raises(SystemExit):
                 _require_sqlite(args, "hash-sources")
+
+
+class TestExportMarkdownPgPath:
+
+    EXPORT_DATA = {
+        "nodes": {
+            "premise-a": {
+                "text": "Alpha premise",
+                "truth_value": "IN",
+                "justifications": [],
+                "source": "test.py",
+                "source_url": "https://example.com",
+                "source_hash": "abc123",
+                "date": "2026-01-01",
+                "metadata": {"domain": "test"},
+            },
+            "derived-b": {
+                "text": "Beta derived from alpha",
+                "truth_value": "IN",
+                "justifications": [
+                    {"type": "SL", "antecedents": ["premise-a"], "outlist": [], "label": ""}
+                ],
+                "source": "",
+                "source_url": "",
+                "source_hash": "",
+                "date": "",
+                "metadata": {},
+            },
+            "gated-c": {
+                "text": "Gamma gated on blocker",
+                "truth_value": "OUT",
+                "justifications": [
+                    {"type": "SL", "antecedents": ["premise-a"],
+                     "outlist": ["blocker"], "label": "gated"}
+                ],
+                "source": "",
+                "source_url": "",
+                "source_hash": "",
+                "date": "",
+                "metadata": {},
+            },
+            "blocker": {
+                "text": "Blocker node",
+                "truth_value": "IN",
+                "justifications": [],
+                "source": "",
+                "source_url": "",
+                "source_hash": "",
+                "date": "",
+                "metadata": {},
+            },
+        },
+        "nogoods": [
+            {"id": "nogood-001", "nodes": ["premise-a", "blocker"],
+             "discovered": "2026-01-01", "resolution": ""},
+        ],
+        "repos": {},
+    }
+
+    def test_produces_markdown(self):
+        with patch("reasons_lib.api.export_network", return_value=self.EXPORT_DATA):
+            md = export_markdown(pg_conninfo="postgresql://...", project_id="test")
+        assert isinstance(md, str)
+        assert len(md) > 0
+
+    def test_contains_node_ids(self):
+        with patch("reasons_lib.api.export_network", return_value=self.EXPORT_DATA):
+            md = export_markdown(pg_conninfo="postgresql://...", project_id="test")
+        assert "premise-a" in md
+        assert "derived-b" in md
+        assert "gated-c" in md
+
+    def test_contains_node_text(self):
+        with patch("reasons_lib.api.export_network", return_value=self.EXPORT_DATA):
+            md = export_markdown(pg_conninfo="postgresql://...", project_id="test")
+        assert "Alpha premise" in md
+        assert "Beta derived from alpha" in md
+
+    def test_contains_justification_refs(self):
+        with patch("reasons_lib.api.export_network", return_value=self.EXPORT_DATA):
+            md = export_markdown(pg_conninfo="postgresql://...", project_id="test")
+        assert "premise-a" in md
+
+    def test_contains_source_info(self):
+        with patch("reasons_lib.api.export_network", return_value=self.EXPORT_DATA):
+            md = export_markdown(pg_conninfo="postgresql://...", project_id="test")
+        assert "test.py" in md
+
+    def test_contains_nogoods(self):
+        with patch("reasons_lib.api.export_network", return_value=self.EXPORT_DATA):
+            md = export_markdown(pg_conninfo="postgresql://...", project_id="test")
+        assert "nogood" in md.lower()
+
+    def test_dependents_reconstructed(self):
+        with patch("reasons_lib.api.export_network", return_value=self.EXPORT_DATA):
+            md = export_markdown(pg_conninfo="postgresql://...", project_id="test")
+        # premise-a is an antecedent of derived-b and gated-c,
+        # so it should show dependents in the markdown
+        assert "derived-b" in md
+        assert "gated-c" in md
+
+    def test_empty_network(self):
+        empty = {"nodes": {}, "nogoods": [], "repos": {}}
+        with patch("reasons_lib.api.export_network", return_value=empty):
+            md = export_markdown(pg_conninfo="postgresql://...", project_id="test")
+        assert isinstance(md, str)

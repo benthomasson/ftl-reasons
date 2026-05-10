@@ -264,7 +264,20 @@ def add_justification(
     db_path: str = DEFAULT_DB,
     pg_conninfo=None, project_id=None,
 ) -> dict:
-    """Add a new justification to an existing node."""
+    """Add a new justification to an existing node.
+
+    Args:
+        node_id: Node to add justification to
+        sl: Comma-separated antecedent IDs for SL justification
+        cp: Comma-separated antecedent IDs for CP justification
+        unless: Comma-separated outlist IDs (must be OUT for justification to hold)
+        label: Justification label
+        namespace: Optional namespace prefix (not supported with PostgreSQL)
+        any_mode: If True, expand SL into one justification per antecedent (OR; not supported with PostgreSQL)
+        db_path: Path to RMS database
+
+    Returns: {"node_id", "old_truth_value", "new_truth_value", "changed", "premise_count"}
+    """
     if pg_conninfo:
         if namespace or any_mode:
             raise NotImplementedError("namespace and any_mode are not supported with PostgreSQL")
