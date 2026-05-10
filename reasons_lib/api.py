@@ -2192,6 +2192,9 @@ def deduplicate(
         in_nodes = [(nid, n) for nid, n in sorted(net.nodes.items())
                     if n.truth_value == "IN"]
 
+        if not in_nodes:
+            return {"clusters": [], "retracted": []}
+
         if semantic:
             beliefs = {nid: n.text for nid, n in in_nodes}
             cache = ClusterCache(embedding_model or DEFAULT_MODEL)
