@@ -763,7 +763,8 @@ def cmd_cluster_list(args):
         for b in cluster["beliefs"]:
             marker = "+" if args.status == "IN" else "-"
             print(f"  [{marker}] {b['id']}")
-            print(f"      {b['text'][:100]}")
+            text = b['text'][:100] + "..." if len(b['text']) > 100 else b['text']
+            print(f"      {text}")
 
     print(f"\n{result['n_clusters']} cluster(s), {total} beliefs")
     print(f"Model: {result['embedding_model']}")

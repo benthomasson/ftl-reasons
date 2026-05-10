@@ -1,6 +1,6 @@
 """Tests for the functional Python API."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 
