@@ -9,7 +9,7 @@ import pytest
 try:
     from reasons_lib.cluster import (
         cluster_beliefs, list_clusters, ClusterCache, _require_cluster_deps,
-        HAS_CLUSTER_DEPS,
+        _auto_k, HAS_CLUSTER_DEPS,
     )
 except ImportError:
     HAS_CLUSTER_DEPS = False
@@ -135,3 +135,30 @@ def test_list_clusters_small_set():
     assert len(result["clusters"]) == 1
     all_ids = {b["id"] for b in result["clusters"][0]["beliefs"]}
     assert all_ids == {"a", "b"}
+
+
+@skip_no_cluster
+def test_list_clusters_reproducible_with_seed():
+    beliefs = {f"b-{i}": f"Belief about topic {i}" for i in range(30)}
+    r1 = list_clusters(beliefs, seed=42)
+    r2 = list_clusters(beliefs, seed=42)
+    ids1 = [b["id"] for c in r1["clusters"] for b in c["beliefs"]]
+    ids2 = [b["id"] for c in r2["clusters"] for b in c["beliefs"]]
+    assert ids1 == ids2
+
+
+def test_auto_k_defaults():
+    assert _auto_k(100) == 20
+    assert _auto_k(50) == 10
+    assert _auto_k(10) == 2
+    assert _auto_k(5) == 2
+
+
+def test_auto_k_with_override():
+    assert _auto_k(100, n_clusters=5) == 5
+    assert _auto_k(3, n_clusters=10) == 3
+
+
+def test_auto_k_with_max_k():
+    assert _auto_k(100, max_k=8) == 8
+    assert _auto_k(100, max_k=30) == 20

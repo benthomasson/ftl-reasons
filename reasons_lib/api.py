@@ -2133,6 +2133,7 @@ def _rewrite_dependents(net, old_id: str, new_id: str):
 def list_clusters(
     status: str = "IN",
     n_clusters: int | None = None,
+    seed: int | None = None,
     embedding_model: str | None = None,
     visible_to: list[str] | None = None,
     db_path: str = DEFAULT_DB,
@@ -2155,6 +2156,7 @@ def list_clusters(
     return _list_clusters(
         beliefs,
         n_clusters=n_clusters,
+        seed=seed,
         model_name=embedding_model or DEFAULT_MODEL,
     )
 

@@ -731,6 +731,7 @@ def cmd_cluster_list(args):
     result = api.list_clusters(
         status=args.status,
         n_clusters=args.n_clusters,
+        seed=args.seed,
         embedding_model=args.embedding_model,
         visible_to=_parse_visible_to(args),
         db_path=args.db,
@@ -1672,6 +1673,8 @@ def main():
                    help="Filter by truth value (default: IN)")
     p.add_argument("--n-clusters", type=int, default=None,
                    help="Override automatic cluster count")
+    p.add_argument("--seed", type=int, default=None,
+                   help="Random seed for reproducible clustering")
     p.add_argument("--embedding-model", default=None,
                    help="Sentence-transformers model (default: all-MiniLM-L6-v2)")
     p.add_argument("--visible-to", metavar="TAG,TAG",
