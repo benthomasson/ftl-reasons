@@ -164,3 +164,75 @@ def detect_contradictions(nodes, belief_ids=None, model="claude", timeout=300,
             print(f"  WARN: batch {batch_num} failed: {e}", file=sys.stderr)
 
     return all_results
+
+
+def detect_contradictions_semantic(nodes, belief_ids=None, model="claude",
+                                   timeout=300, embedding_model=None):
+    """Detect contradictions by clustering beliefs semantically before LLM analysis.
+
+    Groups beliefs by semantic similarity so topically related beliefs
+    are analyzed together, increasing the chance of catching contradictions.
+
+    Args:
+        nodes: Dict of node_id -> node data from export_network().
+        belief_ids: Optional list of specific IDs to check.
+        model: LLM model to use.
+        timeout: LLM timeout in seconds.
+        embedding_model: Sentence-transformers model name.
+
+    Returns: list of contradiction dicts.
+    """
+    from .cluster import list_clusters, DEFAULT_MODEL
+
+    if belief_ids is None:
+        belief_ids = [
+            nid for nid, node in sorted(nodes.items())
+            if node.get("truth_value") == "IN"
+        ]
+    else:
+        belief_ids = [
+            nid for nid in belief_ids
+            if nid in nodes
+            and nodes[nid].get("truth_value") == "IN"
+        ]
+
+    if not belief_ids:
+        return []
+
+    beliefs = {}
+    for nid in belief_ids:
+        text = nodes[nid].get("text", "")
+        beliefs[nid] = text
+
+    result = list_clusters(
+        beliefs,
+        model_name=embedding_model or DEFAULT_MODEL,
+    )
+
+    valid_ids = set(belief_ids)
+    all_results = []
+    clusters = result["clusters"]
+
+    for ci, cluster in enumerate(clusters, 1):
+        cluster_ids = [b["id"] for b in cluster["beliefs"]]
+        if len(cluster_ids) < 2:
+            continue
+
+        print(f"  Checking cluster {ci}/{len(clusters)} "
+              f"({len(cluster_ids)} beliefs)...", file=sys.stderr)
+
+        for i in range(0, len(cluster_ids), CONTRADICTION_BATCH_SIZE):
+            batch = cluster_ids[i:i + CONTRADICTION_BATCH_SIZE]
+            beliefs_text = format_beliefs_for_contradiction_check(batch, nodes)
+            prompt = CONTRADICTION_PROMPT.format(beliefs=beliefs_text)
+
+            try:
+                response = invoke_model(prompt, model=model, timeout=timeout)
+                results = parse_contradiction_response(response,
+                                                       valid_ids=valid_ids)
+                all_results.extend(results)
+            except Exception as e:
+                print(f"  WARN: cluster {ci} batch failed: {e}",
+                      file=sys.stderr)
+
+    return all_results

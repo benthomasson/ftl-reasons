@@ -2054,14 +2054,22 @@ def detect_contradictions(
     timeout: int = 300,
     sample: int | None = None,
     auto_apply: bool = False,
+    semantic: bool = False,
+    embedding_model: str | None = None,
     db_path: str = DEFAULT_DB,
 ) -> dict:
     """Detect contradictions between IN beliefs via LLM analysis.
+
+    When semantic=True, beliefs are clustered by embedding similarity
+    before sending to the LLM, so topically related beliefs are
+    analyzed together.
 
     Returns: {"contradictions": [...], "checked": int, "found": int,
               "applied": int, "total_in": int}
     """
     from .contradictions import detect_contradictions as _detect
+    if semantic:
+        from .contradictions import detect_contradictions_semantic as _detect_semantic
 
     result = export_network(db_path=db_path)
     nodes = result.get("nodes", {})
@@ -2081,8 +2089,13 @@ def detect_contradictions(
         candidates = {k: candidates[k] for k in sampled_keys}
 
     check_ids = sorted(candidates.keys())
-    contradictions = _detect(nodes, belief_ids=check_ids, model=model,
-                            timeout=timeout)
+    if semantic:
+        contradictions = _detect_semantic(nodes, belief_ids=check_ids,
+                                          model=model, timeout=timeout,
+                                          embedding_model=embedding_model)
+    else:
+        contradictions = _detect(nodes, belief_ids=check_ids, model=model,
+                                timeout=timeout)
 
     applied = 0
     applied_details = []

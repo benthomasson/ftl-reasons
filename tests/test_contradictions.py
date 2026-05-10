@@ -383,3 +383,66 @@ class TestCmdContradictions:
             stdout, stderr, code = run_cli(
                 "contradictions", "--auto-apply", "--dry-run", db_path=db_path)
         assert "Applied: 0" in stdout
+
+
+try:
+    from reasons_lib.cluster import HAS_CLUSTER_DEPS
+except ImportError:
+    HAS_CLUSTER_DEPS = False
+
+skip_no_cluster = pytest.mark.skipif(
+    not HAS_CLUSTER_DEPS,
+    reason="sentence-transformers and scikit-learn not installed"
+)
+
+
+@skip_no_cluster
+class TestDetectContradictionsSemantic:
+
+    def test_semantic_groups_by_cluster(self):
+        nodes = {
+            "auth-login-validates": {
+                "text": "Login validates user credentials against the database",
+                "truth_value": "IN",
+                "justifications": [],
+            },
+            "auth-login-skips-validation": {
+                "text": "Login skips credential validation for speed",
+                "truth_value": "IN",
+                "justifications": [],
+            },
+            "db-queries-are-fast": {
+                "text": "Database queries are optimized for read-heavy workloads",
+                "truth_value": "IN",
+                "justifications": [],
+            },
+        }
+        mock_result = type("R", (), {
+            "returncode": 0,
+            "stdout": "No contradictions detected.",
+            "stderr": "",
+        })()
+        from reasons_lib.contradictions import detect_contradictions_semantic
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run", return_value=mock_result) as mock_run:
+            detect_contradictions_semantic(nodes)
+        assert mock_run.call_count >= 1
+        all_prompts = " ".join(
+            call[1].get("input", "") for call in mock_run.call_args_list
+        )
+        assert "auth-login-validates" in all_prompts
+        assert "auth-login-skips-validation" in all_prompts
+
+    def test_semantic_empty_network(self):
+        from reasons_lib.contradictions import detect_contradictions_semantic
+        nodes = {"out-only": {"text": "x", "truth_value": "OUT", "justifications": []}}
+        results = detect_contradictions_semantic(nodes)
+        assert results == []
+
+    def test_semantic_single_belief_skips_llm(self):
+        from reasons_lib.contradictions import detect_contradictions_semantic
+        nodes = {"only-one": {"text": "Single belief", "truth_value": "IN", "justifications": []}}
+        with patch("reasons_lib.llm.subprocess.run") as mock_run:
+            results = detect_contradictions_semantic(nodes)
+        assert results == []
+        mock_run.assert_not_called()

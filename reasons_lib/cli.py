@@ -1335,6 +1335,8 @@ def cmd_contradictions(args):
         timeout=args.timeout,
         sample=args.sample,
         auto_apply=auto_apply,
+        semantic=args.semantic,
+        embedding_model=args.embedding_model,
         db_path=args.db,
     )
 
@@ -1739,6 +1741,10 @@ def main():
                    help="Show findings without applying nogoods")
     p.add_argument("--auto-apply", action="store_true",
                    help="Auto-apply detected nogoods via dependency-directed backtracking")
+    p.add_argument("--semantic", action="store_true",
+                   help="Group beliefs by semantic similarity before LLM analysis")
+    p.add_argument("--embedding-model", default=None,
+                   help="Sentence-transformers model (default: all-MiniLM-L6-v2)")
     p.add_argument("-o", "--output", default=None,
                    help="Write proposals to markdown file")
 
