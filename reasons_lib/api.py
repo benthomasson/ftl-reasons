@@ -2175,7 +2175,7 @@ def parse_contradiction_plan(plan_text: str) -> list[dict]:
         if m:
             if current_id and current_claims:
                 entries.append({"id": current_id, "claims": current_claims})
-            current_id = m.group(2) == "APPLY" and m.group(1) or None
+            current_id = m.group(1) if m.group(2) == "APPLY" else None
             current_claims = []
             continue
 
