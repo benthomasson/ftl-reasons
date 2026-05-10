@@ -76,6 +76,17 @@ class ClusterCache:
         return ids, np.array(embeddings)
 
 
+def _auto_k(n_beliefs, n_clusters=None, max_k=20):
+    """Compute cluster count from belief count or explicit override."""
+    if n_clusters is not None:
+        k = max(n_clusters, 1)
+    else:
+        k = n_beliefs // 5
+        k = min(k, max_k)
+        k = max(k, 2)
+    return min(k, n_beliefs)
+
+
 def cluster_beliefs(beliefs, budget, seed=None, n_clusters=None,
                     cache=None, model_name=DEFAULT_MODEL):
     """Cluster beliefs and sample across cluster boundaries.
@@ -106,14 +117,7 @@ def cluster_beliefs(beliefs, budget, seed=None, n_clusters=None,
 
     ids, embeddings = cache.embed(beliefs)
 
-    if n_clusters is None:
-        k = len(beliefs) // 5
-        k = min(k, budget // 3, 20)
-        k = max(k, 2)
-    else:
-        k = max(n_clusters, 1)
-
-    k = min(k, len(beliefs))
+    k = _auto_k(len(beliefs), n_clusters, max_k=min(budget // 3, 20))
 
     km = KMeans(n_clusters=k, random_state=seed, n_init=10)
     labels = km.fit_predict(embeddings)
@@ -139,5 +143,59 @@ def cluster_beliefs(beliefs, budget, seed=None, n_clusters=None,
     return selected, {
         "n_clusters": k,
         "cluster_sizes": cluster_sizes,
+        "embedding_model": cache.model_name,
+    }
+
+
+def list_clusters(beliefs, n_clusters=None, seed=None, cache=None,
+                  model_name=DEFAULT_MODEL):
+    """Cluster beliefs and return full cluster assignments.
+
+    Args:
+        beliefs: {node_id: text} dict
+        n_clusters: override automatic cluster count
+        seed: random seed for KMeans
+        cache: optional ClusterCache for embedding reuse
+        model_name: sentence-transformers model name
+
+    Returns:
+        {"clusters": [{"id": int, "beliefs": [{"id": str, "text": str}]}],
+         "n_clusters": int, "embedding_model": str}
+    """
+    _require_cluster_deps()
+
+    if len(beliefs) <= 3:
+        return {
+            "clusters": [{"id": 0, "beliefs": [
+                {"id": nid, "text": text} for nid, text in sorted(beliefs.items())
+            ]}],
+            "n_clusters": 1,
+            "embedding_model": model_name,
+        }
+
+    if cache is None:
+        cache = ClusterCache(model_name)
+
+    ids, embeddings = cache.embed(beliefs)
+
+    k = _auto_k(len(beliefs), n_clusters)
+
+    km = KMeans(n_clusters=k, random_state=seed, n_init=10)
+    labels = km.fit_predict(embeddings)
+
+    groups = {}
+    for i, nid in enumerate(ids):
+        groups.setdefault(int(labels[i]), []).append(
+            {"id": nid, "text": beliefs[nid]}
+        )
+
+    clusters = [
+        {"id": label, "beliefs": members}
+        for label, members in sorted(groups.items(), key=lambda x: -len(x[1]))
+    ]
+
+    return {
+        "clusters": clusters,
+        "n_clusters": k,
         "embedding_model": cache.model_name,
     }

@@ -577,3 +577,52 @@ class TestUpdateNode:
         node = api.show_node("a", db_path=db_path)
         assert node["text"] == "Updated while OUT"
         assert node["truth_value"] == "OUT"
+
+
+class TestListClusters:
+
+    @pytest.fixture
+    def db_with_beliefs(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        api.init_db(db_path=db)
+        for i in range(10):
+            api.add_node(f"in-{i}", f"Active belief {i}", db_path=db)
+        for i in range(5):
+            api.add_node(f"out-{i}", f"Retracted belief {i}", db_path=db)
+            api.retract_node(f"out-{i}", db_path=db)
+        return db
+
+    def test_filters_by_status(self, db_with_beliefs):
+        mock_result = {"clusters": [{"id": 0, "beliefs": []}], "n_clusters": 1, "embedding_model": "test"}
+        with patch("reasons_lib.cluster.list_clusters", return_value=mock_result) as mock_lc:
+            api.list_clusters(status="IN", db_path=db_with_beliefs)
+            beliefs_arg = mock_lc.call_args[0][0]
+            assert all(k.startswith("in-") for k in beliefs_arg)
+            assert len(beliefs_arg) == 10
+
+    def test_filters_out_status(self, db_with_beliefs):
+        mock_result = {"clusters": [{"id": 0, "beliefs": []}], "n_clusters": 1, "embedding_model": "test"}
+        with patch("reasons_lib.cluster.list_clusters", return_value=mock_result) as mock_lc:
+            api.list_clusters(status="OUT", db_path=db_with_beliefs)
+            beliefs_arg = mock_lc.call_args[0][0]
+            assert all(k.startswith("out-") for k in beliefs_arg)
+            assert len(beliefs_arg) == 5
+
+    def test_empty_network(self, tmp_path):
+        db = str(tmp_path / "empty.db")
+        api.init_db(db_path=db)
+        result = api.list_clusters(db_path=db)
+        assert result["clusters"] == []
+        assert result["n_clusters"] == 0
+
+    def test_passes_seed(self, db_with_beliefs):
+        mock_result = {"clusters": [], "n_clusters": 0, "embedding_model": "test"}
+        with patch("reasons_lib.cluster.list_clusters", return_value=mock_result) as mock_lc:
+            api.list_clusters(seed=42, db_path=db_with_beliefs)
+            assert mock_lc.call_args[1]["seed"] == 42
+
+    def test_passes_n_clusters(self, db_with_beliefs):
+        mock_result = {"clusters": [], "n_clusters": 0, "embedding_model": "test"}
+        with patch("reasons_lib.cluster.list_clusters", return_value=mock_result) as mock_lc:
+            api.list_clusters(n_clusters=3, db_path=db_with_beliefs)
+            assert mock_lc.call_args[1]["n_clusters"] == 3
