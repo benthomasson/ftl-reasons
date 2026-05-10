@@ -433,6 +433,43 @@ class TestDetectContradictionsSemantic:
         assert "auth-login-validates" in all_prompts
         assert "auth-login-skips-validation" in all_prompts
 
+    def test_semantic_returns_found_contradictions(self):
+        nodes = {
+            "auth-login-validates": {
+                "text": "Login validates user credentials against the database",
+                "truth_value": "IN",
+                "justifications": [],
+            },
+            "auth-login-skips-validation": {
+                "text": "Login skips credential validation for speed",
+                "truth_value": "IN",
+                "justifications": [],
+            },
+            "db-queries-are-fast": {
+                "text": "Database queries are optimized for read-heavy workloads",
+                "truth_value": "IN",
+                "justifications": [],
+            },
+        }
+        nogood_response = (
+            "### NOGOOD auth-contradiction\n"
+            "- Claims: auth-login-validates, auth-login-skips-validation\n"
+            "- Analysis: Cannot both validate and skip validation\n"
+            "- Severity: High\n"
+        )
+        mock_result = type("R", (), {
+            "returncode": 0,
+            "stdout": nogood_response,
+            "stderr": "",
+        })()
+        from reasons_lib.contradictions import detect_contradictions_semantic
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+            results = detect_contradictions_semantic(nodes)
+        assert len(results) == 1
+        assert results[0]["id"] == "auth-contradiction"
+        assert set(results[0]["claims"]) == {"auth-login-validates", "auth-login-skips-validation"}
+
     def test_semantic_empty_network(self):
         from reasons_lib.contradictions import detect_contradictions_semantic
         nodes = {"out-only": {"text": "x", "truth_value": "OUT", "justifications": []}}
