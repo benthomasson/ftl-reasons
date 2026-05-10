@@ -76,6 +76,17 @@ class ClusterCache:
         return ids, np.array(embeddings)
 
 
+def _auto_k(n_beliefs, n_clusters=None, max_k=20):
+    """Compute cluster count from belief count or explicit override."""
+    if n_clusters is not None:
+        k = max(n_clusters, 1)
+    else:
+        k = len(range(n_beliefs)) // 5
+        k = min(k, max_k)
+        k = max(k, 2)
+    return min(k, n_beliefs)
+
+
 def cluster_beliefs(beliefs, budget, seed=None, n_clusters=None,
                     cache=None, model_name=DEFAULT_MODEL):
     """Cluster beliefs and sample across cluster boundaries.
@@ -106,14 +117,7 @@ def cluster_beliefs(beliefs, budget, seed=None, n_clusters=None,
 
     ids, embeddings = cache.embed(beliefs)
 
-    if n_clusters is None:
-        k = len(beliefs) // 5
-        k = min(k, budget // 3, 20)
-        k = max(k, 2)
-    else:
-        k = max(n_clusters, 1)
-
-    k = min(k, len(beliefs))
+    k = _auto_k(len(beliefs), n_clusters, max_k=min(budget // 3, 20))
 
     km = KMeans(n_clusters=k, random_state=seed, n_init=10)
     labels = km.fit_predict(embeddings)
@@ -143,12 +147,14 @@ def cluster_beliefs(beliefs, budget, seed=None, n_clusters=None,
     }
 
 
-def list_clusters(beliefs, n_clusters=None, cache=None, model_name=DEFAULT_MODEL):
+def list_clusters(beliefs, n_clusters=None, seed=None, cache=None,
+                  model_name=DEFAULT_MODEL):
     """Cluster beliefs and return full cluster assignments.
 
     Args:
         beliefs: {node_id: text} dict
         n_clusters: override automatic cluster count
+        seed: random seed for KMeans
         cache: optional ClusterCache for embedding reuse
         model_name: sentence-transformers model name
 
@@ -172,16 +178,9 @@ def list_clusters(beliefs, n_clusters=None, cache=None, model_name=DEFAULT_MODEL
 
     ids, embeddings = cache.embed(beliefs)
 
-    if n_clusters is None:
-        k = len(beliefs) // 5
-        k = min(k, 20)
-        k = max(k, 2)
-    else:
-        k = max(n_clusters, 1)
+    k = _auto_k(len(beliefs), n_clusters)
 
-    k = min(k, len(beliefs))
-
-    km = KMeans(n_clusters=k, random_state=42, n_init=10)
+    km = KMeans(n_clusters=k, random_state=seed, n_init=10)
     labels = km.fit_predict(embeddings)
 
     groups = {}
