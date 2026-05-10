@@ -2130,6 +2130,35 @@ def _rewrite_dependents(net, old_id: str, new_id: str):
         old_node.dependents.discard(dep_id)
 
 
+def list_clusters(
+    status: str = "IN",
+    n_clusters: int | None = None,
+    embedding_model: str | None = None,
+    visible_to: list[str] | None = None,
+    db_path: str = DEFAULT_DB,
+) -> dict:
+    """Cluster beliefs by semantic similarity and return full assignments."""
+    from .cluster import list_clusters as _list_clusters, DEFAULT_MODEL
+
+    with _with_network(db_path) as net:
+        beliefs = {}
+        for nid, n in sorted(net.nodes.items()):
+            if status and n.truth_value != status:
+                continue
+            if visible_to is not None and not _is_visible(n, visible_to):
+                continue
+            beliefs[nid] = n.text
+
+    if not beliefs:
+        return {"clusters": [], "n_clusters": 0, "embedding_model": embedding_model or DEFAULT_MODEL}
+
+    return _list_clusters(
+        beliefs,
+        n_clusters=n_clusters,
+        model_name=embedding_model or DEFAULT_MODEL,
+    )
+
+
 def deduplicate(
     threshold: float = 0.5,
     auto: bool = False,

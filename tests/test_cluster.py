@@ -8,7 +8,8 @@ import pytest
 
 try:
     from reasons_lib.cluster import (
-        cluster_beliefs, ClusterCache, _require_cluster_deps, HAS_CLUSTER_DEPS,
+        cluster_beliefs, list_clusters, ClusterCache, _require_cluster_deps,
+        HAS_CLUSTER_DEPS,
     )
 except ImportError:
     HAS_CLUSTER_DEPS = False
@@ -106,3 +107,31 @@ def test_cluster_n_clusters_override():
     beliefs = {f"b-{i}": f"Belief about topic {i}" for i in range(50)}
     _, stats = cluster_beliefs(beliefs, budget=20, seed=42, n_clusters=5)
     assert stats["n_clusters"] == 5
+
+
+@skip_no_cluster
+def test_list_clusters_returns_all_beliefs():
+    beliefs = {f"b-{i}": f"Belief about topic {i} with some text" for i in range(30)}
+    result = list_clusters(beliefs)
+    all_ids = {b["id"] for c in result["clusters"] for b in c["beliefs"]}
+    assert all_ids == set(beliefs.keys())
+    assert result["n_clusters"] >= 2
+    assert "embedding_model" in result
+
+
+@skip_no_cluster
+def test_list_clusters_n_clusters_override():
+    beliefs = {f"b-{i}": f"Belief about topic {i}" for i in range(50)}
+    result = list_clusters(beliefs, n_clusters=5)
+    assert result["n_clusters"] == 5
+    assert len(result["clusters"]) == 5
+
+
+@skip_no_cluster
+def test_list_clusters_small_set():
+    beliefs = {"a": "Alpha belief", "b": "Beta belief"}
+    result = list_clusters(beliefs)
+    assert result["n_clusters"] == 1
+    assert len(result["clusters"]) == 1
+    all_ids = {b["id"] for b in result["clusters"][0]["beliefs"]}
+    assert all_ids == {"a", "b"}

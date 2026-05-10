@@ -726,6 +726,48 @@ def cmd_ask(args):
     print(result)
 
 
+def cmd_cluster_list(args):
+    _require_sqlite(args, "cluster-list")
+    result = api.list_clusters(
+        status=args.status,
+        n_clusters=args.n_clusters,
+        embedding_model=args.embedding_model,
+        visible_to=_parse_visible_to(args),
+        db_path=args.db,
+    )
+
+    if not result["clusters"]:
+        print("No beliefs to cluster.")
+        return
+
+    fmt = getattr(args, "format", "text")
+
+    if fmt == "json":
+        print(json.dumps(result, indent=2))
+        return
+
+    if fmt == "markdown":
+        for i, cluster in enumerate(result["clusters"], 1):
+            size = len(cluster["beliefs"])
+            print(f"\n## Cluster {i} ({size} belief{'s' if size != 1 else ''})\n")
+            for b in cluster["beliefs"]:
+                print(f"- **{b['id']}**: {b['text']}")
+        return
+
+    total = 0
+    for i, cluster in enumerate(result["clusters"], 1):
+        size = len(cluster["beliefs"])
+        total += size
+        print(f"\nCluster {i} ({size} belief{'s' if size != 1 else ''}):")
+        for b in cluster["beliefs"]:
+            marker = "+" if args.status == "IN" else "-"
+            print(f"  [{marker}] {b['id']}")
+            print(f"      {b['text'][:100]}")
+
+    print(f"\n{result['n_clusters']} cluster(s), {total} beliefs")
+    print(f"Model: {result['embedding_model']}")
+
+
 def cmd_deduplicate(args):
     _require_sqlite(args, "deduplicate")
     if args.accept:
@@ -1624,6 +1666,19 @@ def main():
     p.add_argument("--accept", metavar="FILE",
                    help="Apply a reviewed dedup plan file")
 
+    # cluster-list
+    p = sub.add_parser("cluster-list", help="List semantic similarity clusters")
+    p.add_argument("--status", choices=["IN", "OUT"], default="IN",
+                   help="Filter by truth value (default: IN)")
+    p.add_argument("--n-clusters", type=int, default=None,
+                   help="Override automatic cluster count")
+    p.add_argument("--embedding-model", default=None,
+                   help="Sentence-transformers model (default: all-MiniLM-L6-v2)")
+    p.add_argument("--visible-to", metavar="TAG,TAG",
+                   help="Only show nodes whose access_tags are a subset of these tags")
+    p.add_argument("--format", choices=["text", "json", "markdown"], default="text",
+                   help="Output format (default: text)")
+
     # namespaces
     p = sub.add_parser("list-gated", help="List OUT nodes blocked by IN outlist nodes")
     p.add_argument("--visible-to", metavar="TAG,TAG", help="Only show nodes whose access_tags are a subset of these tags")
@@ -1740,6 +1795,7 @@ def main():
         "lookup": cmd_lookup,
         "ask": cmd_ask,
         "deduplicate": cmd_deduplicate,
+        "cluster-list": cmd_cluster_list,
         "list": cmd_list,
         "list-gated": cmd_list_gated,
         "list-negative": cmd_list_negative,
