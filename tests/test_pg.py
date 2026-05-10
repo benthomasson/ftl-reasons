@@ -870,3 +870,194 @@ class TestCompact:
         result = pg_api.compact(budget=5000)
         assert "[summary]" in result
         assert "hidden by summaries" in result
+
+
+class TestExportNetwork:
+
+    def test_export_empty(self, pg_api):
+        result = pg_api.export_network()
+        assert result["nodes"] == {}
+        assert result["nogoods"] == []
+
+    def test_export_premises(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        pg_api.add_node("b", "Beta")
+        result = pg_api.export_network()
+        assert "a" in result["nodes"]
+        assert "b" in result["nodes"]
+        assert result["nodes"]["a"]["text"] == "Alpha"
+        assert result["nodes"]["a"]["truth_value"] == "IN"
+        assert result["nodes"]["a"]["justifications"] == []
+
+    def test_export_with_justifications(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        pg_api.add_node("b", "Beta", sl="a")
+        result = pg_api.export_network()
+        justs = result["nodes"]["b"]["justifications"]
+        assert len(justs) == 1
+        assert justs[0]["type"] == "SL"
+        assert justs[0]["antecedents"] == ["a"]
+
+    def test_export_with_outlist(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        pg_api.add_node("blocker", "Blocker")
+        pg_api.retract_node("blocker")
+        pg_api.add_node("c", "Gated", sl="a", unless="blocker")
+        result = pg_api.export_network()
+        justs = result["nodes"]["c"]["justifications"]
+        assert justs[0]["outlist"] == ["blocker"]
+
+    def test_export_with_nogoods(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        pg_api.add_node("b", "Beta")
+        pg_api.add_nogood(["a", "b"])
+        result = pg_api.export_network()
+        assert len(result["nogoods"]) == 1
+        assert set(result["nogoods"][0]["nodes"]) == {"a", "b"}
+
+    def test_export_source_fields(self, pg_api):
+        pg_api.add_node("a", "Alpha", source="test.py", source_url="https://example.com")
+        result = pg_api.export_network()
+        assert result["nodes"]["a"]["source"] == "test.py"
+        assert result["nodes"]["a"]["source_url"] == "https://example.com"
+
+    def test_export_filters_private_metadata(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        pg_api.retract_node("a", reason="test")
+        result = pg_api.export_network()
+        assert "_retracted" not in result["nodes"]["a"]["metadata"]
+
+    def test_export_visible_to(self, pg_api):
+        pg_api.add_node("a", "Alpha", access_tags=["billing"])
+        pg_api.add_node("b", "Beta", access_tags=["ops"])
+        result = pg_api.export_network(visible_to=["billing"])
+        assert "a" in result["nodes"]
+        assert "b" not in result["nodes"]
+
+
+class TestRemoveJustification:
+
+    def test_remove_one_of_two(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        pg_api.add_node("b", "Beta")
+        pg_api.add_node("c", "Gamma", sl="a")
+        pg_api.add_justification("c", sl="b")
+        result = pg_api.remove_justification("c", 0)
+        assert result["remaining"] == 1
+        assert result["removed"]["antecedents"] == ["a"]
+
+    def test_remove_last_raises(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        pg_api.add_node("c", "Gamma", sl="a")
+        with pytest.raises(ValueError, match="only one justification"):
+            pg_api.remove_justification("c", 0)
+
+    def test_remove_premise_raises(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        with pytest.raises(ValueError, match="premise"):
+            pg_api.remove_justification("a", 0)
+
+    def test_remove_invalid_index(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        pg_api.add_node("b", "Beta")
+        pg_api.add_node("c", "Gamma", sl="a")
+        pg_api.add_justification("c", sl="b")
+        with pytest.raises(IndexError):
+            pg_api.remove_justification("c", 5)
+
+    def test_remove_not_found(self, pg_api):
+        with pytest.raises(KeyError):
+            pg_api.remove_justification("nonexistent", 0)
+
+    def test_remove_causes_truth_change(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        pg_api.add_node("b", "Beta")
+        pg_api.retract_node("b")
+        pg_api.add_node("c", "Gamma", sl="a")
+        pg_api.add_justification("c", sl="b")
+        # c is IN via first justification (a is IN)
+        result = pg_api.remove_justification("c", 0)
+        # Now only justification is sl=b, but b is OUT → c goes OUT
+        assert result["old_truth_value"] == "IN"
+        assert result["new_truth_value"] == "OUT"
+
+    def test_remove_propagates(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        pg_api.add_node("b", "Beta")
+        pg_api.add_node("c", "Gamma", sl="a")
+        pg_api.add_justification("c", sl="b")
+        pg_api.add_node("d", "Delta", sl="c")
+        pg_api.retract_node("b")
+        # Remove first justification (sl=a), leaving only sl=b (b is OUT)
+        result = pg_api.remove_justification("c", 0)
+        assert result["new_truth_value"] == "OUT"
+        assert "d" in result["changed"]
+
+
+class TestUpdateNode:
+
+    def test_update_text(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        result = pg_api.update_node("a", text="Alpha updated")
+        assert result["updated_fields"] == ["text"]
+        node = pg_api.show_node("a")
+        assert node["text"] == "Alpha updated"
+
+    def test_update_source(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        result = pg_api.update_node("a", source="test.py", source_url="https://example.com")
+        assert "source" in result["updated_fields"]
+        assert "source_url" in result["updated_fields"]
+        node = pg_api.show_node("a")
+        assert node["source"] == "test.py"
+        assert node["source_url"] == "https://example.com"
+
+    def test_update_nothing(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        result = pg_api.update_node("a")
+        assert result["updated_fields"] == []
+
+    def test_update_not_found(self, pg_api):
+        with pytest.raises(KeyError):
+            pg_api.update_node("nonexistent", text="test")
+
+
+class TestConvertToPremise:
+
+    def test_convert_derived_to_premise(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        pg_api.add_node("b", "Beta", sl="a")
+        result = pg_api.convert_to_premise("b")
+        assert result["old_justifications"] == 1
+        assert result["truth_value"] == "IN"
+        node = pg_api.show_node("b")
+        assert node["justifications"] == []
+
+    def test_convert_out_to_in(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        pg_api.add_node("b", "Beta", sl="a")
+        pg_api.retract_node("a")
+        assert pg_api.show_node("b")["truth_value"] == "OUT"
+        result = pg_api.convert_to_premise("b")
+        assert result["truth_value"] == "IN"
+        assert "b" in result["changed"]
+
+    def test_convert_propagates(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        pg_api.add_node("b", "Beta", sl="a")
+        pg_api.add_node("c", "Gamma", sl="b")
+        pg_api.retract_node("a")
+        assert pg_api.show_node("c")["truth_value"] == "OUT"
+        result = pg_api.convert_to_premise("b")
+        assert "c" in result["changed"]
+        assert pg_api.show_node("c")["truth_value"] == "IN"
+
+    def test_convert_not_found(self, pg_api):
+        with pytest.raises(KeyError):
+            pg_api.convert_to_premise("nonexistent")
+
+    def test_convert_premise_noop(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        result = pg_api.convert_to_premise("a")
+        assert result["old_justifications"] == 0
+        assert result["truth_value"] == "IN"
