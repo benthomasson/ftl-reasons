@@ -731,6 +731,36 @@ class TestDeduplicate:
         assert code == 1
 
 
+try:
+    from reasons_lib.cluster import HAS_CLUSTER_DEPS
+except ImportError:
+    HAS_CLUSTER_DEPS = False
+
+
+@pytest.mark.skipif(not HAS_CLUSTER_DEPS,
+                    reason="sentence-transformers and scikit-learn not installed")
+class TestDeduplicateSemantic:
+
+    def test_semantic_finds_similar(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "input-validation-at-boundaries",
+                "The system validates all inputs at system boundaries", db_path=db_path)
+        run_cli("add", "boundary-input-checking",
+                "Input validation occurs at system edges and boundaries", db_path=db_path)
+        out, err, code = run_cli("deduplicate", "--semantic", db_path=db_path)
+        assert code == 0
+        assert "Cluster" in out
+
+    def test_semantic_with_threshold(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "alpha", "Something about alpha", db_path=db_path)
+        run_cli("add", "beta", "Something completely unrelated about beta", db_path=db_path)
+        out, err, code = run_cli("deduplicate", "--semantic", "--threshold", "0.95",
+                                  db_path=db_path)
+        assert code == 0
+        assert "No duplicate" in out
+
+
 class TestCheckStale:
 
     def test_check_stale_all_fresh(self, db_path):

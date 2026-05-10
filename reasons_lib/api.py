@@ -2164,30 +2164,48 @@ def list_clusters(
 def deduplicate(
     threshold: float = 0.5,
     auto: bool = False,
+    semantic: bool = False,
+    embedding_model: str | None = None,
     db_path: str = DEFAULT_DB,
 ) -> dict:
-    """Find clusters of IN beliefs with similar IDs (likely duplicates).
+    """Find clusters of IN beliefs with similar IDs or text (likely duplicates).
 
-    Uses Jaccard similarity on ID tokens to detect beliefs that say the
-    same thing under slightly different IDs.
+    Uses Jaccard similarity on ID tokens by default, or embedding cosine
+    similarity when semantic=True.
 
     Args:
-        threshold: Minimum Jaccard similarity to consider a pair (default: 0.5)
+        threshold: Minimum similarity to consider a pair (default: 0.5)
         auto: If True, retract all but the most-connected belief in each cluster
+        semantic: If True, use embedding cosine similarity instead of ID tokens
+        embedding_model: Sentence-transformers model (semantic mode only)
         db_path: Path to database
 
     Returns: {"clusters": list[dict], "retracted": list[str]}
     """
-    from .derive import _tokenize_id, _jaccard
+    if semantic:
+        from .cluster import ClusterCache, DEFAULT_MODEL
+        import numpy as np
+    else:
+        from .derive import _tokenize_id, _jaccard
 
     with _with_network(db_path, write=auto) as net:
         in_nodes = [(nid, n) for nid, n in sorted(net.nodes.items())
                     if n.truth_value == "IN"]
 
-        # Build token sets once
-        tokens = {nid: _tokenize_id(nid) for nid, _ in in_nodes}
+        if not in_nodes:
+            return {"clusters": [], "retracted": []}
 
-        # Union-find to group similar beliefs
+        if semantic:
+            beliefs = {nid: n.text for nid, n in in_nodes}
+            cache = ClusterCache(embedding_model or DEFAULT_MODEL)
+            ids, embeddings = cache.embed(beliefs)
+            norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+            norms = np.where(norms == 0, 1, norms)
+            normed = embeddings / norms
+            sim_matrix = normed @ normed.T
+        else:
+            tokens = {nid: _tokenize_id(nid) for nid, _ in in_nodes}
+
         parent = {nid: nid for nid, _ in in_nodes}
 
         def find(x):
@@ -2201,10 +2219,16 @@ def deduplicate(
             if ra != rb:
                 parent[ra] = rb
 
-        for i, (nid_a, _) in enumerate(in_nodes):
-            for nid_b, _ in in_nodes[i + 1:]:
-                if _jaccard(tokens[nid_a], tokens[nid_b]) >= threshold:
-                    union(nid_a, nid_b)
+        if semantic:
+            for i in range(len(ids)):
+                for j in range(i + 1, len(ids)):
+                    if sim_matrix[i, j] >= threshold:
+                        union(ids[i], ids[j])
+        else:
+            for i, (nid_a, _) in enumerate(in_nodes):
+                for nid_b, _ in in_nodes[i + 1:]:
+                    if _jaccard(tokens[nid_a], tokens[nid_b]) >= threshold:
+                        union(nid_a, nid_b)
 
         # Collect clusters (only groups of 2+)
         from collections import defaultdict

@@ -796,6 +796,8 @@ def cmd_deduplicate(args):
     result = api.deduplicate(
         threshold=args.threshold,
         auto=args.auto,
+        semantic=args.semantic,
+        embedding_model=args.embedding_model,
         db_path=args.db,
     )
 
@@ -1660,7 +1662,11 @@ def main():
     # deduplicate
     p = sub.add_parser("deduplicate", help="Find and optionally retract duplicate IN beliefs")
     p.add_argument("--threshold", type=float, default=0.5,
-                   help="Jaccard similarity threshold for ID tokens (default: 0.5)")
+                   help="Similarity threshold (Jaccard for ID mode, cosine for --semantic; default: 0.5)")
+    p.add_argument("--semantic", action="store_true",
+                   help="Use embedding similarity instead of ID token similarity")
+    p.add_argument("--embedding-model", default=None,
+                   help="Sentence-transformers model (default: all-MiniLM-L6-v2)")
     p.add_argument("--auto", action="store_true",
                    help="Automatically retract duplicates (keeps one per cluster)")
     p.add_argument("-o", "--output", default="proposed-dedup.md",

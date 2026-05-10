@@ -626,3 +626,65 @@ class TestListClusters:
         with patch("reasons_lib.cluster.list_clusters", return_value=mock_result) as mock_lc:
             api.list_clusters(n_clusters=3, db_path=db_with_beliefs)
             assert mock_lc.call_args[1]["n_clusters"] == 3
+
+
+try:
+    from reasons_lib.cluster import HAS_CLUSTER_DEPS
+except ImportError:
+    HAS_CLUSTER_DEPS = False
+
+skip_no_cluster = pytest.mark.skipif(
+    not HAS_CLUSTER_DEPS,
+    reason="sentence-transformers and scikit-learn not installed"
+)
+
+
+@skip_no_cluster
+class TestDeduplicateSemantic:
+
+    @pytest.fixture
+    def db_with_similar(self, tmp_path):
+        db = str(tmp_path / "sim.db")
+        api.init_db(db_path=db)
+        api.add_node("input-validation-at-boundaries",
+                      "The system validates all inputs at system boundaries",
+                      db_path=db)
+        api.add_node("boundary-input-checking",
+                      "Input validation occurs at system edges and boundaries",
+                      db_path=db)
+        api.add_node("database-query-performance",
+                      "Database queries are optimized for read-heavy workloads",
+                      db_path=db)
+        return db
+
+    def test_semantic_finds_similar_text(self, db_with_similar):
+        result = api.deduplicate(threshold=0.5, semantic=True, db_path=db_with_similar)
+        assert len(result["clusters"]) >= 1
+        cluster_ids = {b["id"] for b in result["clusters"][0]["beliefs"]}
+        assert "input-validation-at-boundaries" in cluster_ids
+        assert "boundary-input-checking" in cluster_ids
+
+    def test_semantic_skips_dissimilar(self, db_with_similar):
+        result = api.deduplicate(threshold=0.8, semantic=True, db_path=db_with_similar)
+        for cluster in result["clusters"]:
+            ids = {b["id"] for b in cluster["beliefs"]}
+            assert not ({"input-validation-at-boundaries", "database-query-performance"} <= ids)
+
+    def test_semantic_auto_retracts(self, db_with_similar):
+        result = api.deduplicate(threshold=0.5, semantic=True, auto=True,
+                                  db_path=db_with_similar)
+        retracted_set = set(result["retracted"])
+        similar_pair = {"input-validation-at-boundaries", "boundary-input-checking"}
+        assert len(retracted_set & similar_pair) == 1
+        assert "database-query-performance" not in retracted_set
+
+    def test_semantic_empty_network(self, tmp_path):
+        db = str(tmp_path / "empty.db")
+        api.init_db(db_path=db)
+        result = api.deduplicate(threshold=0.5, semantic=True, db_path=db)
+        assert result["clusters"] == []
+        assert result["retracted"] == []
+
+    def test_jaccard_mode_unchanged(self, db_with_similar):
+        result = api.deduplicate(threshold=0.5, semantic=False, db_path=db_with_similar)
+        assert result["retracted"] == []
