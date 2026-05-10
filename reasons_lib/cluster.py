@@ -81,7 +81,7 @@ def _auto_k(n_beliefs, n_clusters=None, max_k=20):
     if n_clusters is not None:
         k = max(n_clusters, 1)
     else:
-        k = len(range(n_beliefs)) // 5
+        k = n_beliefs // 5
         k = min(k, max_k)
         k = max(k, 2)
     return min(k, n_beliefs)

@@ -740,7 +740,7 @@ def cmd_cluster_list(args):
         print("No beliefs to cluster.")
         return
 
-    fmt = getattr(args, "format", "text")
+    fmt = args.format
 
     if fmt == "json":
         print(json.dumps(result, indent=2))
