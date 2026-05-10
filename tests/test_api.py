@@ -673,9 +673,10 @@ class TestDeduplicateSemantic:
     def test_semantic_auto_retracts(self, db_with_similar):
         result = api.deduplicate(threshold=0.5, semantic=True, auto=True,
                                   db_path=db_with_similar)
-        assert len(result["retracted"]) >= 1
         retracted_set = set(result["retracted"])
-        assert not ({"input-validation-at-boundaries", "boundary-input-checking"} <= retracted_set)
+        similar_pair = {"input-validation-at-boundaries", "boundary-input-checking"}
+        assert len(retracted_set & similar_pair) == 1
+        assert "database-query-performance" not in retracted_set
 
     def test_jaccard_mode_unchanged(self, db_with_similar):
         result = api.deduplicate(threshold=0.5, semantic=False, db_path=db_with_similar)
