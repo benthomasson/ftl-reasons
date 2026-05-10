@@ -2183,9 +2183,8 @@ def deduplicate(
     Returns: {"clusters": list[dict], "retracted": list[str]}
     """
     if semantic:
-        from .cluster import ClusterCache, DEFAULT_MODEL, _require_cluster_deps
+        from .cluster import ClusterCache, DEFAULT_MODEL
         import numpy as np
-        _require_cluster_deps()
     else:
         from .derive import _tokenize_id, _jaccard
 

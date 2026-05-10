@@ -797,7 +797,7 @@ def cmd_deduplicate(args):
         threshold=args.threshold,
         auto=args.auto,
         semantic=args.semantic,
-        embedding_model=getattr(args, "embedding_model", None),
+        embedding_model=args.embedding_model,
         db_path=args.db,
     )
 
