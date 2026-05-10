@@ -110,8 +110,18 @@ def parse_contradiction_response(response, valid_ids=None):
     return results
 
 
+def _flush_results(results, output_path, header_written):
+    """Write results to plan file incrementally."""
+    if not output_path or not results:
+        return header_written
+    from .api import write_contradiction_plan
+    write_contradiction_plan(results, output_path, append=header_written)
+    return True
+
+
 def detect_contradictions(nodes, belief_ids=None, model="claude", timeout=300,
-                          batch_size=CONTRADICTION_BATCH_SIZE):
+                          batch_size=CONTRADICTION_BATCH_SIZE,
+                          output_path=None):
     """Detect contradictions between IN beliefs via LLM.
 
     Args:
@@ -121,6 +131,7 @@ def detect_contradictions(nodes, belief_ids=None, model="claude", timeout=300,
         model: LLM model to use.
         timeout: LLM timeout in seconds.
         batch_size: Number of beliefs per LLM call.
+        output_path: If set, write results incrementally to this file.
 
     Returns: list of contradiction dicts.
     """
@@ -145,6 +156,7 @@ def detect_contradictions(nodes, belief_ids=None, model="claude", timeout=300,
     valid_ids = set(belief_ids)
     all_results = []
     total_batches = (len(belief_ids) + batch_size - 1) // batch_size
+    header_written = False
 
     for i in range(0, len(belief_ids), batch_size):
         batch = belief_ids[i:i + batch_size]
@@ -160,6 +172,8 @@ def detect_contradictions(nodes, belief_ids=None, model="claude", timeout=300,
             results = parse_contradiction_response(response,
                                                    valid_ids=valid_ids)
             all_results.extend(results)
+            header_written = _flush_results(results, output_path,
+                                            header_written)
         except Exception as e:
             print(f"  WARN: batch {batch_num} failed: {e}", file=sys.stderr)
 
@@ -167,7 +181,8 @@ def detect_contradictions(nodes, belief_ids=None, model="claude", timeout=300,
 
 
 def detect_contradictions_semantic(nodes, belief_ids=None, model="claude",
-                                   timeout=300, embedding_model=None):
+                                   timeout=300, embedding_model=None,
+                                   output_path=None):
     """Detect contradictions by clustering beliefs semantically before LLM analysis.
 
     Groups beliefs by semantic similarity so topically related beliefs
@@ -179,6 +194,7 @@ def detect_contradictions_semantic(nodes, belief_ids=None, model="claude",
         model: LLM model to use.
         timeout: LLM timeout in seconds.
         embedding_model: Sentence-transformers model name.
+        output_path: If set, write results incrementally to this file.
 
     Returns: list of contradiction dicts.
     """
@@ -212,6 +228,7 @@ def detect_contradictions_semantic(nodes, belief_ids=None, model="claude",
     valid_ids = set(belief_ids)
     all_results = []
     clusters = result["clusters"]
+    header_written = False
 
     for ci, cluster in enumerate(clusters, 1):
         cluster_ids = [b["id"] for b in cluster["beliefs"]]
@@ -231,6 +248,8 @@ def detect_contradictions_semantic(nodes, belief_ids=None, model="claude",
                 results = parse_contradiction_response(response,
                                                        valid_ids=valid_ids)
                 all_results.extend(results)
+                header_written = _flush_results(results, output_path,
+                                                header_written)
             except Exception as e:
                 print(f"  WARN: cluster {ci} batch failed: {e}",
                       file=sys.stderr)

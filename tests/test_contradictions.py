@@ -331,10 +331,10 @@ class TestCmdContradictions:
         with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
              patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
             stdout, stderr, code = run_cli(
-                "contradictions", "--dry-run", db_path=db_path)
+                "contradictions", db_path=db_path)
         assert "No contradictions detected" in stdout
 
-    def test_displays_found_contradictions(self, db_path):
+    def test_displays_found_contradictions(self, db_path, tmp_path):
         nogood_response = (
             "### NOGOOD x-conflict\n"
             "- Claims: belief-a, belief-b\n"
@@ -342,16 +342,17 @@ class TestCmdContradictions:
             "- Severity: High\n"
         )
         mock_result = self._mock_response(nogood_response)
+        output_file = str(tmp_path / "plan.md")
         with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
              patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
             stdout, stderr, code = run_cli(
-                "contradictions", "--dry-run", db_path=db_path)
+                "contradictions", "-o", output_file, db_path=db_path)
         assert "[NOGOOD] x-conflict (High)" in stdout
         assert "belief-a, belief-b" in stdout
         assert "direct negation" in stdout
 
-    def test_output_writes_markdown(self, db_path, tmp_path):
-        output_file = str(tmp_path / "contradictions.md")
+    def test_output_writes_plan(self, db_path, tmp_path):
+        output_file = str(tmp_path / "plan.md")
         nogood_response = (
             "### NOGOOD x-conflict\n"
             "- Claims: belief-a, belief-b\n"
@@ -363,26 +364,12 @@ class TestCmdContradictions:
              patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
             stdout, stderr, code = run_cli(
                 "contradictions", "-o", output_file, db_path=db_path)
-        assert f"Wrote findings to {output_file}" in stdout
+        assert "--accept" in stdout
         with open(output_file) as f:
             content = f.read()
-        assert "# Contradiction Detection Findings" in content
-        assert "### NOGOOD x-conflict" in content
+        assert "# Contradiction Plan" in content
+        assert "### NOGOOD x-conflict [APPLY]" in content
         assert "belief-a, belief-b" in content
-
-    def test_dry_run_prevents_apply(self, db_path):
-        nogood_response = (
-            "### NOGOOD x-conflict\n"
-            "- Claims: belief-a, belief-b\n"
-            "- Analysis: direct negation\n"
-            "- Severity: High\n"
-        )
-        mock_result = self._mock_response(nogood_response)
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
-            stdout, stderr, code = run_cli(
-                "contradictions", "--auto-apply", "--dry-run", db_path=db_path)
-        assert "Applied: 0" in stdout
 
 
 try:
@@ -483,3 +470,100 @@ class TestDetectContradictionsSemantic:
             results = detect_contradictions_semantic(nodes)
         assert results == []
         mock_run.assert_not_called()
+
+
+class TestContradictionPlan:
+
+    def test_write_contradiction_plan_format(self, tmp_path):
+        contradictions = [
+            {"id": "test-nogood", "claims": ["a", "b"],
+             "analysis": "They conflict", "severity": "High"},
+            {"id": "another-nogood", "claims": ["c", "d"],
+             "analysis": "Also conflict", "severity": "Medium"},
+        ]
+        path = str(tmp_path / "plan.md")
+        api.write_contradiction_plan(contradictions, path)
+        text = open(path).read()
+        assert "# Contradiction Plan" in text
+        assert "### NOGOOD test-nogood [APPLY]" in text
+        assert "### NOGOOD another-nogood [APPLY]" in text
+        assert "- Claims: a, b" in text
+        assert "- Analysis: They conflict" in text
+        assert "- Severity: High" in text
+        assert "--accept" in text
+
+    def test_write_contradiction_plan_append(self, tmp_path):
+        path = str(tmp_path / "plan.md")
+        batch1 = [{"id": "first", "claims": ["a", "b"], "analysis": "", "severity": ""}]
+        batch2 = [{"id": "second", "claims": ["c", "d"], "analysis": "", "severity": ""}]
+        api.write_contradiction_plan(batch1, path, append=False)
+        api.write_contradiction_plan(batch2, path, append=True)
+        text = open(path).read()
+        assert text.count("# Contradiction Plan") == 1
+        assert "### NOGOOD first [APPLY]" in text
+        assert "### NOGOOD second [APPLY]" in text
+
+    def test_parse_contradiction_plan_apply(self):
+        plan_text = (
+            "# Contradiction Plan\n\n---\n\n"
+            "### NOGOOD keep-this [APPLY]\n"
+            "- Claims: a, b\n"
+            "- Analysis: conflict\n\n"
+            "### NOGOOD skip-this [SKIP]\n"
+            "- Claims: c, d\n"
+            "- Analysis: not really\n\n"
+        )
+        entries = api.parse_contradiction_plan(plan_text)
+        assert len(entries) == 1
+        assert entries[0]["id"] == "keep-this"
+        assert entries[0]["claims"] == ["a", "b"]
+
+    def test_parse_contradiction_plan_deleted(self):
+        plan_text = (
+            "# Contradiction Plan\n\n---\n\n"
+            "### NOGOOD keep-this [APPLY]\n"
+            "- Claims: a, b\n\n"
+        )
+        entries = api.parse_contradiction_plan(plan_text)
+        assert len(entries) == 1
+
+    def test_apply_contradiction_plan(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        api.init_db(db_path=db)
+        api.add_node("a", "Belief A", db_path=db)
+        api.add_node("b", "Belief B", db_path=db)
+        plan = [{"id": "test-nogood", "claims": ["a", "b"]}]
+        result = api.apply_contradiction_plan(plan, db_path=db)
+        assert result["applied"] == 1
+        assert len(result["nogoods"]) == 1
+        assert result["nogoods"][0]["id"] == "test-nogood"
+
+    def test_accept_cli_flow(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        run_cli("init", db_path=db)
+        run_cli("add", "x", "Belief X", db_path=db)
+        run_cli("add", "y", "Belief Y", db_path=db)
+        plan_file = tmp_path / "plan.md"
+        plan_file.write_text(
+            "### NOGOOD test [APPLY]\n"
+            "- Claims: x, y\n"
+        )
+        out, err, code = run_cli("contradictions", "--accept",
+                                  str(plan_file), db_path=db)
+        assert code == 0
+        assert "Applied 1 nogood" in out
+
+    def test_accept_missing_file(self):
+        out, err, code = run_cli("contradictions", "--accept",
+                                  "/nonexistent.md", db_path="/tmp/dummy.db")
+        assert code == 1
+
+    def test_accept_empty_plan(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        run_cli("init", db_path=db)
+        plan_file = tmp_path / "empty.md"
+        plan_file.write_text("")
+        out, err, code = run_cli("contradictions", "--accept",
+                                  str(plan_file), db_path=db)
+        assert code == 0
+        assert "No APPLY entries" in out

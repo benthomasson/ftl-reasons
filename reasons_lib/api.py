@@ -2056,6 +2056,7 @@ def detect_contradictions(
     auto_apply: bool = False,
     semantic: bool = False,
     embedding_model: str | None = None,
+    output_path: str | None = None,
     db_path: str = DEFAULT_DB,
 ) -> dict:
     """Detect contradictions between IN beliefs via LLM analysis.
@@ -2063,6 +2064,9 @@ def detect_contradictions(
     When semantic=True, beliefs are clustered by embedding similarity
     before sending to the LLM, so topically related beliefs are
     analyzed together.
+
+    When output_path is set, results are written incrementally after
+    each batch/cluster completes.
 
     Returns: {"contradictions": [...], "checked": int, "found": int,
               "applied": int, "total_in": int}
@@ -2092,10 +2096,12 @@ def detect_contradictions(
     if semantic:
         contradictions = _detect_semantic(nodes, belief_ids=check_ids,
                                           model=model, timeout=timeout,
-                                          embedding_model=embedding_model)
+                                          embedding_model=embedding_model,
+                                          output_path=output_path)
     else:
         contradictions = _detect(nodes, belief_ids=check_ids, model=model,
-                                timeout=timeout)
+                                timeout=timeout,
+                                output_path=output_path)
 
     applied = 0
     applied_details = []
@@ -2121,6 +2127,95 @@ def detect_contradictions(
         "applied_details": applied_details,
         "total_in": total_in,
     }
+
+
+def write_contradiction_plan(contradictions: list[dict], output_path: str,
+                             append: bool = False) -> str:
+    """Write (or append to) a contradiction plan file for human review.
+
+    Format is parseable by parse_contradiction_plan(). Each nogood lists
+    claims and analysis. Change [APPLY] to [SKIP] or delete entries to
+    exclude them.
+    """
+    path = Path(output_path)
+    mode = "a" if append else "w"
+    with open(path, mode) as f:
+        if not append:
+            f.write("# Contradiction Plan\n\n")
+            f.write("Review each nogood below. Delete any you want to skip,\n")
+            f.write("or change APPLY to SKIP. Then run:\n")
+            f.write(f"  reasons contradictions --accept {output_path}\n\n")
+            f.write("---\n\n")
+
+        for c in contradictions:
+            severity = c.get("severity", "")
+            f.write(f"### NOGOOD {c['id']} [APPLY]\n")
+            if severity:
+                f.write(f"- Severity: {severity}\n")
+            f.write(f"- Claims: {', '.join(c['claims'])}\n")
+            if c.get("analysis"):
+                f.write(f"- Analysis: {c['analysis']}\n")
+            f.write("\n")
+
+    return str(path)
+
+
+def parse_contradiction_plan(plan_text: str) -> list[dict]:
+    """Parse a contradiction plan file into actionable entries.
+
+    Returns list of {"id": str, "claims": list[str]} for APPLY-marked entries.
+    """
+    import re
+    entries = []
+    current_id = None
+    current_claims = []
+
+    for line in plan_text.splitlines():
+        m = re.match(r"###\s+NOGOOD\s+(\S+)\s+\[(APPLY|SKIP)\]", line)
+        if m:
+            if current_id and current_claims:
+                entries.append({"id": current_id, "claims": current_claims})
+            current_id = m.group(2) == "APPLY" and m.group(1) or None
+            current_claims = []
+            continue
+
+        if current_id and line.strip().startswith("- Claims:"):
+            claims_str = line.split(":", 1)[1].strip()
+            current_claims = [c.strip().strip("`") for c in claims_str.split(",")
+                              if c.strip()]
+
+    if current_id and current_claims:
+        entries.append({"id": current_id, "claims": current_claims})
+
+    return entries
+
+
+def apply_contradiction_plan(
+    plan: list[dict],
+    db_path: str = DEFAULT_DB,
+) -> dict:
+    """Apply a reviewed contradiction plan: record nogoods and backtrack.
+
+    Args:
+        plan: list of {"id": str, "claims": list[str]} from parse_contradiction_plan
+        db_path: Path to database
+
+    Returns: {"applied": int, "nogoods": list[dict], "errors": list[str]}
+    """
+    nogoods = []
+    errors = []
+    for entry in plan:
+        try:
+            result = add_nogood(entry["claims"], db_path=db_path)
+            nogoods.append({
+                "id": entry["id"],
+                "nogood_id": result.get("nogood_id"),
+                "changed": result.get("changed", []),
+                "backtracked_to": result.get("backtracked_to"),
+            })
+        except Exception as e:
+            errors.append(f"Failed to apply {entry['id']}: {e}")
+    return {"applied": len(nogoods), "nogoods": nogoods, "errors": errors}
 
 
 def _rewrite_dependents(net, old_id: str, new_id: str):

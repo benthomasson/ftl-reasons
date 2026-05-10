@@ -1327,16 +1327,40 @@ def cmd_review_beliefs(args):
 
 def cmd_contradictions(args):
     _require_sqlite(args, "detect-contradictions")
+
+    if args.accept:
+        accept_path = Path(args.accept)
+        if not accept_path.exists():
+            print(f"File not found: {accept_path}", file=sys.stderr)
+            sys.exit(1)
+        plan = api.parse_contradiction_plan(accept_path.read_text())
+        if not plan:
+            print("No APPLY entries found in plan file.")
+            return
+        result = api.apply_contradiction_plan(plan, db_path=args.db)
+        for err in result["errors"]:
+            print(f"  ERROR: {err}", file=sys.stderr)
+        if result["nogoods"]:
+            print(f"Applied {result['applied']} nogood(s):")
+            for n in result["nogoods"]:
+                changed = n.get("changed", [])
+                print(f"  {n['id']}: nogood={n.get('nogood_id', '?')}, "
+                      f"changed {len(changed)} node(s)")
+        else:
+            print("No nogoods to apply.")
+        return
+
     model = getattr(args, "model", None) or "claude"
-    auto_apply = args.auto_apply and not args.dry_run
+    output = args.output
     result = api.detect_contradictions(
         belief_ids=args.ids or None,
         model=model,
         timeout=args.timeout,
         sample=args.sample,
-        auto_apply=auto_apply,
+        auto_apply=args.auto_apply,
         semantic=args.semantic,
         embedding_model=args.embedding_model,
+        output_path=output if not args.auto_apply else None,
         db_path=args.db,
     )
 
@@ -1356,27 +1380,15 @@ def cmd_contradictions(args):
     print(f"\nChecked {result['checked']} of {result['total_in']} IN beliefs")
     print(f"  Found: {result['found']}  Applied: {result['applied']}")
 
-    if args.output:
-        with open(args.output, "w") as f:
-            f.write("# Contradiction Detection Findings\n\n")
-            f.write(f"Checked {result['checked']} beliefs, "
-                    f"found {result['found']} contradictions.\n\n")
-            for c in contradictions:
-                f.write(f"### NOGOOD {c['id']}\n")
-                f.write(f"- Claims: {', '.join(c['claims'])}\n")
-                if c.get("analysis"):
-                    f.write(f"- Analysis: {c['analysis']}\n")
-                if c.get("severity"):
-                    f.write(f"- Severity: {c['severity']}\n")
-                f.write("\n")
-        print(f"\nWrote findings to {args.output}")
-
-    if auto_apply and result.get("applied_details"):
+    if args.auto_apply and result.get("applied_details"):
         print(f"\nApplied {result['applied']} nogood(s):")
         for d in result["applied_details"]:
             changed = d.get("changed", [])
             print(f"  {d.get('id', '?')}: nogood={d.get('nogood_id', '?')}, "
                   f"changed {len(changed)} node(s)")
+    elif not args.auto_apply:
+        print(f"\nWrote {output} — review, then run:")
+        print(f"  reasons contradictions --accept {output}")
 
 
 def cmd_namespaces(args):
@@ -1737,16 +1749,16 @@ def main():
                    help="LLM timeout in seconds (default: 300)")
     p.add_argument("--sample", type=int, default=None,
                    help="Randomly sample N beliefs to check")
-    p.add_argument("--dry-run", action="store_true",
-                   help="Show findings without applying nogoods")
     p.add_argument("--auto-apply", action="store_true",
                    help="Auto-apply detected nogoods via dependency-directed backtracking")
     p.add_argument("--semantic", action="store_true",
                    help="Group beliefs by semantic similarity before LLM analysis")
     p.add_argument("--embedding-model", default=None,
                    help="Sentence-transformers model (default: all-MiniLM-L6-v2)")
-    p.add_argument("-o", "--output", default=None,
-                   help="Write proposals to markdown file")
+    p.add_argument("-o", "--output", default="proposed-contradictions.md",
+                   help="Output file for contradiction plan (default: proposed-contradictions.md)")
+    p.add_argument("--accept", metavar="FILE",
+                   help="Apply a reviewed contradiction plan file")
 
     # list
     p = sub.add_parser("list", help="List nodes with filters")
