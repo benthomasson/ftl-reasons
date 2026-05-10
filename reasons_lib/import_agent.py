@@ -155,6 +155,7 @@ def _normalize_json(data, only_in=False):
             "text": ndata.get("text", ""),
             "is_out": is_out,
             "source": ndata.get("source", ""),
+            "source_url": ndata.get("source_url", ""),
             "source_hash": ndata.get("source_hash", ""),
             "date": ndata.get("date", ""),
             "metadata": meta,
@@ -297,6 +298,7 @@ def _import_claims(network, agent_name, claims, source_path, nogoods):
             text=claim["text"],
             justifications=justifications if justifications else None,
             source=claim["source"],
+            source_url=claim.get("source_url", ""),
             source_hash=claim["source_hash"],
             date=claim["date"],
             metadata=metadata,
@@ -372,6 +374,9 @@ def _sync_claims(network, agent_name, claims, source_path, nogoods):
             if claim["source"] and node.source != claim["source"]:
                 node.source = claim["source"]
                 changed = True
+            if claim.get("source_url") and node.source_url != claim["source_url"]:
+                node.source_url = claim["source_url"]
+                changed = True
             if claim["source_hash"] and node.source_hash != claim["source_hash"]:
                 node.source_hash = claim["source_hash"]
                 changed = True
@@ -446,6 +451,7 @@ def _sync_claims(network, agent_name, claims, source_path, nogoods):
                 text=claim["text"],
                 justifications=justifications if justifications else None,
                 source=claim["source"],
+                source_url=claim.get("source_url", ""),
                 source_hash=claim["source_hash"],
                 date=claim["date"],
                 metadata=metadata,
