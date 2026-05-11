@@ -1986,6 +1986,7 @@ class PgApi:
                     self._log(cur, "retract", nid, "OUT")
                     retracted += 1
             self.conn.commit()
+            self.propagate()
 
         nogoods_imported = 0
         if nogoods_text:
@@ -2144,8 +2145,9 @@ class PgApi:
                     self._log(cur, "retract", nid, "OUT")
                     retracted += 1
             self.conn.commit()
+            self.propagate()
 
-        nogoods_imported = self._import_agent_nogoods(cur=None, prefix=prefix,
+        nogoods_imported = self._import_agent_nogoods(prefix=prefix,
                                                       nogoods=nogoods)
 
         return {
@@ -2461,8 +2463,9 @@ class PgApi:
                         )
                     beliefs_retracted += 1
             self.conn.commit()
+            self.propagate()
 
-        nogoods_imported = self._import_agent_nogoods(cur=None, prefix=prefix,
+        nogoods_imported = self._import_agent_nogoods(prefix=prefix,
                                                       nogoods=nogoods)
 
         return {
@@ -2479,7 +2482,7 @@ class PgApi:
             "nogoods_imported": nogoods_imported,
         }
 
-    def _import_agent_nogoods(self, cur, prefix, nogoods):
+    def _import_agent_nogoods(self, prefix, nogoods):
         """Import prefixed nogoods for an agent."""
         pid = self.project_id
         count = 0
