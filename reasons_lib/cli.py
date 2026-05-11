@@ -597,8 +597,7 @@ def cmd_export_markdown(args):
 
 
 def cmd_hash_sources(args):
-    _require_sqlite(args, "hash-sources")
-    result = api.hash_sources(force=args.force, db_path=args.db)
+    result = api.hash_sources(force=args.force, **_backend_kwargs(args))
 
     if not result["hashed"]:
         print("No nodes to hash (all sources already have hashes, or source files not found).")
@@ -621,8 +620,7 @@ def cmd_hash_sources(args):
 
 
 def cmd_check_stale(args):
-    _require_sqlite(args, "check-stale")
-    result = api.check_stale(upgrade_hashes=args.upgrade_hashes, db_path=args.db)
+    result = api.check_stale(upgrade_hashes=args.upgrade_hashes, **_backend_kwargs(args))
 
     if result.get("upgraded"):
         print(f"Upgraded {result['upgraded']} truncated hash(es) to full length.")
@@ -696,8 +694,7 @@ def cmd_search(args):
 
 
 def cmd_lookup(args):
-    _require_sqlite(args, "lookup")
-    result = api.lookup(args.query, visible_to=_parse_visible_to(args), db_path=args.db)
+    result = api.lookup(args.query, visible_to=_parse_visible_to(args), **_backend_kwargs(args))
     print(result)
 
 
