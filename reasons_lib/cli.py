@@ -316,13 +316,12 @@ def cmd_convert_to_premise(args):
 
 
 def cmd_summarize(args):
-    _require_sqlite(args, "summarize")
     over = [n.strip() for n in args.over.split(",")]
     try:
         result = api.summarize(
             args.summary_id, args.text, over,
             source=args.source or "",
-            db_path=args.db,
+            **_backend_kwargs(args),
         )
     except (KeyError, ValueError) as e:
         print(f"Error: {e}", file=sys.stderr)
@@ -332,9 +331,8 @@ def cmd_summarize(args):
 
 
 def cmd_supersede(args):
-    _require_sqlite(args, "supersede")
     try:
-        result = api.supersede(args.old_id, args.new_id, db_path=args.db)
+        result = api.supersede(args.old_id, args.new_id, **_backend_kwargs(args))
     except KeyError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
@@ -411,9 +409,9 @@ def cmd_nogood(args):
 
 
 def cmd_trace_access_tags(args):
-    _require_sqlite(args, "trace-access-tags")
     try:
-        result = api.trace_access_tags(args.node_id, visible_to=_parse_visible_to(args), db_path=args.db)
+        result = api.trace_access_tags(args.node_id, visible_to=_parse_visible_to(args),
+                                        **_backend_kwargs(args))
     except KeyError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
@@ -451,8 +449,7 @@ def cmd_trace(args):
 
 
 def cmd_propagate(args):
-    _require_sqlite(args, "propagate")
-    result = api.propagate(db_path=args.db)
+    result = api.propagate(**_backend_kwargs(args))
     changed = result["changed"]
     if changed:
         print(f"Updated: {', '.join(changed)}")

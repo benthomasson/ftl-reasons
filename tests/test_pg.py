@@ -1061,3 +1061,173 @@ class TestConvertToPremise:
         result = pg_api.convert_to_premise("a")
         assert result["old_justifications"] == 0
         assert result["truth_value"] == "IN"
+
+
+class TestGetBeliefSet:
+
+    def test_empty(self, pg_api):
+        result = pg_api.get_belief_set()
+        assert result == []
+
+    def test_all_in(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        pg_api.add_node("b", "Beta")
+        assert set(pg_api.get_belief_set()) == {"a", "b"}
+
+    def test_mixed(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        pg_api.add_node("b", "Beta")
+        pg_api.retract_node("b")
+        result = pg_api.get_belief_set()
+        assert result == ["a"]
+
+
+class TestPropagate:
+
+    def test_no_changes(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        result = pg_api.propagate()
+        assert result["changed"] == []
+
+    def test_fixes_stale_truth(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        pg_api.add_node("b", "Beta", sl="a")
+        with pg_api.conn.cursor() as cur:
+            cur.execute(
+                "UPDATE rms_nodes SET truth_value = 'OUT' "
+                "WHERE id = 'b' AND project_id = %s",
+                (pg_api.project_id,),
+            )
+        pg_api.conn.commit()
+        result = pg_api.propagate()
+        assert "b" in result["changed"]
+        assert pg_api.show_node("b")["truth_value"] == "IN"
+
+    def test_cascade(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        pg_api.add_node("b", "Beta", sl="a")
+        pg_api.add_node("c", "Gamma", sl="b")
+        with pg_api.conn.cursor() as cur:
+            cur.execute(
+                "UPDATE rms_nodes SET truth_value = 'OUT' "
+                "WHERE id IN ('b', 'c') AND project_id = %s",
+                (pg_api.project_id,),
+            )
+        pg_api.conn.commit()
+        result = pg_api.propagate()
+        assert set(result["changed"]) >= {"b", "c"}
+
+    def test_empty_network(self, pg_api):
+        result = pg_api.propagate()
+        assert result["changed"] == []
+
+
+class TestSupersede:
+
+    def test_makes_old_out(self, pg_api):
+        pg_api.add_node("old", "Old belief")
+        pg_api.add_node("new", "New belief")
+        result = pg_api.supersede("old", "new")
+        assert result["old_id"] == "old"
+        assert result["new_id"] == "new"
+        assert "old" in result["changed"]
+        assert pg_api.show_node("old")["truth_value"] == "OUT"
+
+    def test_metadata(self, pg_api):
+        pg_api.add_node("old", "Old belief")
+        pg_api.add_node("new", "New belief")
+        pg_api.supersede("old", "new")
+        old = pg_api.show_node("old")
+        new = pg_api.show_node("new")
+        assert old["metadata"]["superseded_by"] == "new"
+        assert "old" in new["metadata"]["supersedes"]
+
+    def test_reversible(self, pg_api):
+        pg_api.add_node("old", "Old")
+        pg_api.add_node("new", "New")
+        pg_api.supersede("old", "new")
+        assert pg_api.show_node("old")["truth_value"] == "OUT"
+        pg_api.retract_node("new")
+        assert pg_api.show_node("old")["truth_value"] == "IN"
+
+    def test_cascade(self, pg_api):
+        pg_api.add_node("old", "Old")
+        pg_api.add_node("dep", "Depends on old", sl="old")
+        pg_api.add_node("new", "New")
+        result = pg_api.supersede("old", "new")
+        assert "dep" in result["changed"]
+        assert pg_api.show_node("dep")["truth_value"] == "OUT"
+
+    def test_not_found(self, pg_api):
+        pg_api.add_node("a", "Alpha")
+        with pytest.raises(KeyError):
+            pg_api.supersede("a", "missing")
+        with pytest.raises(KeyError):
+            pg_api.supersede("missing", "a")
+
+
+class TestSummarize:
+
+    def test_create_summary(self, pg_api):
+        pg_api.add_node("a", "Premise A")
+        pg_api.add_node("b", "Premise B")
+        result = pg_api.summarize("s", "Summary of A and B", over=["a", "b"])
+        assert result["summary_id"] == "s"
+        assert result["truth_value"] == "IN"
+        assert result["over"] == ["a", "b"]
+
+    def test_metadata(self, pg_api):
+        pg_api.add_node("a", "A")
+        pg_api.add_node("b", "B")
+        pg_api.summarize("s", "Summary", over=["a", "b"])
+        summary = pg_api.show_node("s")
+        assert summary["metadata"]["summarizes"] == ["a", "b"]
+        a = pg_api.show_node("a")
+        assert "s" in a["metadata"]["summarized_by"]
+
+    def test_out_when_antecedent_out(self, pg_api):
+        pg_api.add_node("a", "A")
+        pg_api.add_node("b", "B")
+        pg_api.summarize("s", "Summary", over=["a", "b"])
+        pg_api.retract_node("a")
+        assert pg_api.show_node("s")["truth_value"] == "OUT"
+
+    def test_duplicate_raises(self, pg_api):
+        pg_api.add_node("a", "A")
+        pg_api.summarize("s", "Summary", over=["a"])
+        with pytest.raises(ValueError):
+            pg_api.summarize("s", "Dup", over=["a"])
+
+    def test_missing_node_raises(self, pg_api):
+        pg_api.add_node("a", "A")
+        with pytest.raises(KeyError):
+            pg_api.summarize("s", "Summary", over=["a", "missing"])
+
+
+class TestTraceAccessTags:
+
+    def test_premise_returns_own_tags(self, pg_api):
+        pg_api.add_node("a", "A", access_tags=["finance"])
+        result = pg_api.trace_access_tags("a")
+        assert result["access_tags"] == ["finance"]
+
+    def test_no_tags_returns_empty(self, pg_api):
+        pg_api.add_node("a", "A")
+        result = pg_api.trace_access_tags("a")
+        assert result["access_tags"] == []
+
+    def test_chain_collects_all(self, pg_api):
+        pg_api.add_node("a", "A", access_tags=["finance"])
+        pg_api.add_node("b", "B", sl="a", access_tags=["hr"])
+        pg_api.add_node("c", "C", sl="b")
+        result = pg_api.trace_access_tags("c")
+        assert result["access_tags"] == ["finance", "hr"]
+
+    def test_not_found(self, pg_api):
+        with pytest.raises(KeyError):
+            pg_api.trace_access_tags("missing")
+
+    def test_visible_to_denied(self, pg_api):
+        pg_api.add_node("a", "A", access_tags=["finance"])
+        with pytest.raises(PermissionError):
+            pg_api.trace_access_tags("a", visible_to=["hr"])

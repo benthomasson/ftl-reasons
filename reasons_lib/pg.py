@@ -1043,6 +1043,230 @@ class PgApi:
             "changed": changed,
         }
 
+    def get_belief_set(self):
+        """Return all node IDs currently IN."""
+        pid = self.project_id
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM rms_nodes "
+                "WHERE project_id = %s AND truth_value = 'IN'",
+                (pid,),
+            )
+            return [row[0] for row in cur.fetchall()]
+
+    def propagate(self):
+        """Recompute truth values for all derived nodes to a fixpoint."""
+        pid = self.project_id
+        all_changed = set()
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) FROM rms_nodes WHERE project_id = %s",
+                (pid,),
+            )
+            max_iterations = cur.fetchone()[0] + 1
+
+            for _ in range(max_iterations):
+                cur.execute(
+                    "SELECT DISTINCT n.id, n.truth_value, n.metadata "
+                    "FROM rms_nodes n "
+                    "JOIN rms_justifications j "
+                    "  ON j.node_id = n.id AND j.project_id = n.project_id "
+                    "WHERE n.project_id = %s",
+                    (pid,),
+                )
+                rows = cur.fetchall()
+
+                changed_this_pass = []
+                for node_id, old_tv, meta in rows:
+                    if isinstance(meta, str):
+                        meta = json.loads(meta)
+                    if meta.get("_retracted"):
+                        continue
+                    new_tv = self._compute_truth(cur, node_id)
+                    if old_tv != new_tv:
+                        cur.execute(
+                            "UPDATE rms_nodes SET truth_value = %s "
+                            "WHERE id = %s AND project_id = %s",
+                            (new_tv, node_id, pid),
+                        )
+                        self._log(cur, "recompute", node_id, new_tv)
+                        changed_this_pass.append(node_id)
+
+                if not changed_this_pass:
+                    break
+                all_changed.update(changed_this_pass)
+
+        self.conn.commit()
+        return {"changed": list(all_changed)}
+
+    def supersede(self, old_id, new_id):
+        """Mark old_id as superseded by new_id using the outlist mechanism."""
+        pid = self.project_id
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT truth_value, metadata FROM rms_nodes "
+                "WHERE id = %s AND project_id = %s",
+                (old_id, pid),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise KeyError(f"Node '{old_id}' not found")
+            old_tv, old_meta = row
+            if isinstance(old_meta, str):
+                old_meta = json.loads(old_meta)
+
+            cur.execute(
+                "SELECT metadata FROM rms_nodes "
+                "WHERE id = %s AND project_id = %s",
+                (new_id, pid),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise KeyError(f"Node '{new_id}' not found")
+            new_meta = row[0]
+            if isinstance(new_meta, str):
+                new_meta = json.loads(new_meta)
+
+            cur.execute(
+                "SELECT id, outlist FROM rms_justifications "
+                "WHERE node_id = %s AND project_id = %s",
+                (old_id, pid),
+            )
+            just_rows = cur.fetchall()
+            if just_rows:
+                cur.execute(
+                    "UPDATE rms_justifications "
+                    "SET outlist = outlist || %s::jsonb "
+                    "WHERE node_id = %s AND project_id = %s "
+                    "AND NOT outlist @> %s::jsonb",
+                    (json.dumps([new_id]), old_id, pid,
+                     json.dumps([new_id])),
+                )
+            else:
+                cur.execute(
+                    "INSERT INTO rms_justifications "
+                    "(node_id, project_id, type, antecedents, outlist, label) "
+                    "VALUES (%s, %s, 'SL', '[]', %s, '')",
+                    (old_id, pid, json.dumps([new_id])),
+                )
+
+            old_meta["superseded_by"] = new_id
+            cur.execute(
+                "UPDATE rms_nodes SET metadata = %s "
+                "WHERE id = %s AND project_id = %s",
+                (json.dumps(old_meta), old_id, pid),
+            )
+
+            supersedes = new_meta.get("supersedes", [])
+            if old_id not in supersedes:
+                supersedes.append(old_id)
+            new_meta["supersedes"] = supersedes
+            cur.execute(
+                "UPDATE rms_nodes SET metadata = %s "
+                "WHERE id = %s AND project_id = %s",
+                (json.dumps(new_meta), new_id, pid),
+            )
+
+            new_tv = self._compute_truth(cur, old_id)
+            changed = []
+            if old_tv != new_tv:
+                cur.execute(
+                    "UPDATE rms_nodes SET truth_value = %s "
+                    "WHERE id = %s AND project_id = %s",
+                    (new_tv, old_id, pid),
+                )
+                self._log(cur, "supersede", old_id,
+                          f"superseded by {new_id}")
+                changed.append(old_id)
+                went_out, went_in = self._propagate(cur, old_id)
+                changed.extend(went_out)
+                changed.extend(went_in)
+            else:
+                self._log(cur, "supersede", old_id,
+                          f"superseded by {new_id} (unchanged)")
+
+        self.conn.commit()
+        return {"old_id": old_id, "new_id": new_id, "changed": changed}
+
+    def summarize(self, summary_id, text, over, source=""):
+        """Create a summary node that abstracts over a group of nodes."""
+        pid = self.project_id
+        now = datetime.now().isoformat(timespec="seconds")
+
+        with self.conn.cursor() as cur:
+            if over:
+                cur.execute(
+                    "SELECT id FROM rms_nodes "
+                    "WHERE project_id = %s AND id = ANY(%s)",
+                    (pid, list(over)),
+                )
+                found = {row[0] for row in cur.fetchall()}
+                missing = set(over) - found
+                if missing:
+                    raise KeyError(
+                        f"Node(s) not found: {', '.join(sorted(missing))}")
+
+            cur.execute(
+                "SELECT 1 FROM rms_nodes "
+                "WHERE id = %s AND project_id = %s",
+                (summary_id, pid),
+            )
+            if cur.fetchone():
+                raise ValueError(f"Node '{summary_id}' already exists")
+
+            metadata = {"summarizes": list(over)}
+            cur.execute(
+                "INSERT INTO rms_nodes "
+                "(id, project_id, text, source, date, metadata) "
+                "VALUES (%s, %s, %s, %s, %s, %s)",
+                (summary_id, pid, text, source, now, json.dumps(metadata)),
+            )
+
+            justifications = [{"antecedents": list(over), "outlist": []}]
+            cur.execute(
+                "INSERT INTO rms_justifications "
+                "(node_id, project_id, type, antecedents, outlist, label) "
+                "VALUES (%s, %s, 'SL', %s, '[]', 'summarizes')",
+                (summary_id, pid, json.dumps(list(over))),
+            )
+
+            self._inherit_access_tags(cur, summary_id, justifications)
+
+            truth = self._compute_truth(cur, summary_id)
+            cur.execute(
+                "UPDATE rms_nodes SET truth_value = %s "
+                "WHERE id = %s AND project_id = %s",
+                (truth, summary_id, pid),
+            )
+            self._log(cur, "add", summary_id, truth)
+
+            for nid in over:
+                cur.execute(
+                    "SELECT metadata FROM rms_nodes "
+                    "WHERE id = %s AND project_id = %s",
+                    (nid, pid),
+                )
+                row = cur.fetchone()
+                meta = row[0] if row else {}
+                if isinstance(meta, str):
+                    meta = json.loads(meta)
+                covered = meta.get("summarized_by", [])
+                if summary_id not in covered:
+                    covered.append(summary_id)
+                meta["summarized_by"] = covered
+                cur.execute(
+                    "UPDATE rms_nodes SET metadata = %s "
+                    "WHERE id = %s AND project_id = %s",
+                    (json.dumps(meta), nid, pid),
+                )
+
+        self.conn.commit()
+        return {
+            "summary_id": summary_id,
+            "over": list(over),
+            "truth_value": truth,
+        }
+
     def get_log(self, last=None):
         pid = self.project_id
         with self.conn.cursor() as cur:
@@ -1374,6 +1598,33 @@ class PgApi:
             self._trace_assumptions_recursive(cur, node_id, premises, visited)
 
         return {"node_id": node_id, "premises": premises}
+
+    def trace_access_tags(self, node_id, visible_to=None):
+        """Trace access_tags union through the dependency chain."""
+        pid = self.project_id
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT metadata FROM rms_nodes "
+                "WHERE id = %s AND project_id = %s",
+                (node_id, pid),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise KeyError(f"Node '{node_id}' not found")
+            meta = row[0]
+            if isinstance(meta, str):
+                meta = json.loads(meta)
+            if visible_to is not None and not self._is_visible(meta, visible_to):
+                raise PermissionError(
+                    f"Node '{node_id}' requires access tags "
+                    f"not in {visible_to}")
+
+            all_tags = set()
+            visited = set()
+            self._trace_access_tags_recursive(
+                cur, node_id, all_tags, visited)
+
+        return {"node_id": node_id, "access_tags": sorted(all_tags)}
 
     # ── Internal: propagation ───────────────────────────────────
 
@@ -1758,6 +2009,37 @@ class PgApi:
                 ants = json.loads(ants)
             for ant_id in ants:
                 self._trace_assumptions_recursive(cur, ant_id, premises, visited)
+
+    def _trace_access_tags_recursive(self, cur, node_id, all_tags, visited):
+        if node_id in visited:
+            return
+        visited.add(node_id)
+        pid = self.project_id
+
+        cur.execute(
+            "SELECT metadata FROM rms_nodes "
+            "WHERE id = %s AND project_id = %s",
+            (node_id, pid),
+        )
+        row = cur.fetchone()
+        if not row:
+            return
+        meta = row[0]
+        if isinstance(meta, str):
+            meta = json.loads(meta)
+        all_tags.update(meta.get("access_tags", []))
+
+        cur.execute(
+            "SELECT antecedents FROM rms_justifications "
+            "WHERE node_id = %s AND project_id = %s",
+            (node_id, pid),
+        )
+        for (ants,) in cur.fetchall():
+            if isinstance(ants, str):
+                ants = json.loads(ants)
+            for ant_id in ants:
+                self._trace_access_tags_recursive(
+                    cur, ant_id, all_tags, visited)
 
     def _explain_recursive(self, cur, node_id, visible_to, visited):
         if node_id in visited:
