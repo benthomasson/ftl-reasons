@@ -780,19 +780,22 @@ class PgApi:
                 continue
             new_hash = hash_file(path)
             was_empty = not source_hash
-            with self.conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE rms_nodes SET source_hash = %s "
-                    "WHERE id = %s AND project_id = %s",
-                    (new_hash, nid, pid),
-                )
-            self.conn.commit()
             results.append({
                 "node_id": nid,
                 "source": source,
                 "hash": new_hash,
                 "was_empty": was_empty,
             })
+
+        if results:
+            with self.conn.cursor() as cur:
+                for item in results:
+                    cur.execute(
+                        "UPDATE rms_nodes SET source_hash = %s "
+                        "WHERE id = %s AND project_id = %s",
+                        (item["hash"], item["node_id"], pid),
+                    )
+            self.conn.commit()
 
         return {"hashed": results, "count": len(results)}
 
@@ -818,6 +821,7 @@ class PgApi:
 
         results = []
         upgraded = 0
+        upgrades_to_commit = []
 
         for nid, source, source_hash, meta in sorted(rows, key=lambda r: r[0]):
             if isinstance(meta, str):
@@ -839,13 +843,7 @@ class PgApi:
             if current_hash != source_hash:
                 if len(source_hash) == 16 and current_hash.startswith(source_hash):
                     if upgrade_hashes:
-                        with self.conn.cursor() as cur:
-                            cur.execute(
-                                "UPDATE rms_nodes SET source_hash = %s "
-                                "WHERE id = %s AND project_id = %s",
-                                (current_hash, nid, pid),
-                            )
-                        self.conn.commit()
+                        upgrades_to_commit.append((current_hash, nid))
                         upgraded += 1
                         continue
                     results.append({
@@ -865,6 +863,16 @@ class PgApi:
                     "source_path": str(path),
                     "reason": "content_changed",
                 })
+
+        if upgrades_to_commit:
+            with self.conn.cursor() as cur:
+                for new_hash, nid in upgrades_to_commit:
+                    cur.execute(
+                        "UPDATE rms_nodes SET source_hash = %s "
+                        "WHERE id = %s AND project_id = %s",
+                        (new_hash, nid, pid),
+                    )
+            self.conn.commit()
 
         return {
             "stale": results,
@@ -888,20 +896,23 @@ class PgApi:
             node_rows = cur.fetchall()
 
             cur.execute(
-                "SELECT node_id, antecedents FROM rms_justifications "
+                "SELECT node_id, antecedents, outlist FROM rms_justifications "
                 "WHERE project_id = %s",
                 (pid,),
             )
             just_rows = cur.fetchall()
 
-        antecedents_by_node = {}
+        refs_by_node = {}
         dependents_by_node = {}
-        for node_id, ants in just_rows:
+        for node_id, ants, outs in just_rows:
             if isinstance(ants, str):
                 ants = json.loads(ants)
-            antecedents_by_node.setdefault(node_id, []).extend(ants)
-            for ant in ants:
-                dependents_by_node.setdefault(ant, []).append(node_id)
+            if isinstance(outs, str):
+                outs = json.loads(outs)
+            all_refs = list(ants) + list(outs or [])
+            refs_by_node.setdefault(node_id, []).extend(all_refs)
+            for ref in all_refs:
+                dependents_by_node.setdefault(ref, []).append(node_id)
 
         matches = []
         for nid, text, tv, source, source_hash, date, meta in node_rows:
@@ -917,8 +928,8 @@ class PgApi:
                 block_parts.append(source_hash)
             if date:
                 block_parts.append(date)
-            for ant in antecedents_by_node.get(nid, []):
-                block_parts.append(ant)
+            for ref in refs_by_node.get(nid, []):
+                block_parts.append(ref)
             for dep in dependents_by_node.get(nid, []):
                 block_parts.append(dep)
             block_lower = " ".join(block_parts).lower()
@@ -928,7 +939,7 @@ class PgApi:
                     "id": nid, "text": text, "truth_value": tv,
                     "source": source, "source_hash": source_hash,
                     "date": date,
-                    "antecedents": antecedents_by_node.get(nid, []),
+                    "depends_on": refs_by_node.get(nid, []),
                 })
 
         if not matches:
@@ -944,8 +955,8 @@ class PgApi:
                 parts.append(f"- Source hash: {m['source_hash']}")
             if m["date"]:
                 parts.append(f"- Date: {m['date']}")
-            if m["antecedents"]:
-                parts.append(f"- Depends on: {', '.join(m['antecedents'])}")
+            if m["depends_on"]:
+                parts.append(f"- Depends on: {', '.join(m['depends_on'])}")
             parts.append("")
 
         return "\n".join(parts)
