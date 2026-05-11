@@ -1051,6 +1051,7 @@ def cmd_derive(args):
                 "cluster": args.cluster,
                 "embedding_model": args.embedding_model,
                 "n_clusters": args.n_clusters,
+                "prompt_file": args.prompt_file,
             },
             "rounds": [],
         }

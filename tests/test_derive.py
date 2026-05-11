@@ -942,3 +942,17 @@ def test_build_prompt_default_template_unchanged(simple_network):
     prompt_default, _ = build_prompt(data["nodes"])
     prompt_none, _ = build_prompt(data["nodes"], prompt_template=None)
     assert prompt_default == prompt_none
+
+
+def test_build_prompt_bad_placeholder(simple_network):
+    data = api.export_network(db_path=simple_network)
+    template = "Bad template with {unknown_field}"
+    with pytest.raises(ValueError, match="unknown placeholder"):
+        build_prompt(data["nodes"], prompt_template=template)
+
+
+def test_build_prompt_malformed_braces(simple_network):
+    data = api.export_network(db_path=simple_network)
+    template = "Output as JSON: {unclosed brace"
+    with pytest.raises(ValueError, match="malformed braces"):
+        build_prompt(data["nodes"], prompt_template=template)

@@ -496,16 +496,32 @@ def build_prompt(nodes, domain=None, topic=None, budget=300, sample=False,
     )
     derived_section = _build_derived_section(nodes, derived)
 
-    prompt = (prompt_template or DERIVE_PROMPT).format(
-        domain_context=domain_context,
-        beliefs_section=beliefs_section,
-        derived_section=derived_section,
-        total_in=len(in_nodes),
-        total_derived=len(derived),
-        max_depth=max_depth,
-        cross_agent_task=cross_agent_task,
-        agents_stats=agents_stats,
-    )
+    template = prompt_template or DERIVE_PROMPT
+    try:
+        prompt = template.format(
+            domain_context=domain_context,
+            beliefs_section=beliefs_section,
+            derived_section=derived_section,
+            total_in=len(in_nodes),
+            total_derived=len(derived),
+            max_depth=max_depth,
+            cross_agent_task=cross_agent_task,
+            agents_stats=agents_stats,
+        )
+    except KeyError as e:
+        raise ValueError(
+            f"Custom prompt template references unknown placeholder: {e}. "
+            f"Available: {{beliefs_section}}, {{derived_section}}, {{total_in}}, "
+            f"{{total_derived}}, {{max_depth}}, {{domain_context}}, "
+            f"{{cross_agent_task}}, {{agents_stats}}"
+        ) from None
+    except ValueError as e:
+        if prompt_template:
+            raise ValueError(
+                f"Custom prompt template has malformed braces: {e}. "
+                f"Use {{{{ and }}}} to include literal braces in the template."
+            ) from None
+        raise
 
     stats = {
         "total_in": len(in_nodes),
