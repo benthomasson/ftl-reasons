@@ -1297,21 +1297,28 @@ def derive_apply(proposals: list[dict], db_path: str = DEFAULT_DB) -> dict:
     return {"added": added, "failed": failed}
 
 
-def add_repo(name: str, path: str, db_path: str = DEFAULT_DB) -> dict:
+def add_repo(name: str, path: str, db_path: str = DEFAULT_DB,
+             pg_conninfo=None, project_id=None) -> dict:
     """Add a repo to the network.
 
     Returns: {"name": str, "path": str}
     """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "add_repo",
+                            name=name, path=path)
     with _with_network(db_path, write=True) as net:
         net.repos[name] = path
         return {"name": name, "path": path}
 
 
-def list_repos(db_path: str = DEFAULT_DB) -> dict:
+def list_repos(db_path: str = DEFAULT_DB,
+               pg_conninfo=None, project_id=None) -> dict:
     """List all repos.
 
     Returns: {"repos": dict[str, str]}
     """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "list_repos")
     with _with_network(db_path) as net:
         return {"repos": dict(net.repos)}
 
@@ -1970,6 +1977,7 @@ def list_negative(
     visible_to: list[str] | None = None,
     model: str = "claude",
     db_path: str = DEFAULT_DB,
+    pg_conninfo=None, project_id=None,
 ) -> dict:
     """Find IN beliefs that describe problems, defects, or risks.
 
@@ -1978,6 +1986,9 @@ def list_negative(
     Returns: {"negative": [{"id": str, "text": str}, ...],
               "count": int, "candidates": int, "total": int}
     """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "list_negative",
+                            visible_to=visible_to, model=model)
     from . import ask
 
     with _with_network(db_path) as net:

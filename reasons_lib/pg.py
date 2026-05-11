@@ -753,6 +753,8 @@ class PgApi:
         repo_paths = None
         if repos:
             repo_paths = {k: Path(v) for k, v in repos.items()}
+        else:
+            repo_paths = self._load_repos()
 
         with self.conn.cursor() as cur:
             if force:
@@ -808,6 +810,8 @@ class PgApi:
         repo_paths = None
         if repos:
             repo_paths = {k: Path(v) for k, v in repos.items()}
+        else:
+            repo_paths = self._load_repos()
 
         with self.conn.cursor() as cur:
             cur.execute(
@@ -960,6 +964,118 @@ class PgApi:
             parts.append("")
 
         return "\n".join(parts)
+
+    def add_repo(self, name, path):
+        """Register a repo name/path for source tracking."""
+        pid = self.project_id
+        key = f"repo:{name}"
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO rms_network_meta (key, project_id, value) "
+                "VALUES (%s, %s, %s) "
+                "ON CONFLICT (key, project_id) DO UPDATE SET value = EXCLUDED.value",
+                (key, pid, path),
+            )
+        self.conn.commit()
+        return {"name": name, "path": path}
+
+    def list_repos(self):
+        """List all registered repos."""
+        pid = self.project_id
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT key, value FROM rms_network_meta "
+                "WHERE project_id = %s AND key LIKE 'repo:%%'",
+                (pid,),
+            )
+            rows = cur.fetchall()
+        repos = {key[5:]: value for key, value in rows}
+        return {"repos": repos}
+
+    def _load_repos(self):
+        """Load stored repos as a Path dict for source resolution."""
+        from pathlib import Path
+        result = self.list_repos()
+        if result["repos"]:
+            return {k: Path(v) for k, v in result["repos"].items()}
+        return None
+
+    def list_negative(self, visible_to=None, model="claude"):
+        """Find IN beliefs describing problems/defects/risks."""
+        import sys
+        from .api import NEGATIVE_TERMS, NEGATIVE_CLASSIFY_PROMPT, NEGATIVE_BATCH_SIZE
+        from .llm import invoke_model
+
+        pid = self.project_id
+
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, text, metadata FROM rms_nodes "
+                "WHERE project_id = %s AND truth_value = 'IN' "
+                "ORDER BY id",
+                (pid,),
+            )
+            rows = cur.fetchall()
+
+        in_nodes = []
+        for nid, text, meta in rows:
+            if isinstance(meta, str):
+                meta = json.loads(meta) if meta else {}
+            if visible_to is not None and not self._is_visible(meta, visible_to):
+                continue
+            in_nodes.append((nid, text))
+
+        total = len(in_nodes)
+        empty = {"negative": [], "count": 0, "candidates": 0, "total": total}
+
+        if not in_nodes:
+            return empty
+
+        candidates = []
+        for nid, text in in_nodes:
+            text_lower = text.lower()
+            if any(term in text_lower for term in NEGATIVE_TERMS):
+                candidates.append((nid, text))
+
+        if not candidates:
+            return empty
+
+        negative_ids = set()
+        total_batches = (len(candidates) + NEGATIVE_BATCH_SIZE - 1) // NEGATIVE_BATCH_SIZE
+        for i in range(0, len(candidates), NEGATIVE_BATCH_SIZE):
+            batch = candidates[i:i + NEGATIVE_BATCH_SIZE]
+            lines = [f"- [{nid}] `{text}`" for nid, text in batch]
+            prompt = NEGATIVE_CLASSIFY_PROMPT.format(candidates="\n".join(lines))
+
+            batch_num = i // NEGATIVE_BATCH_SIZE + 1
+            print(f"  Classifying batch {batch_num}/{total_batches} "
+                  f"({len(batch)} candidates)...", file=sys.stderr)
+
+            response = invoke_model(prompt, model=model)
+
+            for match in re.finditer(r"\[.*?\]", response, re.DOTALL):
+                try:
+                    ids = json.loads(match.group())
+                    if isinstance(ids, list):
+                        negative_ids.update(ids)
+                        break
+                except json.JSONDecodeError:
+                    continue
+
+        candidate_map = {nid: text for nid, text in candidates}
+        negative = [
+            {"id": nid, "text": candidate_map[nid]}
+            for nid in negative_ids
+            if nid in candidate_map
+        ]
+        negative.sort(key=lambda x: x["id"])
+
+        return {
+            "negative": negative,
+            "count": len(negative),
+            "candidates": len(candidates),
+            "total": total,
+        }
 
     def list_nodes(self, status=None, premises_only=False, has_dependents=False,
                    namespace=None, visible_to=None):
@@ -1163,7 +1279,8 @@ class PgApi:
                     "resolution": resolution or "",
                 })
 
-        return {"nodes": nodes, "nogoods": nogoods, "repos": {}}
+        repos = self.list_repos()["repos"]
+        return {"nodes": nodes, "nogoods": nogoods, "repos": repos}
 
     def remove_justification(self, node_id, index):
         pid = self.project_id

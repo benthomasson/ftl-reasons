@@ -10,6 +10,7 @@ from reasons_lib.api import (
     _pg_dispatch, export_markdown,
     import_json, import_beliefs, import_agent, sync_agent,
     hash_sources, check_stale, lookup,
+    add_repo, list_repos, list_negative,
 )
 from reasons_lib.cli import _backend_kwargs, _require_sqlite
 
@@ -459,3 +460,102 @@ class TestMaintenanceCliNoLongerBlocked:
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = lookup("test", pg_conninfo="postgresql://...", project_id="test")
         assert "No beliefs" in result
+
+
+class TestAddRepoDispatch:
+
+    def test_dispatches_to_pg(self):
+        mock_pg = MagicMock()
+        mock_pg.add_repo.return_value = {"name": "myrepo", "path": "/tmp/repo"}
+        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+            MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
+            MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
+            result = add_repo("myrepo", "/tmp/repo",
+                              pg_conninfo="postgresql://...", project_id="test")
+        mock_pg.add_repo.assert_called_once_with(name="myrepo", path="/tmp/repo")
+        assert result == {"name": "myrepo", "path": "/tmp/repo"}
+
+
+class TestListReposDispatch:
+
+    def test_dispatches_to_pg(self):
+        mock_pg = MagicMock()
+        mock_pg.list_repos.return_value = {"repos": {"myrepo": "/tmp/repo"}}
+        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+            MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
+            MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
+            result = list_repos(pg_conninfo="postgresql://...", project_id="test")
+        mock_pg.list_repos.assert_called_once_with()
+        assert result["repos"] == {"myrepo": "/tmp/repo"}
+
+    def test_empty_repos(self):
+        mock_pg = MagicMock()
+        mock_pg.list_repos.return_value = {"repos": {}}
+        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+            MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
+            MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
+            result = list_repos(pg_conninfo="postgresql://...", project_id="test")
+        assert result["repos"] == {}
+
+
+class TestListNegativeDispatch:
+
+    def test_dispatches_to_pg(self):
+        mock_pg = MagicMock()
+        mock_pg.list_negative.return_value = {
+            "negative": [{"id": "a", "text": "A bug"}],
+            "count": 1, "candidates": 3, "total": 10,
+        }
+        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+            MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
+            MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
+            result = list_negative(pg_conninfo="postgresql://...", project_id="test")
+        mock_pg.list_negative.assert_called_once_with(visible_to=None, model="claude")
+        assert result["count"] == 1
+
+    def test_passes_visible_to_and_model(self):
+        mock_pg = MagicMock()
+        mock_pg.list_negative.return_value = {
+            "negative": [], "count": 0, "candidates": 0, "total": 5,
+        }
+        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+            MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
+            MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
+            result = list_negative(visible_to=["admin"], model="gemini",
+                                   pg_conninfo="postgresql://...", project_id="test")
+        mock_pg.list_negative.assert_called_once_with(
+            visible_to=["admin"], model="gemini")
+        assert result["total"] == 5
+
+
+class TestRepoAndNegativeCliNoLongerBlocked:
+
+    def test_add_repo_accepts_pg(self):
+        mock_pg = MagicMock()
+        mock_pg.add_repo.return_value = {"name": "r", "path": "/p"}
+        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+            MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
+            MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
+            result = add_repo("r", "/p",
+                              pg_conninfo="postgresql://...", project_id="test")
+        assert result["name"] == "r"
+
+    def test_list_repos_accepts_pg(self):
+        mock_pg = MagicMock()
+        mock_pg.list_repos.return_value = {"repos": {}}
+        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+            MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
+            MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
+            result = list_repos(pg_conninfo="postgresql://...", project_id="test")
+        assert result["repos"] == {}
+
+    def test_list_negative_accepts_pg(self):
+        mock_pg = MagicMock()
+        mock_pg.list_negative.return_value = {
+            "negative": [], "count": 0, "candidates": 0, "total": 0,
+        }
+        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+            MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
+            MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
+            result = list_negative(pg_conninfo="postgresql://...", project_id="test")
+        assert result["count"] == 0
