@@ -523,7 +523,10 @@ def assert_node(node_id: str, db_path: str = DEFAULT_DB,
         return {"changed": changed, "went_out": went_out, "went_in": went_in}
 
 
-def propagate(db_path: str = DEFAULT_DB) -> dict:
+def propagate(db_path: str = DEFAULT_DB,
+              pg_conninfo=None, project_id=None) -> dict:
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "propagate")
     with _with_network(db_path, write=True) as net:
         changed = net.recompute_all()
     return {"changed": changed}
@@ -636,12 +639,17 @@ def trace_assumptions(node_id: str, visible_to: list[str] | None = None, db_path
         return {"node_id": node_id, "premises": premises}
 
 
-def trace_access_tags(node_id: str, visible_to: list[str] | None = None, db_path: str = DEFAULT_DB) -> dict:
+def trace_access_tags(node_id: str, visible_to: list[str] | None = None,
+                      db_path: str = DEFAULT_DB,
+                      pg_conninfo=None, project_id=None) -> dict:
     """Trace backward through dependency chains and return union of all access_tags.
 
     Returns: {"node_id": str, "access_tags": list[str]}
     Raises PermissionError if node's access_tags are not a subset of visible_to.
     """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "trace_access_tags",
+                            node_id=node_id, visible_to=visible_to)
     with _with_network(db_path) as net:
         if node_id not in net.nodes:
             raise KeyError(f"Node '{node_id}' not found")
@@ -699,20 +707,29 @@ def summarize(
     over: list[str],
     source: str = "",
     db_path: str = DEFAULT_DB,
+    pg_conninfo=None, project_id=None,
 ) -> dict:
     """Create a summary node that abstracts over a group of nodes.
 
     Returns: {"summary_id": str, "over": list[str], "truth_value": str}
     """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "summarize",
+                            summary_id=summary_id, text=text,
+                            over=over, source=source)
     with _with_network(db_path, write=True) as net:
         return net.summarize(summary_id, text, over, source=source)
 
 
-def supersede(old_id: str, new_id: str, db_path: str = DEFAULT_DB) -> dict:
+def supersede(old_id: str, new_id: str, db_path: str = DEFAULT_DB,
+              pg_conninfo=None, project_id=None) -> dict:
     """Mark old_id as superseded by new_id. Old goes OUT when new is IN.
 
     Returns: {"old_id": str, "new_id": str, "changed": list[str]}
     """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "supersede",
+                            old_id=old_id, new_id=new_id)
     with _with_network(db_path, write=True) as net:
         return net.supersede(old_id, new_id)
 
@@ -818,8 +835,11 @@ def add_nogood(node_ids: list[str], db_path: str = DEFAULT_DB,
         }
 
 
-def get_belief_set(db_path: str = DEFAULT_DB) -> list[str]:
+def get_belief_set(db_path: str = DEFAULT_DB,
+                   pg_conninfo=None, project_id=None) -> list[str]:
     """Return all node IDs currently IN."""
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "get_belief_set")
     with _with_network(db_path) as net:
         return net.get_belief_set()
 
