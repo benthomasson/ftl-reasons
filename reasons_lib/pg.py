@@ -2309,7 +2309,8 @@ class PgApi:
                         for a, b in zip(old_justs, justs):
                             if (a["type"] != b["type"]
                                     or a["antecedents"] != b["antecedents"]
-                                    or a["outlist"] != b["outlist"]):
+                                    or a["outlist"] != b["outlist"]
+                                    or a.get("label", "") != b.get("label", "")):
                                 justs_changed = True
                                 break
 
