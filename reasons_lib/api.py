@@ -1369,7 +1369,8 @@ def export_markdown(visible_to: list[str] | None = None, db_path: str = DEFAULT_
                 discovered=ngdata.get("discovered", ""),
                 resolution=ngdata.get("resolution", ""),
             ))
-        return _export(net)
+        repos = data.get("repos", {})
+        return _export(net, repos=repos)
 
     with _with_network(db_path) as net:
         if visible_to is not None:
