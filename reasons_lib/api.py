@@ -911,13 +911,12 @@ def import_beliefs(
     beliefs_file: str,
     nogoods_file: str | None = None,
     db_path: str = DEFAULT_DB,
+    pg_conninfo=None, project_id=None,
 ) -> dict:
     """Import a beliefs.md registry into the RMS network.
 
     Returns: {"claims_imported": int, "claims_skipped": int, "claims_retracted": int, "nogoods_imported": int}
     """
-    from .import_beliefs import import_into_network
-
     beliefs_path = Path(beliefs_file)
     if not beliefs_path.exists():
         raise FileNotFoundError(f"File not found: {beliefs_file}")
@@ -935,6 +934,11 @@ def import_beliefs(
         if auto_nogoods.exists():
             nogoods_text = auto_nogoods.read_text()
 
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "import_beliefs",
+                            beliefs_text=beliefs_text, nogoods_text=nogoods_text)
+
+    from .import_beliefs import import_into_network
     with _with_network(db_path, write=True) as net:
         return import_into_network(net, beliefs_text, nogoods_text)
 
@@ -945,6 +949,7 @@ def import_agent(
     nogoods_file: str | None = None,
     only_in: bool = False,
     db_path: str = DEFAULT_DB,
+    pg_conninfo=None, project_id=None,
 ) -> dict:
     """Import another agent's beliefs into the local RMS with namespacing.
 
@@ -960,6 +965,34 @@ def import_agent(
     beliefs_path = Path(beliefs_file)
     if not beliefs_path.exists():
         raise FileNotFoundError(f"File not found: {beliefs_file}")
+
+    if pg_conninfo:
+        from .import_agent import (
+            _normalize_json, _normalize_markdown,
+            _normalize_nogoods_json, _normalize_nogoods_markdown,
+        )
+        if beliefs_path.suffix == ".json":
+            import json as json_mod
+            data = json_mod.loads(beliefs_path.read_text())
+            claims = _normalize_json(data, only_in)
+            nogoods = _normalize_nogoods_json(data)
+        else:
+            beliefs_text = beliefs_path.read_text()
+            nogoods_text = None
+            if nogoods_file:
+                nogoods_path = Path(nogoods_file)
+                if not nogoods_path.exists():
+                    raise FileNotFoundError(f"Nogoods file not found: {nogoods_file}")
+                nogoods_text = nogoods_path.read_text()
+            else:
+                auto_nogoods = beliefs_path.parent / "nogoods.md"
+                if auto_nogoods.exists():
+                    nogoods_text = auto_nogoods.read_text()
+            claims = _normalize_markdown(beliefs_text, only_in)
+            nogoods = _normalize_nogoods_markdown(nogoods_text)
+        return _pg_dispatch(pg_conninfo, project_id, "import_agent",
+                            agent_name=agent_name, claims=claims,
+                            nogoods=nogoods, source_path=str(beliefs_path))
 
     if beliefs_path.suffix == ".json":
         from .import_agent import import_agent_json as _import_agent_json
@@ -1008,6 +1041,7 @@ def sync_agent(
     nogoods_file: str | None = None,
     only_in: bool = False,
     db_path: str = DEFAULT_DB,
+    pg_conninfo=None, project_id=None,
 ) -> dict:
     """Sync another agent's beliefs into the local RMS (remote wins).
 
@@ -1019,6 +1053,34 @@ def sync_agent(
     beliefs_path = Path(beliefs_file)
     if not beliefs_path.exists():
         raise FileNotFoundError(f"File not found: {beliefs_file}")
+
+    if pg_conninfo:
+        from .import_agent import (
+            _normalize_json, _normalize_markdown,
+            _normalize_nogoods_json, _normalize_nogoods_markdown,
+        )
+        if beliefs_path.suffix == ".json":
+            import json as json_mod
+            data = json_mod.loads(beliefs_path.read_text())
+            claims = _normalize_json(data, only_in)
+            nogoods = _normalize_nogoods_json(data)
+        else:
+            beliefs_text = beliefs_path.read_text()
+            nogoods_text = None
+            if nogoods_file:
+                nogoods_path = Path(nogoods_file)
+                if not nogoods_path.exists():
+                    raise FileNotFoundError(f"Nogoods file not found: {nogoods_file}")
+                nogoods_text = nogoods_path.read_text()
+            else:
+                auto_nogoods = beliefs_path.parent / "nogoods.md"
+                if auto_nogoods.exists():
+                    nogoods_text = auto_nogoods.read_text()
+            claims = _normalize_markdown(beliefs_text, only_in)
+            nogoods = _normalize_nogoods_markdown(nogoods_text)
+        return _pg_dispatch(pg_conninfo, project_id, "sync_agent",
+                            agent_name=agent_name, claims=claims,
+                            nogoods=nogoods, source_path=str(beliefs_path))
 
     if beliefs_path.suffix == ".json":
         from .import_agent import sync_agent_json as _sync_agent_json
@@ -1061,7 +1123,8 @@ def sync_agent(
         )
 
 
-def import_json(json_file: str, db_path: str = DEFAULT_DB) -> dict:
+def import_json(json_file: str, db_path: str = DEFAULT_DB,
+                pg_conninfo=None, project_id=None) -> dict:
     """Import a network from a JSON file (produced by export).
 
     Reconstructs the full network: nodes with justifications, truth values,
@@ -1076,6 +1139,9 @@ def import_json(json_file: str, db_path: str = DEFAULT_DB) -> dict:
         raise FileNotFoundError(f"File not found: {json_file}")
 
     data = json_mod.loads(json_path.read_text())
+
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "import_json", data=data)
 
     with _with_network(db_path, write=True) as net:
         # Topological sort: add nodes whose antecedents are already in the network first
