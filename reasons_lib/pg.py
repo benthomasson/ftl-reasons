@@ -1057,7 +1057,7 @@ class PgApi:
     def propagate(self):
         """Recompute truth values for all derived nodes to a fixpoint."""
         pid = self.project_id
-        all_changed = []
+        all_changed = set()
         with self.conn.cursor() as cur:
             cur.execute(
                 "SELECT COUNT(*) FROM rms_nodes WHERE project_id = %s",
@@ -1094,10 +1094,10 @@ class PgApi:
 
                 if not changed_this_pass:
                     break
-                all_changed.extend(changed_this_pass)
+                all_changed.update(changed_this_pass)
 
         self.conn.commit()
-        return {"changed": all_changed}
+        return {"changed": list(all_changed)}
 
     def supersede(self, old_id, new_id):
         """Mark old_id as superseded by new_id using the outlist mechanism."""
