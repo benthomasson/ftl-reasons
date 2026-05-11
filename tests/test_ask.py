@@ -87,8 +87,8 @@ class TestBuildAskPrompt:
 
     def test_with_tool_history(self):
         history = [
-            {"query": "propagation", "result": "Found: propagation-is-bfs"},
-            {"query": "retraction", "result": "Found: retraction-cascades"},
+            {"tool_label": 'search_beliefs("propagation")', "result": "Found: propagation-is-bfs"},
+            {"tool_label": 'search_beliefs("retraction")', "result": "Found: retraction-cascades"},
         ]
         prompt = build_ask_prompt("question", "context", tool_history=history)
         assert "Additional search results" in prompt
