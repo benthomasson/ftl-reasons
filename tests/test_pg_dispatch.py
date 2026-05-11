@@ -39,7 +39,10 @@ class TestBackendKwargs:
 
     def test_sqlite_default(self):
         args = argparse.Namespace(db="reasons.db", pg=None, project_id=None)
-        result = _backend_kwargs(args)
+        env = {k: v for k, v in __import__("os").environ.items()
+               if k not in ("REASONS_PG_CONNINFO", "REASONS_PROJECT_ID")}
+        with patch.dict("os.environ", env, clear=True):
+            result = _backend_kwargs(args)
         assert result == {"db_path": "reasons.db"}
 
     def test_pg_with_project_id(self):
@@ -52,8 +55,11 @@ class TestBackendKwargs:
     def test_pg_missing_project_id_exits(self):
         args = argparse.Namespace(db="reasons.db", pg="postgresql://localhost/test",
                                   project_id=None)
-        with pytest.raises(SystemExit):
-            _backend_kwargs(args)
+        env = {k: v for k, v in __import__("os").environ.items()
+               if k not in ("REASONS_PG_CONNINFO", "REASONS_PROJECT_ID")}
+        with patch.dict("os.environ", env, clear=True):
+            with pytest.raises(SystemExit):
+                _backend_kwargs(args)
 
     def test_env_var_fallback(self):
         args = argparse.Namespace(db="reasons.db", pg=None, project_id=None)
@@ -75,7 +81,10 @@ class TestRequireSqlite:
 
     def test_no_pg_passes(self):
         args = argparse.Namespace(pg=None)
-        _require_sqlite(args, "hash-sources")
+        env = {k: v for k, v in __import__("os").environ.items()
+               if k != "REASONS_PG_CONNINFO"}
+        with patch.dict("os.environ", env, clear=True):
+            _require_sqlite(args, "hash-sources")
 
     def test_pg_set_exits(self):
         args = argparse.Namespace(pg="postgresql://localhost/test")
