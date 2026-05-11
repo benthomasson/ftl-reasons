@@ -1381,6 +1381,7 @@ def check_stale(
     repos: dict[str, str] | None = None,
     upgrade_hashes: bool = False,
     db_path: str = DEFAULT_DB,
+    pg_conninfo=None, project_id=None,
 ) -> dict:
     """Check all IN nodes for source file staleness.
 
@@ -1390,6 +1391,9 @@ def check_stale(
     Returns: {"stale": list[dict], "checked": int, "stale_count": int,
               "upgraded": int}
     """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "check_stale",
+                            repos=repos, upgrade_hashes=upgrade_hashes)
     from pathlib import Path as P
     from .check_stale import check_stale as _check
 
@@ -1420,11 +1424,15 @@ def hash_sources(
     force: bool = False,
     repos: dict[str, str] | None = None,
     db_path: str = DEFAULT_DB,
+    pg_conninfo=None, project_id=None,
 ) -> dict:
     """Backfill source hashes for nodes with source paths but no stored hash.
 
     Returns: {"hashed": list[dict], "count": int}
     """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "hash_sources",
+                            force=force, repos=repos)
     from pathlib import Path as P
     from .check_stale import hash_sources as _hash
 
@@ -1464,7 +1472,8 @@ def compact(budget: int = 500, truncate: bool = True, visible_to: list[str] | No
         return _compact(net, budget=budget, truncate=truncate)
 
 
-def lookup(query: str, visible_to: list[str] | None = None, db_path: str = DEFAULT_DB) -> str:
+def lookup(query: str, visible_to: list[str] | None = None, db_path: str = DEFAULT_DB,
+           pg_conninfo=None, project_id=None) -> str:
     """Simple all-terms search over the full belief block — ID, text, source,
     dependencies, and metadata. Matches the same search corpus and output
     format as lookup_beliefs on a flat beliefs.md file.
@@ -1476,6 +1485,9 @@ def lookup(query: str, visible_to: list[str] | None = None, db_path: str = DEFAU
 
     Returns: formatted string with matching beliefs (full blocks)
     """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "lookup",
+                            query=query, visible_to=visible_to)
     with _with_network(db_path) as net:
         query_terms = query.lower().split()
         matches = []

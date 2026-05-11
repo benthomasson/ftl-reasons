@@ -9,6 +9,7 @@ import pytest
 from reasons_lib.api import (
     _pg_dispatch, export_markdown,
     import_json, import_beliefs, import_agent, sync_agent,
+    hash_sources, check_stale, lookup,
 )
 from reasons_lib.cli import _backend_kwargs, _require_sqlite
 
@@ -38,7 +39,10 @@ class TestBackendKwargs:
 
     def test_sqlite_default(self):
         args = argparse.Namespace(db="reasons.db", pg=None, project_id=None)
-        result = _backend_kwargs(args)
+        env = {k: v for k, v in __import__("os").environ.items()
+               if k not in ("REASONS_PG_CONNINFO", "REASONS_PROJECT_ID")}
+        with patch.dict("os.environ", env, clear=True):
+            result = _backend_kwargs(args)
         assert result == {"db_path": "reasons.db"}
 
     def test_pg_with_project_id(self):
@@ -51,8 +55,11 @@ class TestBackendKwargs:
     def test_pg_missing_project_id_exits(self):
         args = argparse.Namespace(db="reasons.db", pg="postgresql://localhost/test",
                                   project_id=None)
-        with pytest.raises(SystemExit):
-            _backend_kwargs(args)
+        env = {k: v for k, v in __import__("os").environ.items()
+               if k not in ("REASONS_PG_CONNINFO", "REASONS_PROJECT_ID")}
+        with patch.dict("os.environ", env, clear=True):
+            with pytest.raises(SystemExit):
+                _backend_kwargs(args)
 
     def test_env_var_fallback(self):
         args = argparse.Namespace(db="reasons.db", pg=None, project_id=None)
@@ -74,7 +81,10 @@ class TestRequireSqlite:
 
     def test_no_pg_passes(self):
         args = argparse.Namespace(pg=None)
-        _require_sqlite(args, "hash-sources")
+        env = {k: v for k, v in __import__("os").environ.items()
+               if k != "REASONS_PG_CONNINFO"}
+        with patch.dict("os.environ", env, clear=True):
+            _require_sqlite(args, "hash-sources")
 
     def test_pg_set_exits(self):
         args = argparse.Namespace(pg="postgresql://localhost/test")
@@ -341,3 +351,111 @@ class TestImportCliNoLongerBlocked:
             result = import_beliefs(str(f),
                                     pg_conninfo="postgresql://...", project_id="test")
         assert result["claims_imported"] == 0
+
+
+class TestHashSourcesDispatch:
+
+    def test_dispatches_to_pg(self):
+        mock_pg = MagicMock()
+        mock_pg.hash_sources.return_value = {"hashed": [], "count": 0}
+        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+            MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
+            MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
+            result = hash_sources(pg_conninfo="postgresql://...", project_id="test")
+        mock_pg.hash_sources.assert_called_once_with(force=False, repos=None)
+        assert result == {"hashed": [], "count": 0}
+
+    def test_passes_force_and_repos(self):
+        mock_pg = MagicMock()
+        mock_pg.hash_sources.return_value = {"hashed": [{"node_id": "a"}], "count": 1}
+        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+            MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
+            MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
+            result = hash_sources(force=True, repos={"myrepo": "/tmp/repo"},
+                                  pg_conninfo="postgresql://...", project_id="test")
+        mock_pg.hash_sources.assert_called_once_with(
+            force=True, repos={"myrepo": "/tmp/repo"})
+        assert result["count"] == 1
+
+
+class TestCheckStaleDispatch:
+
+    def test_dispatches_to_pg(self):
+        mock_pg = MagicMock()
+        mock_pg.check_stale.return_value = {
+            "stale": [], "checked": 5, "stale_count": 0, "upgraded": 0,
+        }
+        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+            MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
+            MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
+            result = check_stale(pg_conninfo="postgresql://...", project_id="test")
+        mock_pg.check_stale.assert_called_once_with(repos=None, upgrade_hashes=False)
+        assert result["checked"] == 5
+
+    def test_passes_upgrade_hashes(self):
+        mock_pg = MagicMock()
+        mock_pg.check_stale.return_value = {
+            "stale": [], "checked": 3, "stale_count": 0, "upgraded": 2,
+        }
+        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+            MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
+            MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
+            result = check_stale(upgrade_hashes=True,
+                                 pg_conninfo="postgresql://...", project_id="test")
+        mock_pg.check_stale.assert_called_once_with(repos=None, upgrade_hashes=True)
+        assert result["upgraded"] == 2
+
+
+class TestLookupDispatch:
+
+    def test_dispatches_to_pg(self):
+        mock_pg = MagicMock()
+        mock_pg.lookup.return_value = "Found 1 matching belief(s):\n\n### a [IN]\nAlpha\n"
+        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+            MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
+            MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
+            result = lookup("alpha", pg_conninfo="postgresql://...", project_id="test")
+        mock_pg.lookup.assert_called_once_with(query="alpha", visible_to=None)
+        assert "alpha" in result.lower()
+
+    def test_passes_visible_to(self):
+        mock_pg = MagicMock()
+        mock_pg.lookup.return_value = "No beliefs found matching 'secret'"
+        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+            MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
+            MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
+            result = lookup("secret", visible_to=["admin"],
+                            pg_conninfo="postgresql://...", project_id="test")
+        mock_pg.lookup.assert_called_once_with(query="secret", visible_to=["admin"])
+
+
+class TestMaintenanceCliNoLongerBlocked:
+
+    def test_hash_sources_accepts_pg(self):
+        mock_pg = MagicMock()
+        mock_pg.hash_sources.return_value = {"hashed": [], "count": 0}
+        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+            MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
+            MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
+            result = hash_sources(pg_conninfo="postgresql://...", project_id="test")
+        assert result["count"] == 0
+
+    def test_check_stale_accepts_pg(self):
+        mock_pg = MagicMock()
+        mock_pg.check_stale.return_value = {
+            "stale": [], "checked": 0, "stale_count": 0, "upgraded": 0,
+        }
+        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+            MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
+            MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
+            result = check_stale(pg_conninfo="postgresql://...", project_id="test")
+        assert result["stale_count"] == 0
+
+    def test_lookup_accepts_pg(self):
+        mock_pg = MagicMock()
+        mock_pg.lookup.return_value = "No beliefs found matching 'test'"
+        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+            MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
+            MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
+            result = lookup("test", pg_conninfo="postgresql://...", project_id="test")
+        assert "No beliefs" in result

@@ -744,6 +744,223 @@ class PgApi:
 
         return self._format_results(matched, neighbors, format)
 
+    def hash_sources(self, force=False, repos=None):
+        """Backfill source hashes for nodes with source paths but no stored hash."""
+        from pathlib import Path
+        from .check_stale import hash_file, resolve_source_path
+
+        pid = self.project_id
+        repo_paths = None
+        if repos:
+            repo_paths = {k: Path(v) for k, v in repos.items()}
+
+        with self.conn.cursor() as cur:
+            if force:
+                cur.execute(
+                    "SELECT id, source, source_hash, metadata FROM rms_nodes "
+                    "WHERE project_id = %s AND source != '' AND source IS NOT NULL",
+                    (pid,),
+                )
+            else:
+                cur.execute(
+                    "SELECT id, source, source_hash, metadata FROM rms_nodes "
+                    "WHERE project_id = %s AND source != '' AND source IS NOT NULL "
+                    "AND (source_hash = '' OR source_hash IS NULL)",
+                    (pid,),
+                )
+            rows = cur.fetchall()
+
+        results = []
+        for nid, source, source_hash, meta in sorted(rows, key=lambda r: r[0]):
+            if isinstance(meta, str):
+                meta = json.loads(meta) if meta else {}
+            agent = meta.get("agent") if meta else None
+            path = resolve_source_path(source, repo_paths, agent=agent)
+            if path is None:
+                continue
+            new_hash = hash_file(path)
+            was_empty = not source_hash
+            results.append({
+                "node_id": nid,
+                "source": source,
+                "hash": new_hash,
+                "was_empty": was_empty,
+            })
+
+        if results:
+            with self.conn.cursor() as cur:
+                for item in results:
+                    cur.execute(
+                        "UPDATE rms_nodes SET source_hash = %s "
+                        "WHERE id = %s AND project_id = %s",
+                        (item["hash"], item["node_id"], pid),
+                    )
+            self.conn.commit()
+
+        return {"hashed": results, "count": len(results)}
+
+    def check_stale(self, repos=None, upgrade_hashes=False):
+        """Check all IN nodes for source file staleness."""
+        from pathlib import Path
+        from .check_stale import hash_file, resolve_source_path
+
+        pid = self.project_id
+        repo_paths = None
+        if repos:
+            repo_paths = {k: Path(v) for k, v in repos.items()}
+
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, source, source_hash, metadata FROM rms_nodes "
+                "WHERE project_id = %s AND truth_value = 'IN' "
+                "AND source != '' AND source IS NOT NULL "
+                "AND source_hash != '' AND source_hash IS NOT NULL",
+                (pid,),
+            )
+            rows = cur.fetchall()
+
+        results = []
+        upgraded = 0
+        upgrades_to_commit = []
+
+        for nid, source, source_hash, meta in sorted(rows, key=lambda r: r[0]):
+            if isinstance(meta, str):
+                meta = json.loads(meta) if meta else {}
+            agent = meta.get("agent") if meta else None
+            path = resolve_source_path(source, repo_paths, agent=agent)
+            if path is None:
+                results.append({
+                    "node_id": nid,
+                    "old_hash": source_hash,
+                    "new_hash": None,
+                    "source": source,
+                    "source_path": None,
+                    "reason": "source_deleted",
+                })
+                continue
+
+            current_hash = hash_file(path)
+            if current_hash != source_hash:
+                if len(source_hash) == 16 and current_hash.startswith(source_hash):
+                    if upgrade_hashes:
+                        upgrades_to_commit.append((current_hash, nid))
+                        upgraded += 1
+                        continue
+                    results.append({
+                        "node_id": nid,
+                        "old_hash": source_hash,
+                        "new_hash": current_hash,
+                        "source": source,
+                        "source_path": str(path),
+                        "reason": "truncated_hash",
+                    })
+                    continue
+                results.append({
+                    "node_id": nid,
+                    "old_hash": source_hash,
+                    "new_hash": current_hash,
+                    "source": source,
+                    "source_path": str(path),
+                    "reason": "content_changed",
+                })
+
+        if upgrades_to_commit:
+            with self.conn.cursor() as cur:
+                for new_hash, nid in upgrades_to_commit:
+                    cur.execute(
+                        "UPDATE rms_nodes SET source_hash = %s "
+                        "WHERE id = %s AND project_id = %s",
+                        (new_hash, nid, pid),
+                    )
+            self.conn.commit()
+
+        return {
+            "stale": results,
+            "checked": len(rows),
+            "stale_count": len(results),
+            "upgraded": upgraded,
+        }
+
+    def lookup(self, query, visible_to=None):
+        """Simple all-terms substring search over full belief blocks."""
+        pid = self.project_id
+        query_terms = query.lower().split()
+
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT n.id, n.text, n.truth_value, n.source, n.source_hash, "
+                "n.date, n.metadata FROM rms_nodes n "
+                "WHERE n.project_id = %s ORDER BY n.id",
+                (pid,),
+            )
+            node_rows = cur.fetchall()
+
+            cur.execute(
+                "SELECT node_id, antecedents, outlist FROM rms_justifications "
+                "WHERE project_id = %s",
+                (pid,),
+            )
+            just_rows = cur.fetchall()
+
+        refs_by_node = {}
+        dependents_by_node = {}
+        for node_id, ants, outs in just_rows:
+            if isinstance(ants, str):
+                ants = json.loads(ants)
+            if isinstance(outs, str):
+                outs = json.loads(outs)
+            all_refs = list(ants) + list(outs or [])
+            refs_by_node.setdefault(node_id, []).extend(all_refs)
+            for ref in all_refs:
+                dependents_by_node.setdefault(ref, []).append(node_id)
+
+        matches = []
+        for nid, text, tv, source, source_hash, date, meta in node_rows:
+            if isinstance(meta, str):
+                meta = json.loads(meta) if meta else {}
+            if visible_to is not None and not self._is_visible(meta, visible_to):
+                continue
+
+            block_parts = [nid, text]
+            if source:
+                block_parts.append(source)
+            if source_hash:
+                block_parts.append(source_hash)
+            if date:
+                block_parts.append(date)
+            for ref in refs_by_node.get(nid, []):
+                block_parts.append(ref)
+            for dep in dependents_by_node.get(nid, []):
+                block_parts.append(dep)
+            block_lower = " ".join(block_parts).lower()
+
+            if all(term in block_lower for term in query_terms):
+                matches.append({
+                    "id": nid, "text": text, "truth_value": tv,
+                    "source": source, "source_hash": source_hash,
+                    "date": date,
+                    "depends_on": refs_by_node.get(nid, []),
+                })
+
+        if not matches:
+            return f"No beliefs found matching '{query}'"
+
+        parts = [f"Found {len(matches)} matching belief(s):", ""]
+        for m in matches[:20]:
+            parts.append(f"### {m['id']} [{m['truth_value']}]")
+            parts.append(m["text"])
+            if m["source"]:
+                parts.append(f"- Source: {m['source']}")
+            if m["source_hash"]:
+                parts.append(f"- Source hash: {m['source_hash']}")
+            if m["date"]:
+                parts.append(f"- Date: {m['date']}")
+            if m["depends_on"]:
+                parts.append(f"- Depends on: {', '.join(m['depends_on'])}")
+            parts.append("")
+
+        return "\n".join(parts)
+
     def list_nodes(self, status=None, premises_only=False, has_dependents=False,
                    namespace=None, visible_to=None):
         pid = self.project_id
