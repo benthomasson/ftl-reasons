@@ -708,19 +708,33 @@ def cmd_lookup(args):
 def cmd_ask(args):
     _require_sqlite(args, "ask")
     from .ask import ask
-    result = ask(
-        question=args.question,
-        db_path=args.db,
-        timeout=args.timeout,
-        no_synth=args.no_synth,
-        format=getattr(args, "format", None),
-        model=args.model or "claude",
-        simple=args.simple,
-        sources_db=args.full_sources,
-        natural=args.natural,
-        dual=args.dual,
-    )
-    print(result)
+
+    mcp_servers = []
+    try:
+        if args.mcp:
+            from .mcp_client import McpBridge
+            for cmd in args.mcp:
+                bridge = McpBridge(cmd)
+                bridge.connect()
+                mcp_servers.append(bridge)
+
+        result = ask(
+            question=args.question,
+            db_path=args.db,
+            timeout=args.timeout,
+            no_synth=args.no_synth,
+            format=getattr(args, "format", None),
+            model=args.model or "claude",
+            simple=args.simple,
+            sources_db=args.full_sources,
+            natural=args.natural,
+            dual=args.dual,
+            mcp_servers=mcp_servers or None,
+        )
+        print(result)
+    finally:
+        for bridge in mcp_servers:
+            bridge.close()
 
 
 def cmd_cluster_list(args):
@@ -1683,6 +1697,8 @@ def main():
                    help="Strip belief IDs, status, and justification metadata from context")
     p.add_argument("--dual", action="store_true",
                    help="Run TMS and FTS RAG separately, then merge (requires --full-sources)")
+    p.add_argument("--mcp", action="append", default=None,
+                   help="MCP server command as data source (repeatable, e.g. --mcp snowflake-mcp)")
 
     # deduplicate
     p = sub.add_parser("deduplicate", help="Find and optionally retract duplicate IN beliefs")

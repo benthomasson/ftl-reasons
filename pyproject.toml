@@ -16,6 +16,7 @@ test = ["pytest", "pytest-cov"]
 pg = ["psycopg[binary]>=3.1"]
 test-pg = ["psycopg[binary]>=3.1", "pytest", "pytest-cov"]
 cluster = ["sentence-transformers>=2.2", "scikit-learn>=1.2"]
+mcp = ["mcp>=1.0"]
 
 [project.scripts]
 reasons = "reasons_lib.cli:main"

@@ -23,22 +23,20 @@ You are answering a question using a belief network (a Truth Maintenance System)
 Each belief has an ID, text, truth value (IN = held true, OUT = retracted), and
 may have justifications tracing why it is believed.
 
-You have one tool available:
-
-{{"tool": "search_beliefs", "query": "search terms"}}
+{tools_section}
 
 Rules:
 - If the belief matches below are sufficient to answer the question, write your
-  answer directly. Do NOT call the tool.
-- If you need to search for more beliefs, respond with ONLY a single JSON line
-  (no other text). The system will run the search and give you the results.
+  answer directly. Do NOT call a tool.
+- If you need more information, respond with ONLY a single JSON line
+  (no other text). The system will run the tool and give you the results.
 {cite_rule}
-- ONLY answer based on the beliefs provided. Do NOT use your training data or
-  general knowledge to fill gaps.
+- ONLY answer based on the beliefs and data provided. Do NOT use your training
+  data or general knowledge to fill gaps.
 - If the beliefs are insufficient to answer, respond EXACTLY with:
   "I don't have enough beliefs in the network to answer this question."
   Do NOT attempt a partial or speculative answer.
-
+{mcp_instructions}
 ## Question
 
 {question}
@@ -47,6 +45,12 @@ Rules:
 
 {beliefs_context}
 {tool_history}"""
+
+
+_DEFAULT_TOOLS_SECTION = """\
+You have one tool available:
+
+{"tool": "search_beliefs", "query": "search terms"}"""
 
 
 FINAL_ASK_PROMPT = """\
@@ -123,23 +127,29 @@ def extract_tool_call(text):
     return None
 
 
-def build_ask_prompt(question, beliefs_context, tool_history=None, natural=False):
+def build_ask_prompt(question, beliefs_context, tool_history=None, natural=False,
+                     tools_section=None, mcp_instructions=""):
     """Build the full prompt for LLM synthesis."""
     history_section = ""
     if tool_history:
         parts = []
         for entry in tool_history:
             parts.append(
-                f"### Tool call: search_beliefs(\"{entry['query']}\")\n\n"
+                f"### Tool call: {entry['tool_label']}\n\n"
                 f"{entry['result']}"
             )
         history_section = "\n\n## Additional search results\n\n" + "\n\n---\n\n".join(parts)
+
+    if mcp_instructions:
+        mcp_instructions = f"\n## Data Source Instructions\n\n{mcp_instructions}\n"
 
     return ASK_PROMPT.format(
         question=question,
         beliefs_context=beliefs_context,
         tool_history=history_section,
         cite_rule=_CITE_RULE_NATURAL if natural else _CITE_RULE,
+        tools_section=tools_section or _DEFAULT_TOOLS_SECTION,
+        mcp_instructions=mcp_instructions,
     )
 
 
@@ -150,7 +160,7 @@ def build_final_prompt(question, beliefs_context, tool_history=None, natural=Fal
         parts = []
         for entry in tool_history:
             parts.append(
-                f"### Tool call: search_beliefs(\"{entry['query']}\")\n\n"
+                f"### Tool call: {entry['tool_label']}\n\n"
                 f"{entry['result']}"
             )
         history_section = "\n\n## Additional search results\n\n" + "\n\n---\n\n".join(parts)
@@ -331,8 +341,42 @@ def _beliefs_or_no_match(beliefs_context):
     return beliefs_context
 
 
+def _build_tools_section(mcp_servers):
+    """Build the tools section for the prompt, including MCP server tools."""
+    lines = ["You have the following tools available:", "",
+             '{"tool": "search_beliefs", "query": "search terms"}']
+    if mcp_servers:
+        for bridge in mcp_servers:
+            for tool in bridge.list_tools():
+                schema = tool.get("input_schema", {})
+                props = schema.get("properties", {})
+                param_parts = []
+                for pname, pinfo in props.items():
+                    param_parts.append(f'"{pname}": "<{pinfo.get("description", pname)}>"')
+                example = ', '.join(param_parts)
+                if example:
+                    lines.append(f'{{"tool": "{tool["name"]}", {example}}}')
+                else:
+                    lines.append(f'{{"tool": "{tool["name"]}"}}')
+                if tool["description"]:
+                    desc = tool["description"].split("\n")[0]
+                    lines.append(f"  # {desc}")
+    return "\n".join(lines)
+
+
+def _build_mcp_instructions(mcp_servers):
+    """Collect server instructions from all MCP servers."""
+    parts = []
+    for bridge in mcp_servers:
+        instructions = bridge.get_instructions()
+        if instructions:
+            parts.append(instructions)
+    return "\n\n".join(parts)
+
+
 def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None,
-        model="claude", simple=False, sources_db=None, natural=False, dual=False):
+        model="claude", simple=False, sources_db=None, natural=False, dual=False,
+        mcp_servers=None):
     """Answer a question using FTS5 belief search and optional LLM synthesis.
 
     Args:
@@ -346,6 +390,7 @@ def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None
               calls with simple=True (1 TMS + 1 FTS + 1 merge), or up to
               5 with simple=False (up to 3 TMS tool-loop rounds + 1 FTS
               + 1 merge). Timeout applies per call.
+        mcp_servers: list of connected McpBridge instances for external tools.
 
     Returns the answer text.
     """
@@ -355,7 +400,8 @@ def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None
     if dual and sources_db:
         print("Dual path: running TMS...", file=sys.stderr)
         answer_tms = ask(question, db_path=db_path, timeout=timeout,
-                         model=model, simple=simple, natural=natural)
+                         model=model, simple=simple, natural=natural,
+                         mcp_servers=mcp_servers)
         print("Dual path: running FTS RAG...", file=sys.stderr)
         answer_fts = _fts_rag_answer(question, sources_db, model=model,
                                      timeout=timeout)
@@ -423,16 +469,31 @@ def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None
             return (beliefs_context or "") + sources_suffix
         return beliefs_context
 
+    tools_section = None
+    mcp_instructions = ""
+    mcp_tool_map = {}
+    max_iters = MAX_ITERATIONS
+
+    if mcp_servers:
+        tools_section = _build_tools_section(mcp_servers)
+        mcp_instructions = _build_mcp_instructions(mcp_servers)
+        for bridge in mcp_servers:
+            for tool in bridge.list_tools():
+                mcp_tool_map[tool["name"]] = bridge
+        max_iters = max(MAX_ITERATIONS, 5)
+
     tool_history = []
 
-    for iteration in range(MAX_ITERATIONS):
+    for iteration in range(max_iters):
         ctx = _full_context()
-        if iteration == MAX_ITERATIONS - 1:
+        if iteration == max_iters - 1:
             prompt = build_final_prompt(question, ctx, tool_history, natural=natural)
         else:
-            prompt = build_ask_prompt(question, ctx, tool_history, natural=natural)
+            prompt = build_ask_prompt(question, ctx, tool_history, natural=natural,
+                                      tools_section=tools_section,
+                                      mcp_instructions=mcp_instructions)
 
-        print(f"Synthesizing (round {iteration + 1}/{MAX_ITERATIONS})...",
+        print(f"Synthesizing (round {iteration + 1}/{max_iters})...",
               file=sys.stderr)
 
         try:
@@ -449,20 +510,37 @@ def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None
         if tool_call is None:
             return response.strip()
 
-        if tool_call.get("tool") == "search_beliefs":
+        tool_name = tool_call.get("tool")
+
+        if tool_name == "search_beliefs":
             query = tool_call.get("query", "")
             print(f"  Searching: {query}", file=sys.stderr)
             result = api.search(query, db_path=db_path, format="markdown")
             history_result = _strip_belief_metadata(result) if natural and result else result
-            tool_history.append({"query": query, "result": history_result})
+            tool_history.append({
+                "tool_label": f'search_beliefs("{query}")',
+                "result": history_result,
+            })
             if result and result.strip() != "No results found.":
                 beliefs_context = result
                 if natural:
                     beliefs_context = _strip_belief_metadata(beliefs_context)
+        elif tool_name in mcp_tool_map:
+            bridge = mcp_tool_map[tool_name]
+            args = {k: v for k, v in tool_call.items() if k != "tool"}
+            print(f"  MCP tool: {tool_name}({json.dumps(args)[:80]})", file=sys.stderr)
+            try:
+                result = bridge.call_tool(tool_name, args)
+            except Exception as e:
+                result = f"Error calling {tool_name}: {e}"
+            tool_history.append({
+                "tool_label": f"{tool_name}(...)",
+                "result": result,
+            })
         else:
             return response.strip()
 
-        if iteration == MAX_ITERATIONS - 1:
+        if iteration == max_iters - 1:
             print(f"Synthesizing (final)...", file=sys.stderr)
             ctx = _full_context()
             prompt = build_final_prompt(question, ctx, tool_history, natural=natural)
