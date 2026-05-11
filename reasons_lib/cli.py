@@ -823,7 +823,7 @@ def cmd_deduplicate(args):
 
 
 def _derive_one_round(args, round_num=None, report_state=None,
-                      cluster_cache=None):
+                      cluster_cache=None, prompt_template=None):
     """Run a single derive round. Returns number of beliefs added (0 = saturated).
 
     Used by cmd_derive for both single-round and --exhaust mode.
@@ -860,6 +860,7 @@ def _derive_one_round(args, round_num=None, report_state=None,
         premises_only=args.premises, has_dependents=args.has_dependents,
         cluster=args.cluster, cluster_cache=cluster_cache,
         embedding_model=args.embedding_model, n_clusters=args.n_clusters,
+        prompt_template=prompt_template,
     )
 
     print(f"{prefix}Network: {stats['total_in']} IN beliefs, "
@@ -999,6 +1000,15 @@ def cmd_derive(args):
     _require_sqlite(args, "derive")
     from datetime import datetime
 
+    prompt_template = None
+    if args.prompt_file:
+        prompt_path = Path(args.prompt_file)
+        if not prompt_path.exists():
+            print(f"Error: prompt file not found: {prompt_path}",
+                  file=sys.stderr)
+            sys.exit(1)
+        prompt_template = prompt_path.read_text()
+
     if args.cluster and args.sample:
         print("Error: --cluster and --sample are mutually exclusive.",
               file=sys.stderr)
@@ -1041,6 +1051,7 @@ def cmd_derive(args):
                 "cluster": args.cluster,
                 "embedding_model": args.embedding_model,
                 "n_clusters": args.n_clusters,
+                "prompt_file": args.prompt_file,
             },
             "rounds": [],
         }
@@ -1054,7 +1065,8 @@ def cmd_derive(args):
             print(f"{'=' * 40}", file=sys.stderr)
             added = _derive_one_round(args, round_num=round_num,
                                       report_state=report_state,
-                                      cluster_cache=cluster_cache)
+                                      cluster_cache=cluster_cache,
+                                      prompt_template=prompt_template)
             if added < 0:
                 print(f"\nExhaust stopped: error in round {round_num}.",
                       file=sys.stderr)
@@ -1069,7 +1081,8 @@ def cmd_derive(args):
                   f"Total added: {total_added}.", file=sys.stderr)
     else:
         added = _derive_one_round(args, report_state=report_state,
-                                  cluster_cache=cluster_cache)
+                                  cluster_cache=cluster_cache,
+                                  prompt_template=prompt_template)
         if added < 0:
             sys.exit(1)
 
@@ -1582,6 +1595,8 @@ def main():
                         "(default: all-MiniLM-L6-v2)")
     p.add_argument("--n-clusters", type=int, default=None,
                    help="Override automatic cluster count for --cluster")
+    p.add_argument("--prompt-file", default=None,
+                   help="Custom prompt template file (overrides built-in DERIVE_PROMPT)")
 
     # accept
     p = sub.add_parser("accept", help="Accept proposals from a derive proposals file")
