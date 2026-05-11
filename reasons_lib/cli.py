@@ -709,16 +709,15 @@ def cmd_ask(args):
     _require_sqlite(args, "ask")
     from .ask import ask
 
-    mcp_servers = None
-    if args.mcp:
-        from .mcp_client import McpBridge
-        mcp_servers = []
-        for cmd in args.mcp:
-            bridge = McpBridge(cmd)
-            bridge.connect()
-            mcp_servers.append(bridge)
-
+    mcp_servers = []
     try:
+        if args.mcp:
+            from .mcp_client import McpBridge
+            for cmd in args.mcp:
+                bridge = McpBridge(cmd)
+                bridge.connect()
+                mcp_servers.append(bridge)
+
         result = ask(
             question=args.question,
             db_path=args.db,
@@ -730,13 +729,12 @@ def cmd_ask(args):
             sources_db=args.full_sources,
             natural=args.natural,
             dual=args.dual,
-            mcp_servers=mcp_servers,
+            mcp_servers=mcp_servers or None,
         )
         print(result)
     finally:
-        if mcp_servers:
-            for bridge in mcp_servers:
-                bridge.close()
+        for bridge in mcp_servers:
+            bridge.close()
 
 
 def cmd_cluster_list(args):

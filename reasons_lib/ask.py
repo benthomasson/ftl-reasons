@@ -50,7 +50,7 @@ Rules:
 _DEFAULT_TOOLS_SECTION = """\
 You have one tool available:
 
-{{"tool": "search_beliefs", "query": "search terms"}}"""
+{"tool": "search_beliefs", "query": "search terms"}"""
 
 
 FINAL_ASK_PROMPT = """\

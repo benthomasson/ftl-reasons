@@ -98,6 +98,8 @@ class TestAskPromptWithMcp:
     def test_default_tools_section(self):
         prompt = build_ask_prompt("question", "context")
         assert "one tool available" in prompt
+        assert '{"tool": "search_beliefs"' in prompt
+        assert '{{' not in prompt
 
     def test_custom_tools_section(self):
         prompt = build_ask_prompt("question", "context",
