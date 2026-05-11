@@ -91,7 +91,8 @@ def init_db(db_path: str = DEFAULT_DB, force: bool = False,
     return {"db_path": str(p), "created": True}
 
 
-def ensure_namespace(namespace: str, db_path: str = DEFAULT_DB) -> dict:
+def ensure_namespace(namespace: str, db_path: str = DEFAULT_DB,
+                     pg_conninfo=None, project_id=None) -> dict:
     """Ensure a namespace premise node exists (namespace:active).
 
     Creates the premise if it doesn't exist. This is the node that all
@@ -100,6 +101,9 @@ def ensure_namespace(namespace: str, db_path: str = DEFAULT_DB) -> dict:
 
     Returns: {"namespace": str, "active_node": str, "created": bool}
     """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "ensure_namespace",
+                            namespace=namespace)
     active_id = f"{namespace}:active"
     with _with_network(db_path, write=True) as net:
         created = False
@@ -113,7 +117,8 @@ def ensure_namespace(namespace: str, db_path: str = DEFAULT_DB) -> dict:
         return {"namespace": namespace, "active_node": active_id, "created": created}
 
 
-def list_namespaces(db_path: str = DEFAULT_DB) -> dict:
+def list_namespaces(db_path: str = DEFAULT_DB,
+                    pg_conninfo=None, project_id=None) -> dict:
     """List all namespaces (agents) in the database.
 
     Detects namespaces by looking for nodes with ':active' suffix
@@ -121,6 +126,8 @@ def list_namespaces(db_path: str = DEFAULT_DB) -> dict:
 
     Returns: {"namespaces": list[dict]}
     """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "list_namespaces")
     with _with_network(db_path) as net:
         namespaces = []
         for nid, node in sorted(net.nodes.items()):
@@ -175,12 +182,12 @@ def add_node(
     Returns: {"node_id": str, "truth_value": str, "type": str, "premise_count": int}
     """
     if pg_conninfo:
-        if namespace or any_mode:
-            raise NotImplementedError("namespace and any_mode are not supported with PostgreSQL")
+        if any_mode:
+            raise NotImplementedError("any_mode is not supported with PostgreSQL")
         return _pg_dispatch(pg_conninfo, project_id, "add_node",
                             node_id=node_id, text=text, sl=sl, cp=cp, unless=unless,
                             label=label, source=source, source_url=source_url,
-                            access_tags=access_tags)
+                            access_tags=access_tags, namespace=namespace)
     outlist = [o.strip() for o in unless.split(",") if o.strip()] if unless else []
     justifications = []
     if sl:
@@ -272,17 +279,18 @@ def add_justification(
         cp: Comma-separated antecedent IDs for CP justification
         unless: Comma-separated outlist IDs (must be OUT for justification to hold)
         label: Justification label
-        namespace: Optional namespace prefix (not supported with PostgreSQL)
+        namespace: Optional namespace prefix
         any_mode: If True, expand SL into one justification per antecedent (OR; not supported with PostgreSQL)
         db_path: Path to RMS database
 
     Returns: {"node_id", "old_truth_value", "new_truth_value", "changed", "premise_count"}
     """
     if pg_conninfo:
-        if namespace or any_mode:
-            raise NotImplementedError("namespace and any_mode are not supported with PostgreSQL")
+        if any_mode:
+            raise NotImplementedError("any_mode is not supported with PostgreSQL")
         return _pg_dispatch(pg_conninfo, project_id, "add_justification",
-                            node_id=node_id, sl=sl, cp=cp, unless=unless, label=label)
+                            node_id=node_id, sl=sl, cp=cp, unless=unless,
+                            label=label, namespace=namespace)
     outlist = [o.strip() for o in unless.split(",") if o.strip()] if unless else []
 
     if sl:

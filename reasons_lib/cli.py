@@ -1389,8 +1389,7 @@ def cmd_contradictions(args):
 
 
 def cmd_namespaces(args):
-    _require_sqlite(args, "namespaces")
-    result = api.list_namespaces(db_path=args.db)
+    result = api.list_namespaces(**_backend_kwargs(args))
     if not result["namespaces"]:
         print("No namespaces found. Use --namespace/-n with 'add' or 'import-agent' to create one.")
         return

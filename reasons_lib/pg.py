@@ -136,12 +136,18 @@ class PgApi:
     # ── Core mutations ──────────────────────────────────────────
 
     def add_node(self, node_id, text, sl="", cp="", unless="", label="",
-                 source="", source_url="", access_tags=None):
+                 source="", source_url="", access_tags=None,
+                 namespace=None):
         pid = self.project_id
         now = datetime.now().isoformat(timespec="seconds")
         metadata = {}
         if access_tags:
             metadata["access_tags"] = sorted(access_tags)
+
+        if namespace:
+            if ":" not in node_id:
+                node_id = f"{namespace}:{node_id}"
+            self.ensure_namespace(namespace)
 
         with self.conn.cursor() as cur:
             cur.execute(
@@ -158,6 +164,29 @@ class PgApi:
             )
 
             justifications = self._parse_justifications(sl, cp, unless, label)
+
+            if namespace:
+                active_id = f"{namespace}:active"
+                for j in justifications:
+                    j["antecedents"] = [
+                        f"{namespace}:{a}" if ":" not in a else a
+                        for a in j["antecedents"]
+                    ]
+                    j["outlist"] = [
+                        f"{namespace}:{o}" if ":" not in o else o
+                        for o in j["outlist"]
+                    ]
+                if not justifications:
+                    justifications.append({
+                        "type": "SL",
+                        "antecedents": [active_id],
+                        "outlist": [],
+                        "label": "",
+                    })
+                else:
+                    for j in justifications:
+                        if active_id not in j["antecedents"]:
+                            j["antecedents"].append(active_id)
 
             if justifications:
                 self._validate_refs(cur, justifications)
@@ -204,8 +233,12 @@ class PgApi:
             "premise_count": premise_count,
         }
 
-    def add_justification(self, node_id, sl="", cp="", unless="", label=""):
+    def add_justification(self, node_id, sl="", cp="", unless="", label="",
+                          namespace=None):
         pid = self.project_id
+
+        if namespace and ":" not in node_id:
+            node_id = f"{namespace}:{node_id}"
 
         with self.conn.cursor() as cur:
             cur.execute(
@@ -220,6 +253,17 @@ class PgApi:
             justifications = self._parse_justifications(sl, cp, unless, label)
             if not justifications:
                 raise ValueError("No justification specified (use --sl or --cp)")
+
+            if namespace:
+                for j in justifications:
+                    j["antecedents"] = [
+                        f"{namespace}:{a}" if ":" not in a else a
+                        for a in j["antecedents"]
+                    ]
+                    j["outlist"] = [
+                        f"{namespace}:{o}" if ":" not in o else o
+                        for o in j["outlist"]
+                    ]
 
             self._validate_refs(cur, justifications)
 
@@ -1625,6 +1669,71 @@ class PgApi:
                 cur, node_id, all_tags, visited)
 
         return {"node_id": node_id, "access_tags": sorted(all_tags)}
+
+    def ensure_namespace(self, namespace):
+        """Ensure a namespace premise node exists (namespace:active)."""
+        pid = self.project_id
+        active_id = f"{namespace}:active"
+        now = datetime.now().isoformat(timespec="seconds")
+
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM rms_nodes "
+                "WHERE id = %s AND project_id = %s",
+                (active_id, pid),
+            )
+            if cur.fetchone():
+                return {"namespace": namespace,
+                        "active_node": active_id, "created": False}
+
+            metadata = {"agent": namespace, "role": "agent_premise"}
+            cur.execute(
+                "INSERT INTO rms_nodes "
+                "(id, project_id, text, source, date, metadata, truth_value) "
+                "VALUES (%s, %s, %s, '', %s, %s, 'IN')",
+                (active_id, pid,
+                 f"Agent '{namespace}' beliefs are trusted",
+                 now, json.dumps(metadata)),
+            )
+            self._log(cur, "add", active_id, "IN")
+
+        self.conn.commit()
+        return {"namespace": namespace,
+                "active_node": active_id, "created": True}
+
+    def list_namespaces(self):
+        """List all namespaces with belief counts."""
+        pid = self.project_id
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, truth_value FROM rms_nodes "
+                "WHERE project_id = %s AND id LIKE '%%:active' "
+                "AND metadata->>'role' = 'agent_premise' "
+                "ORDER BY id",
+                (pid,),
+            )
+            ns_rows = cur.fetchall()
+
+            namespaces = []
+            for active_id, tv in ns_rows:
+                ns = active_id[:-len(":active")]
+                cur.execute(
+                    "SELECT COUNT(*), "
+                    "COUNT(*) FILTER (WHERE truth_value = 'IN') "
+                    "FROM rms_nodes "
+                    "WHERE project_id = %s AND id LIKE %s AND id != %s",
+                    (pid, f"{ns}:%", active_id),
+                )
+                total, in_count = cur.fetchone()
+                namespaces.append({
+                    "namespace": ns,
+                    "active_node": active_id,
+                    "active": tv == "IN",
+                    "total_beliefs": total,
+                    "in_beliefs": in_count,
+                })
+
+        return {"namespaces": namespaces}
 
     # ── Internal: propagation ───────────────────────────────────
 
