@@ -469,14 +469,12 @@ def cmd_log(args):
 
 
 def cmd_add_repo(args):
-    _require_sqlite(args, "add-repo")
-    result = api.add_repo(args.name, args.path, db_path=args.db)
+    result = api.add_repo(args.name, args.path, **_backend_kwargs(args))
     print(f"Added repo {result['name']}: {result['path']}")
 
 
 def cmd_repos(args):
-    _require_sqlite(args, "repos")
-    result = api.list_repos(db_path=args.db)
+    result = api.list_repos(**_backend_kwargs(args))
     if not result["repos"]:
         print("No repos registered.")
         return
@@ -1200,11 +1198,10 @@ def cmd_list_gated(args):
 
 
 def cmd_list_negative(args):
-    _require_sqlite(args, "list-negative")
     result = api.list_negative(
         visible_to=_parse_visible_to(args),
         model=getattr(args, "model", None) or "claude",
-        db_path=args.db,
+        **_backend_kwargs(args),
     )
 
     if not result["negative"]:
