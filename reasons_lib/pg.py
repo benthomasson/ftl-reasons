@@ -7,6 +7,7 @@ Requires psycopg v3: pip install 'psycopg[binary]>=3.1'
 """
 
 import json
+import re
 from collections import deque
 from datetime import datetime
 
@@ -135,11 +136,55 @@ class PgApi:
 
     # ── Core mutations ──────────────────────────────────────────
 
+    def _add_node_raw(self, cur, node_id, text, justifications=None,
+                      source="", source_url="", source_hash="", date="",
+                      metadata=None):
+        """Insert a node with pre-parsed justification dicts.
+
+        Does NOT commit, validate refs, or inherit access tags.
+        Caller is responsible for transaction management.
+        """
+        pid = self.project_id
+        now = date or datetime.now().isoformat(timespec="seconds")
+        meta = metadata or {}
+
+        cur.execute(
+            "INSERT INTO rms_nodes (id, project_id, text, source, source_url, "
+            "source_hash, date, metadata) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+            (node_id, pid, text, source, source_url, source_hash, now,
+             json.dumps(meta)),
+        )
+
+        if justifications:
+            for j in justifications:
+                cur.execute(
+                    "INSERT INTO rms_justifications (node_id, project_id, type, "
+                    "antecedents, outlist, label) "
+                    "VALUES (%s, %s, %s, %s, %s, %s)",
+                    (node_id, pid, j["type"],
+                     json.dumps(j.get("antecedents", [])),
+                     json.dumps(j.get("outlist", [])),
+                     j.get("label", "")),
+                )
+
+        if justifications:
+            truth = self._compute_truth(cur, node_id)
+        else:
+            truth = "IN"
+
+        cur.execute(
+            "UPDATE rms_nodes SET truth_value = %s WHERE id = %s AND project_id = %s",
+            (truth, node_id, pid),
+        )
+
+        self._log(cur, "add", node_id, truth)
+        return truth
+
     def add_node(self, node_id, text, sl="", cp="", unless="", label="",
                  source="", source_url="", access_tags=None,
                  namespace=None):
         pid = self.project_id
-        now = datetime.now().isoformat(timespec="seconds")
         metadata = {}
         if access_tags:
             metadata["access_tags"] = sorted(access_tags)
@@ -156,12 +201,6 @@ class PgApi:
             )
             if cur.fetchone():
                 raise ValueError(f"Node '{node_id}' already exists")
-
-            cur.execute(
-                "INSERT INTO rms_nodes (id, project_id, text, source, source_url, date, metadata) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                (node_id, pid, text, source, source_url, now, json.dumps(metadata)),
-            )
 
             justifications = self._parse_justifications(sl, cp, unless, label)
 
@@ -191,32 +230,14 @@ class PgApi:
             if justifications:
                 self._validate_refs(cur, justifications)
 
-            for j in justifications:
-                cur.execute(
-                    "INSERT INTO rms_justifications (node_id, project_id, type, antecedents, outlist, label) "
-                    "VALUES (%s, %s, %s, %s, %s, %s)",
-                    (node_id, pid, j["type"],
-                     json.dumps(j["antecedents"]), json.dumps(j["outlist"]), j["label"]),
-                )
+            truth = self._add_node_raw(
+                cur, node_id, text, justifications=justifications or None,
+                source=source, source_url=source_url, metadata=metadata,
+            )
 
-            # Inherit access tags from antecedents
             if justifications:
                 self._inherit_access_tags(cur, node_id, justifications)
 
-            # Compute initial truth value
-            if justifications:
-                truth = self._compute_truth(cur, node_id)
-            else:
-                truth = "IN"
-
-            cur.execute(
-                "UPDATE rms_nodes SET truth_value = %s WHERE id = %s AND project_id = %s",
-                (truth, node_id, pid),
-            )
-
-            self._log(cur, "add", node_id, truth)
-
-            # Count premises for return value
             cur.execute(
                 "SELECT COUNT(*) FROM rms_nodes WHERE project_id = %s "
                 "AND NOT EXISTS (SELECT 1 FROM rms_justifications j "
@@ -1734,6 +1755,759 @@ class PgApi:
                 })
 
         return {"namespaces": namespaces}
+
+    # ── Import operations ──────────────────────────────────────
+
+    def import_json(self, data):
+        """Import a network from parsed JSON export data.
+
+        Uses topological sort to add nodes in dependency order,
+        then propagates truth values and applies overrides.
+        """
+        pid = self.project_id
+        remaining = dict(data.get("nodes", {}))
+        nodes_imported = 0
+        skipped = 0
+
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM rms_nodes WHERE project_id = %s", (pid,),
+            )
+            added = {r[0] for r in cur.fetchall()}
+
+            all_node_ids = set(remaining.keys())
+            max_passes = len(remaining) + 1
+            for _ in range(max_passes):
+                if not remaining:
+                    break
+                next_remaining = {}
+                for nid, ndata in remaining.items():
+                    if nid in added:
+                        skipped += 1
+                        continue
+                    all_deps = set()
+                    for j in ndata.get("justifications", []):
+                        all_deps.update(j.get("antecedents", []))
+                        all_deps.update(j.get("outlist", []))
+                    deps_in_data = {d for d in all_deps if d in all_node_ids}
+                    if all(d in added for d in deps_in_data):
+                        justs = ndata.get("justifications", []) or None
+                        meta = {k: v for k, v in ndata.get("metadata", {}).items()
+                                if not k.startswith("_")}
+                        self._add_node_raw(
+                            cur, nid, ndata.get("text", ""),
+                            justifications=justs,
+                            source=ndata.get("source", ""),
+                            source_url=ndata.get("source_url", ""),
+                            source_hash=ndata.get("source_hash", ""),
+                            date=ndata.get("date", ""),
+                            metadata=meta,
+                        )
+                        added.add(nid)
+                        nodes_imported += 1
+                    else:
+                        next_remaining[nid] = ndata
+                if len(next_remaining) == len(remaining):
+                    for nid, ndata in next_remaining.items():
+                        if nid in added:
+                            continue
+                        justs = ndata.get("justifications", []) or None
+                        meta = {k: v for k, v in ndata.get("metadata", {}).items()
+                                if not k.startswith("_")}
+                        self._add_node_raw(
+                            cur, nid, ndata.get("text", ""),
+                            justifications=justs,
+                            source=ndata.get("source", ""),
+                            source_url=ndata.get("source_url", ""),
+                            source_hash=ndata.get("source_hash", ""),
+                            date=ndata.get("date", ""),
+                            metadata=meta,
+                        )
+                        added.add(nid)
+                        nodes_imported += 1
+                    break
+                remaining = next_remaining
+
+        self.conn.commit()
+
+        self.propagate()
+
+        with self.conn.cursor() as cur:
+            for nid, ndata in data.get("nodes", {}).items():
+                target_tv = ndata.get("truth_value", "IN")
+                cur.execute(
+                    "SELECT truth_value FROM rms_nodes "
+                    "WHERE id = %s AND project_id = %s",
+                    (nid, pid),
+                )
+                row = cur.fetchone()
+                if row and row[0] != target_tv:
+                    if target_tv == "OUT":
+                        meta = ndata.get("metadata", {})
+                        cur.execute(
+                            "UPDATE rms_nodes SET truth_value = 'OUT', "
+                            "metadata = metadata || %s "
+                            "WHERE id = %s AND project_id = %s",
+                            (json.dumps({"_retracted": True}), nid, pid),
+                        )
+                        self._log(cur, "retract", nid, "OUT")
+                    else:
+                        cur.execute(
+                            "UPDATE rms_nodes SET truth_value = 'IN', "
+                            "metadata = metadata - '_retracted' "
+                            "WHERE id = %s AND project_id = %s",
+                            (nid, pid),
+                        )
+                        self._log(cur, "assert", nid, "IN")
+
+            nogoods_imported = 0
+            for ng_data in data.get("nogoods", []):
+                cur.execute(
+                    "SELECT 1 FROM rms_nogoods WHERE id = %s AND project_id = %s",
+                    (ng_data["id"], pid),
+                )
+                if cur.fetchone():
+                    continue
+                cur.execute(
+                    "INSERT INTO rms_nogoods (id, project_id, nodes, discovered, resolution) "
+                    "VALUES (%s, %s, %s, %s, %s)",
+                    (ng_data["id"], pid,
+                     json.dumps(ng_data.get("nodes", [])),
+                     ng_data.get("discovered", ""),
+                     ng_data.get("resolution", "")),
+                )
+                nogoods_imported += 1
+
+                m = re.fullmatch(r"nogood-(\d+)", ng_data["id"])
+                if m:
+                    next_id = int(m.group(1)) + 1
+                    cur.execute(
+                        "INSERT INTO rms_network_meta (key, project_id, value) "
+                        "VALUES ('next_nogood_id', %s, %s) "
+                        "ON CONFLICT (key, project_id) DO UPDATE "
+                        "SET value = GREATEST(EXCLUDED.value::int, "
+                        "rms_network_meta.value::int)::text",
+                        (pid, str(next_id)),
+                    )
+
+        self.conn.commit()
+        return {"nodes_imported": nodes_imported, "nogoods_imported": nogoods_imported}
+
+    def import_beliefs(self, beliefs_text, nogoods_text=None):
+        """Import beliefs from markdown text."""
+        from .import_beliefs import parse_beliefs, parse_nogoods
+
+        pid = self.project_id
+        claims = parse_beliefs(beliefs_text)
+
+        claim_by_id = {c["id"]: c for c in claims}
+        ordered = []
+        added_ids = set()
+        remaining = list(claims)
+        max_passes = len(remaining) + 1
+        for _ in range(max_passes):
+            if not remaining:
+                break
+            next_remaining = []
+            for c in remaining:
+                deps_in_registry = [d for d in c["depends_on"] if d in claim_by_id]
+                if all(d in added_ids for d in deps_in_registry):
+                    ordered.append(c)
+                    added_ids.add(c["id"])
+                else:
+                    next_remaining.append(c)
+            if len(next_remaining) == len(remaining):
+                ordered.extend(next_remaining)
+                break
+            remaining = next_remaining
+
+        imported = 0
+        skipped = 0
+        retracted = 0
+        retract_after = []
+
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM rms_nodes WHERE project_id = %s", (pid,),
+            )
+            existing = {r[0] for r in cur.fetchall()}
+
+            for claim in ordered:
+                if claim["id"] in existing:
+                    skipped += 1
+                    continue
+
+                justifications = None
+                deps_in_network = [d for d in claim["depends_on"] if d in claim_by_id]
+                unless_in_network = [u for u in claim.get("unless", [])
+                                     if u in claim_by_id]
+                if deps_in_network or unless_in_network:
+                    justifications = [{
+                        "type": "SL",
+                        "antecedents": deps_in_network,
+                        "outlist": unless_in_network,
+                        "label": f"imported from beliefs: {claim['type']}",
+                    }]
+
+                metadata = {}
+                if claim["type"]:
+                    metadata["beliefs_type"] = claim["type"]
+                if claim["stale_reason"]:
+                    metadata["stale_reason"] = claim["stale_reason"]
+                if claim["superseded_by"]:
+                    metadata["superseded_by"] = claim["superseded_by"]
+
+                self._add_node_raw(
+                    cur, claim["id"], claim["text"],
+                    justifications=justifications,
+                    source=claim["source"],
+                    source_hash=claim["source_hash"],
+                    date=claim["date"],
+                    metadata=metadata,
+                )
+                existing.add(claim["id"])
+                imported += 1
+
+                if claim["status"] in ("STALE", "OUT"):
+                    retract_after.append(claim["id"])
+
+        self.conn.commit()
+        self.propagate()
+
+        if retract_after:
+            with self.conn.cursor() as cur:
+                for nid in retract_after:
+                    cur.execute(
+                        "UPDATE rms_nodes SET truth_value = 'OUT', "
+                        "metadata = metadata || %s "
+                        "WHERE id = %s AND project_id = %s",
+                        (json.dumps({"_retracted": True}), nid, pid),
+                    )
+                    self._log(cur, "retract", nid, "OUT")
+                    retracted += 1
+            self.conn.commit()
+
+        nogoods_imported = 0
+        if nogoods_text:
+            nogoods = parse_nogoods(nogoods_text)
+            with self.conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id FROM rms_nodes WHERE project_id = %s", (pid,),
+                )
+                all_nodes = {r[0] for r in cur.fetchall()}
+
+                for ng in nogoods:
+                    valid_nodes = [a for a in ng["affects"] if a in all_nodes]
+                    if len(valid_nodes) >= 2:
+                        cur.execute(
+                            "SELECT 1 FROM rms_nogoods WHERE id = %s AND project_id = %s",
+                            (ng["id"], pid),
+                        )
+                        if not cur.fetchone():
+                            cur.execute(
+                                "INSERT INTO rms_nogoods (id, project_id, nodes, "
+                                "discovered, resolution) VALUES (%s, %s, %s, %s, %s)",
+                                (ng["id"], pid, json.dumps(valid_nodes),
+                                 ng["discovered"], ng["resolution"]),
+                            )
+                            m = re.fullmatch(r"nogood-(\d+)", ng["id"])
+                            if m:
+                                next_id = int(m.group(1)) + 1
+                                cur.execute(
+                                    "INSERT INTO rms_network_meta (key, project_id, value) "
+                                    "VALUES ('next_nogood_id', %s, %s) "
+                                    "ON CONFLICT (key, project_id) DO UPDATE "
+                                    "SET value = GREATEST(EXCLUDED.value::int, "
+                                    "rms_network_meta.value::int)::text",
+                                    (pid, str(next_id)),
+                                )
+                            nogoods_imported += 1
+            self.conn.commit()
+
+        return {
+            "claims_imported": imported,
+            "claims_skipped": skipped,
+            "claims_retracted": retracted,
+            "nogoods_imported": nogoods_imported,
+        }
+
+    def import_agent(self, agent_name, claims, nogoods, source_path=""):
+        """Import another agent's beliefs with namespacing.
+
+        Takes pre-normalized claim dicts from import_agent._normalize_*.
+        """
+        from .import_agent import _topo_sort_claims
+
+        pid = self.project_id
+        prefix = f"{agent_name}:"
+        active_id = f"{agent_name}:active"
+        inactive_id = f"{agent_name}:inactive"
+
+        self.ensure_namespace(agent_name)
+        created_premise = True
+
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM rms_nodes WHERE id = %s AND project_id = %s",
+                (inactive_id, pid),
+            )
+            if not cur.fetchone():
+                self._add_node_raw(
+                    cur, inactive_id,
+                    f"Agent '{agent_name}' kill switch — IN when active is OUT",
+                    justifications=[{
+                        "type": "SL", "antecedents": [],
+                        "outlist": [active_id], "label": "",
+                    }],
+                    source=source_path,
+                    metadata={"agent": agent_name, "role": "agent_inactive"},
+                )
+            else:
+                created_premise = False
+        self.conn.commit()
+
+        ordered = _topo_sort_claims(claims)
+        imported = 0
+        skipped = 0
+        retract_after = []
+
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM rms_nodes WHERE project_id = %s", (pid,),
+            )
+            existing = {r[0] for r in cur.fetchall()}
+
+            for claim in ordered:
+                node_id = f"{prefix}{claim['id']}"
+                if node_id in existing:
+                    skipped += 1
+                    continue
+
+                justs = []
+                for rj in claim["raw_justifications"]:
+                    antecedents = [f"{prefix}{a}" for a in rj["antecedents"]]
+                    outlist = [inactive_id] + [f"{prefix}{o}" for o in rj["outlist"]]
+                    label = rj.get("label") or f"imported from agent: {agent_name}"
+                    justs.append({
+                        "type": rj["type"], "antecedents": antecedents,
+                        "outlist": outlist, "label": label,
+                    })
+                if not justs:
+                    justs = [{
+                        "type": "SL", "antecedents": [],
+                        "outlist": [inactive_id],
+                        "label": f"imported from agent: {agent_name}",
+                    }]
+
+                metadata = claim.get("metadata", {}).copy()
+                metadata.update({
+                    "agent": agent_name,
+                    "original_id": claim["id"],
+                    "imported_from": source_path,
+                })
+
+                self._add_node_raw(
+                    cur, node_id, claim["text"],
+                    justifications=justs,
+                    source=claim.get("source", ""),
+                    source_url=claim.get("source_url", ""),
+                    source_hash=claim.get("source_hash", ""),
+                    date=claim.get("date", ""),
+                    metadata=metadata,
+                )
+                existing.add(node_id)
+                imported += 1
+
+                if claim["is_out"] and not claim["raw_justifications"]:
+                    retract_after.append(node_id)
+                elif claim["is_out"]:
+                    cur.execute(
+                        "UPDATE rms_nodes SET truth_value = 'OUT', "
+                        "metadata = metadata || %s "
+                        "WHERE id = %s AND project_id = %s",
+                        (json.dumps({"_retracted": True}), node_id, pid),
+                    )
+
+        self.conn.commit()
+        self.propagate()
+
+        retracted = 0
+        if retract_after:
+            with self.conn.cursor() as cur:
+                for nid in retract_after:
+                    cur.execute(
+                        "UPDATE rms_nodes SET truth_value = 'OUT', "
+                        "metadata = metadata || %s "
+                        "WHERE id = %s AND project_id = %s",
+                        (json.dumps({"_retracted": True}), nid, pid),
+                    )
+                    self._log(cur, "retract", nid, "OUT")
+                    retracted += 1
+            self.conn.commit()
+
+        nogoods_imported = self._import_agent_nogoods(cur=None, prefix=prefix,
+                                                      nogoods=nogoods)
+
+        return {
+            "agent": agent_name,
+            "prefix": prefix,
+            "active_node": active_id,
+            "created_premise": created_premise,
+            "claims_imported": imported,
+            "claims_skipped": skipped,
+            "claims_retracted": retracted,
+            "claims_propagated": 0,
+            "nogoods_imported": nogoods_imported,
+        }
+
+    def sync_agent(self, agent_name, claims, nogoods, source_path=""):
+        """Sync another agent's beliefs (remote wins).
+
+        Takes pre-normalized claim dicts from import_agent._normalize_*.
+        """
+        from .import_agent import _topo_sort_claims
+
+        pid = self.project_id
+        prefix = f"{agent_name}:"
+        active_id = f"{agent_name}:active"
+        inactive_id = f"{agent_name}:inactive"
+
+        self.ensure_namespace(agent_name)
+        created_premise = True
+
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM rms_nodes WHERE id = %s AND project_id = %s",
+                (inactive_id, pid),
+            )
+            if not cur.fetchone():
+                self._add_node_raw(
+                    cur, inactive_id,
+                    f"Agent '{agent_name}' kill switch — IN when active is OUT",
+                    justifications=[{
+                        "type": "SL", "antecedents": [],
+                        "outlist": [active_id], "label": "",
+                    }],
+                    source=source_path,
+                    metadata={"agent": agent_name, "role": "agent_inactive"},
+                )
+            else:
+                created_premise = False
+        self.conn.commit()
+
+        remote_ids = {f"{prefix}{c['id']}" for c in claims}
+        infra_ids = {active_id, inactive_id}
+
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM rms_nodes WHERE project_id = %s AND id LIKE %s",
+                (pid, f"{prefix}%"),
+            )
+            local_agent_ids = {r[0] for r in cur.fetchall()} - infra_ids
+
+        ordered = _topo_sort_claims(claims)
+
+        beliefs_added = 0
+        beliefs_updated = 0
+        beliefs_unchanged = 0
+        retract_after = []
+        assert_after = []
+
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM rms_nodes WHERE project_id = %s", (pid,),
+            )
+            existing = {r[0] for r in cur.fetchall()}
+
+            for claim in ordered:
+                node_id = f"{prefix}{claim['id']}"
+                is_out = claim["is_out"]
+
+                justs = []
+                for rj in claim["raw_justifications"]:
+                    antecedents = [f"{prefix}{a}" for a in rj["antecedents"]]
+                    outlist = [inactive_id] + [f"{prefix}{o}" for o in rj["outlist"]]
+                    label = rj.get("label") or f"imported from agent: {agent_name}"
+                    justs.append({
+                        "type": rj["type"], "antecedents": antecedents,
+                        "outlist": outlist, "label": label,
+                    })
+                if not justs:
+                    justs = [{
+                        "type": "SL", "antecedents": [],
+                        "outlist": [inactive_id],
+                        "label": f"imported from agent: {agent_name}",
+                    }]
+
+                if node_id in existing:
+                    cur.execute(
+                        "SELECT text, source, source_url, source_hash, date, "
+                        "truth_value, metadata FROM rms_nodes "
+                        "WHERE id = %s AND project_id = %s",
+                        (node_id, pid),
+                    )
+                    row = cur.fetchone()
+                    old_text, old_source, old_source_url, old_source_hash, \
+                        old_date, old_tv, old_meta = row
+                    if isinstance(old_meta, str):
+                        old_meta = json.loads(old_meta)
+                    changed = False
+
+                    updates = {}
+                    if old_text != claim["text"]:
+                        updates["text"] = claim["text"]
+                        changed = True
+                    if claim.get("source") and old_source != claim["source"]:
+                        updates["source"] = claim["source"]
+                        changed = True
+                    if claim.get("source_url") and old_source_url != claim.get("source_url"):
+                        updates["source_url"] = claim["source_url"]
+                        changed = True
+                    if claim.get("source_hash") and old_source_hash != claim["source_hash"]:
+                        updates["source_hash"] = claim["source_hash"]
+                        changed = True
+                    if claim.get("date") and old_date != claim["date"]:
+                        updates["date"] = claim["date"]
+                        changed = True
+
+                    if updates:
+                        set_parts = [f"{k} = %s" for k in updates]
+                        cur.execute(
+                            f"UPDATE rms_nodes SET {', '.join(set_parts)} "
+                            f"WHERE id = %s AND project_id = %s",
+                            (*updates.values(), node_id, pid),
+                        )
+
+                    new_meta = old_meta.copy()
+                    for k, v in claim.get("metadata", {}).items():
+                        if not k.startswith("_"):
+                            new_meta[k] = v
+                    new_meta["imported_from"] = source_path
+
+                    cur.execute(
+                        "SELECT type, antecedents, outlist, label "
+                        "FROM rms_justifications WHERE node_id = %s AND project_id = %s "
+                        "ORDER BY id",
+                        (node_id, pid),
+                    )
+                    old_justs = []
+                    for jrow in cur.fetchall():
+                        jtype, ants, outs, jlabel = jrow
+                        if isinstance(ants, str):
+                            ants = json.loads(ants)
+                        if isinstance(outs, str):
+                            outs = json.loads(outs)
+                        old_justs.append({
+                            "type": jtype, "antecedents": ants,
+                            "outlist": outs, "label": jlabel or "",
+                        })
+
+                    justs_changed = len(old_justs) != len(justs)
+                    if not justs_changed:
+                        for a, b in zip(old_justs, justs):
+                            if (a["type"] != b["type"]
+                                    or a["antecedents"] != b["antecedents"]
+                                    or a["outlist"] != b["outlist"]):
+                                justs_changed = True
+                                break
+
+                    if justs_changed:
+                        cur.execute(
+                            "DELETE FROM rms_justifications "
+                            "WHERE node_id = %s AND project_id = %s",
+                            (node_id, pid),
+                        )
+                        for j in justs:
+                            cur.execute(
+                                "INSERT INTO rms_justifications "
+                                "(node_id, project_id, type, antecedents, outlist, label) "
+                                "VALUES (%s, %s, %s, %s, %s, %s)",
+                                (node_id, pid, j["type"],
+                                 json.dumps(j["antecedents"]),
+                                 json.dumps(j["outlist"]),
+                                 j.get("label", "")),
+                            )
+                        changed = True
+
+                    if is_out and not claim["raw_justifications"]:
+                        retract_after.append(node_id)
+                    elif is_out:
+                        if not old_meta.get("_retracted"):
+                            new_meta["_retracted"] = True
+                            changed = True
+                        cur.execute(
+                            "UPDATE rms_nodes SET truth_value = 'OUT', "
+                            "metadata = %s WHERE id = %s AND project_id = %s",
+                            (json.dumps(new_meta), node_id, pid),
+                        )
+                    else:
+                        if old_meta.get("_retracted"):
+                            new_meta.pop("_retracted", None)
+                            changed = True
+                        if old_tv == "OUT":
+                            assert_after.append(node_id)
+                            changed = True
+                        cur.execute(
+                            "UPDATE rms_nodes SET metadata = %s "
+                            "WHERE id = %s AND project_id = %s",
+                            (json.dumps(new_meta), node_id, pid),
+                        )
+
+                    if changed:
+                        beliefs_updated += 1
+                    else:
+                        beliefs_unchanged += 1
+                else:
+                    metadata = claim.get("metadata", {}).copy()
+                    metadata.update({
+                        "agent": agent_name,
+                        "original_id": claim["id"],
+                        "imported_from": source_path,
+                    })
+
+                    self._add_node_raw(
+                        cur, node_id, claim["text"],
+                        justifications=justs,
+                        source=claim.get("source", ""),
+                        source_url=claim.get("source_url", ""),
+                        source_hash=claim.get("source_hash", ""),
+                        date=claim.get("date", ""),
+                        metadata=metadata,
+                    )
+                    existing.add(node_id)
+                    beliefs_added += 1
+
+                    if is_out and not claim["raw_justifications"]:
+                        retract_after.append(node_id)
+                    elif is_out:
+                        cur.execute(
+                            "UPDATE rms_nodes SET truth_value = 'OUT', "
+                            "metadata = metadata || %s "
+                            "WHERE id = %s AND project_id = %s",
+                            (json.dumps({"_retracted": True}), node_id, pid),
+                        )
+
+        self.conn.commit()
+
+        beliefs_removed = 0
+        removed_ids = local_agent_ids - remote_ids
+        if removed_ids:
+            with self.conn.cursor() as cur:
+                for node_id in sorted(removed_ids):
+                    cur.execute(
+                        "SELECT truth_value, metadata FROM rms_nodes "
+                        "WHERE id = %s AND project_id = %s",
+                        (node_id, pid),
+                    )
+                    row = cur.fetchone()
+                    if not row:
+                        continue
+                    tv, meta = row
+                    if isinstance(meta, str):
+                        meta = json.loads(meta)
+                    if tv == "IN":
+                        cur.execute(
+                            "UPDATE rms_nodes SET truth_value = 'OUT', "
+                            "metadata = metadata || %s "
+                            "WHERE id = %s AND project_id = %s",
+                            (json.dumps({"_retracted": True}), node_id, pid),
+                        )
+                        self._log(cur, "retract", node_id, "OUT")
+                        beliefs_removed += 1
+                    elif not meta.get("_retracted"):
+                        cur.execute(
+                            "UPDATE rms_nodes SET metadata = metadata || %s "
+                            "WHERE id = %s AND project_id = %s",
+                            (json.dumps({"_retracted": True}), node_id, pid),
+                        )
+                        beliefs_removed += 1
+            self.conn.commit()
+
+        if assert_after:
+            with self.conn.cursor() as cur:
+                for node_id in assert_after:
+                    cur.execute(
+                        "UPDATE rms_nodes SET metadata = metadata - '_retracted' "
+                        "WHERE id = %s AND project_id = %s",
+                        (node_id, pid),
+                    )
+            self.conn.commit()
+
+        self.propagate()
+
+        beliefs_retracted = 0
+        if retract_after:
+            with self.conn.cursor() as cur:
+                for node_id in retract_after:
+                    cur.execute(
+                        "SELECT truth_value FROM rms_nodes "
+                        "WHERE id = %s AND project_id = %s",
+                        (node_id, pid),
+                    )
+                    row = cur.fetchone()
+                    if row and row[0] != "OUT":
+                        cur.execute(
+                            "UPDATE rms_nodes SET truth_value = 'OUT', "
+                            "metadata = metadata || %s "
+                            "WHERE id = %s AND project_id = %s",
+                            (json.dumps({"_retracted": True}), node_id, pid),
+                        )
+                        self._log(cur, "retract", node_id, "OUT")
+                    else:
+                        cur.execute(
+                            "UPDATE rms_nodes SET metadata = metadata || %s "
+                            "WHERE id = %s AND project_id = %s",
+                            (json.dumps({"_retracted": True}), node_id, pid),
+                        )
+                    beliefs_retracted += 1
+            self.conn.commit()
+
+        nogoods_imported = self._import_agent_nogoods(cur=None, prefix=prefix,
+                                                      nogoods=nogoods)
+
+        return {
+            "agent": agent_name,
+            "prefix": prefix,
+            "active_node": active_id,
+            "created_premise": created_premise,
+            "beliefs_added": beliefs_added,
+            "beliefs_updated": beliefs_updated,
+            "beliefs_removed": beliefs_removed,
+            "beliefs_retracted": beliefs_retracted,
+            "beliefs_unchanged": beliefs_unchanged,
+            "beliefs_propagated": 0,
+            "nogoods_imported": nogoods_imported,
+        }
+
+    def _import_agent_nogoods(self, cur, prefix, nogoods):
+        """Import prefixed nogoods for an agent."""
+        pid = self.project_id
+        count = 0
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM rms_nodes WHERE project_id = %s", (pid,),
+            )
+            all_nodes = {r[0] for r in cur.fetchall()}
+            cur.execute(
+                "SELECT id FROM rms_nogoods WHERE project_id = %s", (pid,),
+            )
+            existing_nogoods = {r[0] for r in cur.fetchall()}
+
+            for ng in nogoods:
+                prefixed_nodes = [f"{prefix}{n}" for n in ng["nodes"]]
+                valid_nodes = [n for n in prefixed_nodes if n in all_nodes]
+                nogood_id = f"{prefix}{ng['id']}"
+                if len(valid_nodes) >= 2 and nogood_id not in existing_nogoods:
+                    cur.execute(
+                        "INSERT INTO rms_nogoods (id, project_id, nodes, "
+                        "discovered, resolution) VALUES (%s, %s, %s, %s, %s)",
+                        (nogood_id, pid, json.dumps(valid_nodes),
+                         ng.get("discovered", ""), ng.get("resolution", "")),
+                    )
+                    existing_nogoods.add(nogood_id)
+                    count += 1
+        self.conn.commit()
+        return count
 
     # ── Internal: propagation ───────────────────────────────────
 

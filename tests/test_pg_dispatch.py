@@ -1,11 +1,15 @@
 """Tests for the PostgreSQL dispatch layer in api.py and cli.py."""
 
 import argparse
+import json
 from unittest.mock import patch, MagicMock
 
 import pytest
 
-from reasons_lib.api import _pg_dispatch, export_markdown
+from reasons_lib.api import (
+    _pg_dispatch, export_markdown,
+    import_json, import_beliefs, import_agent, sync_agent,
+)
 from reasons_lib.cli import _backend_kwargs, _require_sqlite
 
 
@@ -188,3 +192,152 @@ class TestExportMarkdownPgPath:
         with patch("reasons_lib.api.export_network", return_value=empty):
             md = export_markdown(pg_conninfo="postgresql://...", project_id="test")
         assert isinstance(md, str)
+
+
+class TestImportJsonDispatch:
+
+    def test_dispatches_parsed_data(self, tmp_path):
+        json_file = tmp_path / "network.json"
+        data = {"nodes": {"a": {"text": "Alpha", "truth_value": "IN",
+                "justifications": []}}, "nogoods": []}
+        json_file.write_text(json.dumps(data))
+
+        mock_pg = MagicMock()
+        mock_pg.import_json.return_value = {"nodes_imported": 1, "nogoods_imported": 0}
+        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+            MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
+            MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
+            result = import_json(str(json_file),
+                                 pg_conninfo="postgresql://...", project_id="test")
+        mock_pg.import_json.assert_called_once_with(data=data)
+        assert result["nodes_imported"] == 1
+
+    def test_file_not_found(self):
+        with pytest.raises(FileNotFoundError):
+            import_json("/nonexistent.json",
+                        pg_conninfo="postgresql://...", project_id="test")
+
+
+class TestImportBeliefsDispatch:
+
+    def test_dispatches_text(self, tmp_path):
+        beliefs_file = tmp_path / "beliefs.md"
+        beliefs_file.write_text("### alpha [IN] premise\nAlpha belief\n")
+
+        mock_pg = MagicMock()
+        mock_pg.import_beliefs.return_value = {
+            "claims_imported": 1, "claims_skipped": 0,
+            "claims_retracted": 0, "nogoods_imported": 0,
+        }
+        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+            MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
+            MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
+            result = import_beliefs(str(beliefs_file),
+                                    pg_conninfo="postgresql://...", project_id="test")
+        mock_pg.import_beliefs.assert_called_once()
+        call_kwargs = mock_pg.import_beliefs.call_args[1]
+        assert "alpha" in call_kwargs["beliefs_text"].lower()
+        assert result["claims_imported"] == 1
+
+
+class TestImportAgentDispatch:
+
+    def test_dispatches_markdown(self, tmp_path):
+        beliefs_file = tmp_path / "beliefs.md"
+        beliefs_file.write_text("### alpha [IN] premise\nAlpha belief\n")
+
+        mock_pg = MagicMock()
+        mock_pg.import_agent.return_value = {
+            "agent": "remote", "prefix": "remote:",
+            "active_node": "remote:active", "created_premise": True,
+            "claims_imported": 1, "claims_skipped": 0,
+            "claims_retracted": 0, "claims_propagated": 0,
+            "nogoods_imported": 0,
+        }
+        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+            MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
+            MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
+            result = import_agent("remote", str(beliefs_file),
+                                  pg_conninfo="postgresql://...", project_id="test")
+        mock_pg.import_agent.assert_called_once()
+        call_kwargs = mock_pg.import_agent.call_args[1]
+        assert call_kwargs["agent_name"] == "remote"
+        assert len(call_kwargs["claims"]) == 1
+        assert result["agent"] == "remote"
+
+    def test_dispatches_json(self, tmp_path):
+        json_file = tmp_path / "network.json"
+        data = {"nodes": {"a": {"text": "Alpha", "truth_value": "IN",
+                "justifications": []}}, "nogoods": []}
+        json_file.write_text(json.dumps(data))
+
+        mock_pg = MagicMock()
+        mock_pg.import_agent.return_value = {
+            "agent": "remote", "prefix": "remote:",
+            "active_node": "remote:active", "created_premise": True,
+            "claims_imported": 1, "claims_skipped": 0,
+            "claims_retracted": 0, "claims_propagated": 0,
+            "nogoods_imported": 0,
+        }
+        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+            MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
+            MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
+            result = import_agent("remote", str(json_file),
+                                  pg_conninfo="postgresql://...", project_id="test")
+        mock_pg.import_agent.assert_called_once()
+        call_kwargs = mock_pg.import_agent.call_args[1]
+        assert call_kwargs["agent_name"] == "remote"
+
+
+class TestSyncAgentDispatch:
+
+    def test_dispatches_markdown(self, tmp_path):
+        beliefs_file = tmp_path / "beliefs.md"
+        beliefs_file.write_text("### alpha [IN] premise\nAlpha belief\n")
+
+        mock_pg = MagicMock()
+        mock_pg.sync_agent.return_value = {
+            "agent": "remote", "prefix": "remote:",
+            "active_node": "remote:active", "created_premise": True,
+            "beliefs_added": 1, "beliefs_updated": 0,
+            "beliefs_removed": 0, "beliefs_retracted": 0,
+            "beliefs_unchanged": 0, "beliefs_propagated": 0,
+            "nogoods_imported": 0,
+        }
+        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+            MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
+            MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
+            result = sync_agent("remote", str(beliefs_file),
+                                pg_conninfo="postgresql://...", project_id="test")
+        mock_pg.sync_agent.assert_called_once()
+        assert result["beliefs_added"] == 1
+
+
+class TestImportCliNoLongerBlocked:
+
+    def test_import_json_accepts_pg(self, tmp_path):
+        json_file = tmp_path / "network.json"
+        json_file.write_text('{"nodes": {}, "nogoods": []}')
+        mock_pg = MagicMock()
+        mock_pg.import_json.return_value = {"nodes_imported": 0, "nogoods_imported": 0}
+        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+            MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
+            MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
+            result = import_json(str(json_file),
+                                 pg_conninfo="postgresql://...", project_id="test")
+        assert result["nodes_imported"] == 0
+
+    def test_import_beliefs_accepts_pg(self, tmp_path):
+        f = tmp_path / "beliefs.md"
+        f.write_text("")
+        mock_pg = MagicMock()
+        mock_pg.import_beliefs.return_value = {
+            "claims_imported": 0, "claims_skipped": 0,
+            "claims_retracted": 0, "nogoods_imported": 0,
+        }
+        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+            MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
+            MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
+            result = import_beliefs(str(f),
+                                    pg_conninfo="postgresql://...", project_id="test")
+        assert result["claims_imported"] == 0

@@ -486,14 +486,13 @@ def cmd_repos(args):
 
 
 def cmd_import_agent(args):
-    _require_sqlite(args, "import-agent")
     try:
         result = api.import_agent(
             agent_name=args.agent_name,
             beliefs_file=args.beliefs_file,
             nogoods_file=args.nogoods_file,
             only_in=args.only_in,
-            db_path=args.db,
+            **_backend_kwargs(args),
         )
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
@@ -517,14 +516,13 @@ def cmd_import_agent(args):
 
 
 def cmd_sync_agent(args):
-    _require_sqlite(args, "sync-agent")
     try:
         result = api.sync_agent(
             agent_name=args.agent_name,
             beliefs_file=args.beliefs_file,
             nogoods_file=args.nogoods_file,
             only_in=args.only_in,
-            db_path=args.db,
+            **_backend_kwargs(args),
         )
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
@@ -550,12 +548,11 @@ def cmd_sync_agent(args):
 
 
 def cmd_import_beliefs(args):
-    _require_sqlite(args, "import-beliefs")
     try:
         result = api.import_beliefs(
             beliefs_file=args.beliefs_file,
             nogoods_file=args.nogoods_file,
-            db_path=args.db,
+            **_backend_kwargs(args),
         )
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
@@ -569,9 +566,8 @@ def cmd_import_beliefs(args):
 
 
 def cmd_import_json(args):
-    _require_sqlite(args, "import-json")
     try:
-        result = api.import_json(args.json_file, db_path=args.db)
+        result = api.import_json(args.json_file, **_backend_kwargs(args))
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
