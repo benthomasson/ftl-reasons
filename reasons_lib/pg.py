@@ -1128,7 +1128,7 @@ class PgApi:
                 new_meta = json.loads(new_meta)
 
             cur.execute(
-                "SELECT id FROM rms_justifications "
+                "SELECT id, outlist FROM rms_justifications "
                 "WHERE node_id = %s AND project_id = %s",
                 (old_id, pid),
             )
@@ -1137,8 +1137,10 @@ class PgApi:
                 cur.execute(
                     "UPDATE rms_justifications "
                     "SET outlist = outlist || %s::jsonb "
-                    "WHERE node_id = %s AND project_id = %s",
-                    (json.dumps([new_id]), old_id, pid),
+                    "WHERE node_id = %s AND project_id = %s "
+                    "AND NOT outlist @> %s::jsonb",
+                    (json.dumps([new_id]), old_id, pid,
+                     json.dumps([new_id])),
                 )
             else:
                 cur.execute(
