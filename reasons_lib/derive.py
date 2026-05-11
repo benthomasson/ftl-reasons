@@ -401,7 +401,7 @@ def build_prompt(nodes, domain=None, topic=None, budget=300, sample=False,
                  seed=None, min_depth=None, max_depth_filter=None,
                  premises_only=False, has_dependents=False,
                  cluster=False, cluster_cache=None, embedding_model=None,
-                 n_clusters=None):
+                 n_clusters=None, prompt_template=None):
     """Build the full derive prompt from a network's nodes dict.
 
     Args:
@@ -496,7 +496,7 @@ def build_prompt(nodes, domain=None, topic=None, budget=300, sample=False,
     )
     derived_section = _build_derived_section(nodes, derived)
 
-    prompt = DERIVE_PROMPT.format(
+    prompt = (prompt_template or DERIVE_PROMPT).format(
         domain_context=domain_context,
         beliefs_section=beliefs_section,
         derived_section=derived_section,

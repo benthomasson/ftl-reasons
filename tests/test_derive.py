@@ -927,3 +927,18 @@ def test_build_prompt_cluster_with_agents(agent_network):
     assert stats["agents"] == 2
     assert "Agent: agent-a" in prompt
     assert "Agent: agent-b" in prompt
+
+
+def test_build_prompt_custom_template(simple_network):
+    data = api.export_network(db_path=simple_network)
+    template = "Custom prompt with {total_in} beliefs and depth {max_depth}. {beliefs_section}{derived_section}{domain_context}{cross_agent_task}{agents_stats}{total_derived}"
+    prompt, stats = build_prompt(data["nodes"], prompt_template=template)
+    assert prompt.startswith("Custom prompt with")
+    assert str(stats["total_in"]) in prompt
+
+
+def test_build_prompt_default_template_unchanged(simple_network):
+    data = api.export_network(db_path=simple_network)
+    prompt_default, _ = build_prompt(data["nodes"])
+    prompt_none, _ = build_prompt(data["nodes"], prompt_template=None)
+    assert prompt_default == prompt_none
