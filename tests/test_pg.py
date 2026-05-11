@@ -1231,3 +1231,110 @@ class TestTraceAccessTags:
         pg_api.add_node("a", "A", access_tags=["finance"])
         with pytest.raises(PermissionError):
             pg_api.trace_access_tags("a", visible_to=["hr"])
+
+
+class TestEnsureNamespace:
+
+    def test_creates_active_node(self, pg_api):
+        result = pg_api.ensure_namespace("agent1")
+        assert result["namespace"] == "agent1"
+        assert result["active_node"] == "agent1:active"
+        assert result["created"] is True
+        node = pg_api.show_node("agent1:active")
+        assert node["truth_value"] == "IN"
+        meta = node["metadata"]
+        assert meta["agent"] == "agent1"
+        assert meta["role"] == "agent_premise"
+
+    def test_idempotent(self, pg_api):
+        pg_api.ensure_namespace("agent1")
+        result = pg_api.ensure_namespace("agent1")
+        assert result["created"] is False
+        assert result["active_node"] == "agent1:active"
+
+    def test_multiple_namespaces(self, pg_api):
+        pg_api.ensure_namespace("alice")
+        pg_api.ensure_namespace("bob")
+        n1 = pg_api.show_node("alice:active")
+        n2 = pg_api.show_node("bob:active")
+        assert n1["truth_value"] == "IN"
+        assert n2["truth_value"] == "IN"
+
+
+class TestListNamespaces:
+
+    def test_empty(self, pg_api):
+        result = pg_api.list_namespaces()
+        assert result["namespaces"] == []
+
+    def test_with_counts(self, pg_api):
+        pg_api.add_node("a", "A", namespace="ns1")
+        pg_api.add_node("b", "B", namespace="ns1")
+        pg_api.add_node("c", "C", namespace="ns2")
+        result = pg_api.list_namespaces()
+        ns_map = {ns["namespace"]: ns for ns in result["namespaces"]}
+        assert "ns1" in ns_map
+        assert "ns2" in ns_map
+        assert ns_map["ns1"]["total_beliefs"] == 2
+        assert ns_map["ns1"]["in_beliefs"] == 2
+        assert ns_map["ns1"]["active"] is True
+        assert ns_map["ns2"]["total_beliefs"] == 1
+
+    def test_inactive_namespace(self, pg_api):
+        pg_api.add_node("a", "A", namespace="ns1")
+        pg_api.retract_node("ns1:active")
+        result = pg_api.list_namespaces()
+        ns = result["namespaces"][0]
+        assert ns["active"] is False
+        assert ns["in_beliefs"] == 0
+
+
+class TestNamespaceAddNode:
+
+    def test_prefixes_node_id(self, pg_api):
+        result = pg_api.add_node("belief1", "A belief", namespace="agent1")
+        assert result["node_id"] == "agent1:belief1"
+
+    def test_auto_creates_premise(self, pg_api):
+        pg_api.add_node("belief1", "A belief", namespace="agent1")
+        node = pg_api.show_node("agent1:active")
+        assert node["truth_value"] == "IN"
+        assert node["metadata"]["role"] == "agent_premise"
+
+    def test_cascade_on_retract(self, pg_api):
+        pg_api.add_node("belief1", "A belief", namespace="agent1")
+        assert pg_api.show_node("agent1:belief1")["truth_value"] == "IN"
+        pg_api.retract_node("agent1:active")
+        assert pg_api.show_node("agent1:belief1")["truth_value"] == "OUT"
+
+    def test_no_double_prefix(self, pg_api):
+        result = pg_api.add_node("agent1:belief1", "Already prefixed", namespace="agent1")
+        assert result["node_id"] == "agent1:belief1"
+
+    def test_resolves_antecedent_ids(self, pg_api):
+        pg_api.add_node("premise", "P", namespace="agent1")
+        result = pg_api.add_node("derived", "D", sl="premise", namespace="agent1")
+        assert result["node_id"] == "agent1:derived"
+        assert result["truth_value"] == "IN"
+        info = pg_api.explain_node("agent1:derived")
+        antecedents = info["steps"][0].get("antecedents", [])
+        assert "agent1:premise" in antecedents
+        assert "agent1:active" in antecedents
+
+
+class TestNamespaceAddJustification:
+
+    def test_prefixes_ids(self, pg_api):
+        pg_api.add_node("a", "A", namespace="ns1")
+        pg_api.add_node("b", "B", namespace="ns1")
+        result = pg_api.add_justification("b", sl="a", namespace="ns1")
+        assert result["node_id"] == "ns1:b"
+
+    def test_works_with_namespaced_nodes(self, pg_api):
+        pg_api.add_node("a", "A", namespace="ns1")
+        pg_api.add_node("b", "B", namespace="ns1")
+        pg_api.retract_node("ns1:b")
+        assert pg_api.show_node("ns1:b")["truth_value"] == "OUT"
+        pg_api.assert_node("ns1:b")
+        result = pg_api.add_justification("b", sl="a", namespace="ns1")
+        assert result["new_truth_value"] == "IN"
