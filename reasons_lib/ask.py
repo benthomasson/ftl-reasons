@@ -400,7 +400,8 @@ def ask(question, db_path="reasons.db", timeout=300, no_synth=False, format=None
     if dual and sources_db:
         print("Dual path: running TMS...", file=sys.stderr)
         answer_tms = ask(question, db_path=db_path, timeout=timeout,
-                         model=model, simple=simple, natural=natural)
+                         model=model, simple=simple, natural=natural,
+                         mcp_servers=mcp_servers)
         print("Dual path: running FTS RAG...", file=sys.stderr)
         answer_fts = _fts_rag_answer(question, sources_db, model=model,
                                      timeout=timeout)

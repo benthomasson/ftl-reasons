@@ -1,6 +1,10 @@
 """Tests for MCP server integration in ask."""
 
 import json
+import sqlite3
+import sys
+from io import StringIO
+from unittest.mock import patch
 
 import pytest
 
@@ -9,7 +13,9 @@ from reasons_lib.ask import (
     _build_mcp_instructions,
     build_ask_prompt,
     extract_tool_call,
+    ask,
 )
+from reasons_lib.cli import main
 
 
 class FakeBridge:
@@ -123,3 +129,114 @@ class TestExtractToolCallMcp:
         result = extract_tool_call(text)
         assert result["tool"] == "search_beliefs"
         assert result["query"] == "retraction"
+
+
+@pytest.fixture
+def db_path(tmp_path):
+    return str(tmp_path / "test.db")
+
+
+def run_cli(*args, db_path=None):
+    argv = ["reasons"]
+    if db_path:
+        argv += ["--db", db_path]
+    argv += list(args)
+    stdout, stderr = StringIO(), StringIO()
+    with patch.object(sys, "argv", argv), \
+         patch.object(sys, "stdout", stdout), \
+         patch.object(sys, "stderr", stderr):
+        try:
+            main()
+        except SystemExit:
+            pass
+
+
+class TestAskWithMcpDispatch:
+
+    def test_mcp_tool_dispatched(self, db_path):
+        """ask() dispatches MCP tool calls to the bridge."""
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "Alpha belief", db_path=db_path)
+
+        bridge = FakeBridge(
+            tools=[{"name": "run_query", "description": "Run SQL",
+                    "input_schema": {"properties": {"sql": {"description": "SQL", "type": "string"}}}}],
+        )
+        calls = []
+        orig_call = bridge.call_tool
+
+        def tracking_call(name, args):
+            calls.append((name, args))
+            return orig_call(name, args)
+
+        bridge.call_tool = tracking_call
+
+        responses = [
+            '{"tool": "run_query", "sql": "SELECT 1"}',
+            "The query returned 1.",
+        ]
+        idx = [0]
+
+        def mock_invoke(prompt, model="claude", timeout=300):
+            r = responses[idx[0]]
+            idx[0] += 1
+            return r
+
+        with patch("reasons_lib.ask.invoke_model", side_effect=mock_invoke):
+            result = ask("run a query", db_path=db_path, mcp_servers=[bridge])
+
+        assert result == "The query returned 1."
+        assert len(calls) == 1
+        assert calls[0] == ("run_query", {"sql": "SELECT 1"})
+
+    def test_mcp_tool_error_handled(self, db_path):
+        """MCP tool errors are captured in tool history, not raised."""
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "Alpha belief", db_path=db_path)
+
+        bridge = FakeBridge(
+            tools=[{"name": "bad_tool", "description": "Fails",
+                    "input_schema": {"properties": {}}}],
+        )
+        bridge.call_tool = lambda name, args: (_ for _ in ()).throw(
+            RuntimeError("connection lost"))
+
+        responses = [
+            '{"tool": "bad_tool"}',
+            "The tool failed, but alpha is relevant.",
+        ]
+        idx = [0]
+
+        def mock_invoke(prompt, model="claude", timeout=300):
+            r = responses[idx[0]]
+            idx[0] += 1
+            return r
+
+        with patch("reasons_lib.ask.invoke_model", side_effect=mock_invoke):
+            result = ask("alpha", db_path=db_path, mcp_servers=[bridge])
+
+        assert "alpha" in result.lower()
+
+    def test_max_iterations_bumped_with_mcp(self, db_path):
+        """With MCP servers, max iterations increases to 5."""
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "Alpha belief", db_path=db_path)
+
+        bridge = FakeBridge(
+            tools=[{"name": "some_tool", "description": "A tool",
+                    "input_schema": {"properties": {}}}],
+        )
+
+        calls = [0]
+
+        def mock_invoke(prompt, model="claude", timeout=300):
+            calls[0] += 1
+            if calls[0] <= 5:
+                return '{"tool": "search_beliefs", "query": "more"}'
+            return "Final answer."
+
+        with patch("reasons_lib.ask.invoke_model", side_effect=mock_invoke):
+            result = ask("alpha", db_path=db_path, mcp_servers=[bridge])
+
+        assert calls[0] == 6
+        assert "Final answer" in result
