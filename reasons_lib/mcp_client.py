@@ -7,7 +7,7 @@ Requires: pip install 'mcp>=1.0'
 """
 
 import asyncio
-import concurrent.futures
+import shlex
 import threading
 
 try:
@@ -41,6 +41,7 @@ class McpBridge:
         self._loop = None
         self._thread = None
         self._session = None
+        self._shutdown = None
         self._ready = threading.Event()
         self._error = None
 
@@ -50,7 +51,8 @@ class McpBridge:
             target=self._run_loop, daemon=True
         )
         self._thread.start()
-        self._ready.wait(timeout=30)
+        if not self._ready.wait(timeout=30):
+            raise TimeoutError(f"MCP server '{self.command}' did not respond within 30s")
         if self._error:
             raise self._error
 
@@ -59,7 +61,7 @@ class McpBridge:
         self._loop.run_until_complete(self._session_lifecycle())
 
     async def _session_lifecycle(self):
-        parts = self.command.split()
+        parts = shlex.split(self.command)
         server_params = StdioServerParameters(
             command=parts[0], args=parts[1:],
         )
@@ -81,10 +83,9 @@ class McpBridge:
                         }
                         for t in tools_result.tools
                     ]
-                    self._ready.set()
 
-                    # Keep alive until close() is called
                     self._shutdown = asyncio.Event()
+                    self._ready.set()
                     await self._shutdown.wait()
                 except Exception as e:
                     self._error = e

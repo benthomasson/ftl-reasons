@@ -354,7 +354,10 @@ def _build_tools_section(mcp_servers):
                 for pname, pinfo in props.items():
                     param_parts.append(f'"{pname}": "<{pinfo.get("description", pname)}>"')
                 example = ', '.join(param_parts)
-                lines.append(f'{{"tool": "{tool["name"]}", {example}}}')
+                if example:
+                    lines.append(f'{{"tool": "{tool["name"]}", {example}}}')
+                else:
+                    lines.append(f'{{"tool": "{tool["name"]}"}}')
                 if tool["description"]:
                     desc = tool["description"].split("\n")[0]
                     lines.append(f"  # {desc}")

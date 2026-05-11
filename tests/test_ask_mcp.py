@@ -63,6 +63,14 @@ class TestBuildToolsSection:
         assert "tool_a" in section
         assert "tool_b" in section
 
+    def test_no_params_no_trailing_comma(self):
+        bridge = FakeBridge(tools=[
+            {"name": "list_tables", "description": "List tables", "input_schema": {"properties": {}}},
+        ])
+        section = _build_tools_section([bridge])
+        assert '{"tool": "list_tables"}' in section
+        assert '{"tool": "list_tables", }' not in section
+
 
 class TestBuildMcpInstructions:
 
