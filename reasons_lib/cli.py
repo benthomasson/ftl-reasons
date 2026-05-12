@@ -1559,7 +1559,7 @@ def main():
     p.add_argument("-o", "--output", default="proposed-derivations.md",
                    help="Output file for proposals (default: proposed-derivations.md)")
     p.add_argument("-m", "--model", default=None,
-                   help="Model to use (default: claude). Use ollama:<model> for local models")
+                   help="Model to use (default: claude). Prefixes: ollama:<model>, api:<model>, vertex:<model>")
     p.add_argument("--auto", action="store_true",
                    help="Automatically add proposals (no review step)")
     p.add_argument("--dry-run", action="store_true",
@@ -1678,7 +1678,7 @@ def main():
     p.add_argument("--timeout", type=int, default=300,
                    help="LLM timeout in seconds (default: 300)")
     p.add_argument("-m", "--model", default=None,
-                   help="Model to use (default: claude). Use ollama:<model> for local models")
+                   help="Model to use (default: claude). Prefixes: ollama:<model>, api:<model>, vertex:<model>")
     p.add_argument("--simple", action="store_true",
                    help="Single-pass synthesis with pre-retrieved beliefs (better for smaller models)")
     p.add_argument("--full-sources", default=None, metavar="FTS_DB",
@@ -1727,7 +1727,7 @@ def main():
     p = sub.add_parser("list-negative", help="Find IN beliefs describing problems/defects/risks (LLM-classified)")
     p.add_argument("--visible-to", metavar="TAG,TAG", help="Only show nodes whose access_tags are a subset of these tags")
     p.add_argument("-m", "--model", default=None,
-                   help="Model to use (default: claude). Use ollama:<model> for local models")
+                   help="Model to use (default: claude). Prefixes: ollama:<model>, api:<model>, vertex:<model>")
 
     sub.add_parser("namespaces", help="List all agent namespaces in the database")
 
@@ -1735,7 +1735,7 @@ def main():
     p = sub.add_parser("review-beliefs", help="Review derived beliefs for validity, sufficiency, and necessity")
     p.add_argument("ids", nargs="*", help="Specific belief IDs to review (default: all derived)")
     p.add_argument("-m", "--model", default=None,
-                   help="Model to use (default: claude). Use ollama:<model> for local models")
+                   help="Model to use (default: claude). Prefixes: ollama:<model>, api:<model>, vertex:<model>")
     p.add_argument("--timeout", type=int, default=300,
                    help="LLM timeout in seconds (default: 300)")
     p.add_argument("--min-depth", type=int, default=None,
@@ -1761,7 +1761,7 @@ def main():
     p = sub.add_parser("contradictions", help="Detect contradictions between IN beliefs")
     p.add_argument("ids", nargs="*", help="Specific belief IDs to check (default: all IN)")
     p.add_argument("-m", "--model", default=None,
-                   help="Model to use (default: claude). Use ollama:<model> for local models")
+                   help="Model to use (default: claude). Prefixes: ollama:<model>, api:<model>, vertex:<model>")
     p.add_argument("--timeout", type=int, default=300,
                    help="LLM timeout in seconds (default: 300)")
     p.add_argument("--sample", type=int, default=None,
