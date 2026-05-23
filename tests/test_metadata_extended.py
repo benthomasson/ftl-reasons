@@ -14,7 +14,6 @@ Covers edge cases, round-trips, and behaviors not in test_metadata.py:
 
 import json
 import sqlite3
-import time
 from pathlib import Path
 
 import pytest

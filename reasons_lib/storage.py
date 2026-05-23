@@ -67,9 +67,10 @@ CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(id, text, tokenize="port
 class Storage:
     """SQLite persistence for a Network."""
 
-    def __init__(self, db_path: str | Path):
+    def __init__(self, db_path: str | Path, project_name: str = ""):
         self.db_path = Path(db_path)
         self._is_new = not self.db_path.exists()
+        self._project_name = project_name
         self.conn = sqlite3.connect(str(self.db_path))
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA foreign_keys=ON")
@@ -83,7 +84,7 @@ class Storage:
             self.conn.execute("ALTER TABLE nodes ADD COLUMN source_url TEXT DEFAULT ''")
         if self._is_new:
             now = datetime.now(timezone.utc).isoformat(timespec="seconds")
-            project_name = self.db_path.stem
+            project_name = self._project_name or self.db_path.stem
             for key, val in [
                 ("schema_version", SCHEMA_VERSION),
                 ("project_name", project_name),

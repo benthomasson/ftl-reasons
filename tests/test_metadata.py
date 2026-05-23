@@ -119,7 +119,7 @@ class TestMarkdownExportMeta:
         net.meta["project_name"] = "test-proj"
         net.add_node("a", "Premise A")
         md = export_markdown(net)
-        assert "project_name: test-proj" in md
+        assert 'project_name: "test-proj"' in md
 
 
 class TestStripFrontmatter:
@@ -194,7 +194,7 @@ class TestSqliteMeta:
         assert "created_at" in rows
         assert "updated_at" in rows
 
-    def test_save_updates_updated_at(self, tmp_path):
+    def test_save_preserves_created_at(self, tmp_path):
         db = str(tmp_path / "test.db")
         api.init_db(db_path=db)
 

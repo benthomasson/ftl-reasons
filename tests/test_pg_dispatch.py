@@ -102,6 +102,14 @@ class TestRequireSqlite:
 class TestExportMarkdownPgPath:
 
     EXPORT_DATA = {
+        "meta": {
+            "schema_version": "1.0",
+            "project_name": "test",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+            "node_count": 4,
+            "generator": "ftl-reasons/test",
+        },
         "nodes": {
             "premise-a": {
                 "text": "Alpha premise",
@@ -199,7 +207,7 @@ class TestExportMarkdownPgPath:
         assert "gated-c" in md
 
     def test_empty_network(self):
-        empty = {"nodes": {}, "nogoods": [], "repos": {}}
+        empty = {"meta": {}, "nodes": {}, "nogoods": [], "repos": {}}
         with patch("reasons_lib.api.export_network", return_value=empty):
             md = export_markdown(pg_conninfo="postgresql://...", project_id="test")
         assert isinstance(md, str)

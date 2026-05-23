@@ -94,11 +94,7 @@ def init_db(db_path: str = DEFAULT_DB, force: bool = False,
         raise FileExistsError(f"Database already exists: {db_path}")
     if p.exists() and force:
         p.unlink()
-    store = Storage(db_path)
-    if project_name:
-        net = store.load()
-        net.meta["project_name"] = project_name
-        store.save(net)
+    store = Storage(db_path, project_name=project_name)
     store.close()
     return {"db_path": str(p), "created": True}
 

@@ -23,7 +23,7 @@ def export_markdown(network: Network, repos: dict[str, str] | None = None) -> st
     lines = [
         "---",
         f'schema_version: "{meta["schema_version"]}"',
-        f"project_name: {meta['project_name']}" if meta["project_name"] else "project_name:",
+        f"project_name: \"{meta['project_name']}\"" if meta["project_name"] else "project_name:",
         f'updated_at: "{meta["updated_at"]}"',
         f"node_count: {meta['node_count']}",
         f"generator: {meta['generator']}",
