@@ -387,7 +387,7 @@ class TestExport:
     def test_export_json(self, db_path):
         run_cli("init", db_path=db_path)
         run_cli("add", "a", "A", db_path=db_path)
-        out, err, code = run_cli("export", db_path=db_path)
+        out, err, code = run_cli("export", "--output=-", db_path=db_path)
         assert code == 0
         data = json.loads(out)
         assert "a" in data["nodes"]
@@ -395,7 +395,7 @@ class TestExport:
     def test_export_markdown(self, db_path):
         run_cli("init", db_path=db_path)
         run_cli("add", "a", "Premise A", db_path=db_path)
-        out, err, code = run_cli("export-markdown", db_path=db_path)
+        out, err, code = run_cli("export-markdown", "--output=-", db_path=db_path)
         assert code == 0
         assert "a" in out
 
@@ -559,7 +559,7 @@ class TestImportExportJson:
         run_cli("add", "a", "A", db_path=db_path)
         run_cli("add", "b", "B", "--sl", "a", db_path=db_path)
 
-        out, _, _ = run_cli("export", db_path=db_path)
+        out, _, _ = run_cli("export", "--output=-", db_path=db_path)
         json_file = str(tmp_path / "export.json")
         from pathlib import Path
         Path(json_file).write_text(out)
@@ -1204,7 +1204,7 @@ class TestImportJsonWithNogoods:
         run_cli("add", "b", "B", db_path=db_path)
         run_cli("nogood", "a", "b", db_path=db_path)
 
-        out, _, _ = run_cli("export", db_path=db_path)
+        out, _, _ = run_cli("export", "--output=-", db_path=db_path)
         json_file = str(tmp_path / "export.json")
         from pathlib import Path
         Path(json_file).write_text(out)

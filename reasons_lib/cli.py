@@ -578,20 +578,20 @@ def cmd_import_json(args):
 def cmd_export(args):
     data = api.export_network(visible_to=_parse_visible_to(args), **_backend_kwargs(args))
     output = json.dumps(data, indent=2)
-    if args.output:
+    if args.output == "-":
+        print(output)
+    else:
         Path(args.output).write_text(output)
         print(f"Written to {args.output}")
-    else:
-        print(output)
 
 
 def cmd_export_markdown(args):
     md = api.export_markdown(visible_to=_parse_visible_to(args), **_backend_kwargs(args))
-    if args.output:
+    if args.output == "-":
+        print(md)
+    else:
         Path(args.output).write_text(md)
         print(f"Written to {args.output}")
-    else:
-        print(md)
 
 
 def cmd_hash_sources(args):
@@ -1632,12 +1632,14 @@ def main():
 
     # export
     p = sub.add_parser("export", help="Export network as JSON")
-    p.add_argument("-o", "--output", help="Write to file instead of stdout")
+    p.add_argument("-o", "--output", default="network.json", nargs="?", const="network.json",
+                   help="Output file (default: network.json). Use --output=- for stdout")
     p.add_argument("--visible-to", metavar="TAG,TAG", help="Only export nodes whose access_tags are a subset of these tags")
 
     # export-markdown
     p = sub.add_parser("export-markdown", help="Export network as beliefs.md-compatible markdown")
-    p.add_argument("-o", "--output", help="Write to file instead of stdout")
+    p.add_argument("-o", "--output", default="beliefs.md", nargs="?", const="beliefs.md",
+                   help="Output file (default: beliefs.md). Use --output=- for stdout")
     p.add_argument("--visible-to", metavar="TAG,TAG", help="Only export nodes whose access_tags are a subset of these tags")
 
     # hash-sources
