@@ -6,9 +6,11 @@ SQLite database. ACID transactions ensure propagation cascades are atomic.
 
 import json
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 from . import Node, Justification, Nogood
+from .metadata import SCHEMA_VERSION, build_meta
 from .network import Network
 
 
@@ -65,8 +67,10 @@ CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(id, text, tokenize="port
 class Storage:
     """SQLite persistence for a Network."""
 
-    def __init__(self, db_path: str | Path):
+    def __init__(self, db_path: str | Path, project_name: str = ""):
         self.db_path = Path(db_path)
+        self._is_new = not self.db_path.exists()
+        self._project_name = project_name
         self.conn = sqlite3.connect(str(self.db_path))
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA foreign_keys=ON")
@@ -78,6 +82,19 @@ class Storage:
         cols = [c[1] for c in self.conn.execute("PRAGMA table_info(nodes)").fetchall()]
         if "source_url" not in cols:
             self.conn.execute("ALTER TABLE nodes ADD COLUMN source_url TEXT DEFAULT ''")
+        if self._is_new:
+            now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            project_name = self._project_name or self.db_path.stem
+            for key, val in [
+                ("schema_version", SCHEMA_VERSION),
+                ("project_name", project_name),
+                ("created_at", now),
+                ("updated_at", now),
+            ]:
+                self.conn.execute(
+                    "INSERT OR IGNORE INTO network_meta (key, value) VALUES (?, ?)",
+                    (key, val),
+                )
         self.conn.commit()
 
     def save(self, network: Network) -> None:
@@ -130,6 +147,18 @@ class Storage:
                 "INSERT INTO network_meta (key, value) VALUES (?, ?)",
                 ("next_nogood_id", str(network._next_nogood_id)),
             )
+
+            now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            meta = dict(network.meta)
+            meta.setdefault("schema_version", SCHEMA_VERSION)
+            meta.setdefault("project_name", self.db_path.stem)
+            meta.setdefault("created_at", now)
+            meta["updated_at"] = now
+            for key, val in meta.items():
+                self.conn.execute(
+                    "INSERT OR REPLACE INTO network_meta (key, value) VALUES (?, ?)",
+                    (key, str(val)),
+                )
 
             for name, path in network.repos.items():
                 self.conn.execute(
@@ -210,12 +239,13 @@ class Storage:
         # otherwise derive from existing nogoods to avoid ID collisions
         loaded_counter = False
         try:
-            row = self.conn.execute(
-                "SELECT value FROM network_meta WHERE key = 'next_nogood_id'"
-            ).fetchone()
-            if row:
-                network._next_nogood_id = int(row[0])
-                loaded_counter = True
+            meta_cursor = self.conn.execute("SELECT key, value FROM network_meta")
+            for key, value in meta_cursor:
+                if key == "next_nogood_id":
+                    network._next_nogood_id = int(value)
+                    loaded_counter = True
+                else:
+                    network.meta[key] = value
         except Exception:
             pass  # network_meta table may not exist in old databases
         if not loaded_counter and network.nogoods:

@@ -17,7 +17,11 @@ from . import api
 
 def cmd_init(args):
     try:
-        result = api.init_db(force=args.force, **_backend_kwargs(args))
+        result = api.init_db(
+            force=args.force,
+            project_name=getattr(args, "project_name", "") or "",
+            **_backend_kwargs(args),
+        )
         if "db_path" in result:
             print(f"Initialized RMS database: {result['db_path']}")
         else:
@@ -1432,6 +1436,7 @@ def main():
     # init
     p = sub.add_parser("init", help="Initialize a new RMS database")
     p.add_argument("--force", action="store_true", help="Overwrite existing database")
+    p.add_argument("--project-name", default="", help="Name for this belief network (defaults to DB filename stem)")
 
     # add
     p = sub.add_parser("add", help="Add a node")
