@@ -8,3 +8,13 @@ dist/
 build/
 uv.lock
 .sdlc-loop/
+reviews
+.code-expert/
+.coverage
+network.json
+beliefs.md
+entries/
+logs/
+*.log
+proposed-beliefs.md
+proposed-dedup.md
