@@ -1461,7 +1461,6 @@ def export_card(visible_to: list[str] | None = None, db_path: str = DEFAULT_DB,
                 discovered=ngdata.get("discovered", ""),
                 resolution=ngdata.get("resolution", ""),
             ))
-        repos = data.get("repos", {})
         meta = data.get("meta")
         if meta:
             net.meta = dict(meta)
