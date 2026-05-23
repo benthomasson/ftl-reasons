@@ -1283,6 +1283,48 @@ def import_json(json_file: str, db_path: str = DEFAULT_DB,
         return {"nodes_imported": nodes_imported, "nogoods_imported": nogoods_imported}
 
 
+def import_hf(repo_id: str, init: bool = False, token: str | None = None,
+              db_path: str = DEFAULT_DB,
+              pg_conninfo=None, project_id=None) -> dict:
+    """Download network.json from a HuggingFace repo and import it.
+
+    Args:
+        repo_id: HuggingFace repo ID (user/repo) or full URL
+        init: Initialize reasons.db before import if it doesn't exist
+        token: Optional HuggingFace auth token
+
+    Returns: {"nodes_imported": int, "nogoods_imported": int, "repo_id": str}
+    """
+    import json as json_mod
+    import tempfile
+
+    from .hf import download_network, _parse_repo_id
+
+    parsed_id = _parse_repo_id(repo_id)
+    json_str = download_network(repo_id, token=token)
+
+    db_exists = Path(db_path).exists()
+    if init or (not db_exists and not pg_conninfo):
+        data = json_mod.loads(json_str)
+        project_name = data.get("meta", {}).get("project_name", "")
+        init_db(db_path=db_path, force=False,
+                project_name=project_name,
+                pg_conninfo=pg_conninfo, project_id=project_id)
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+        f.write(json_str)
+        temp_path = f.name
+
+    try:
+        result = import_json(temp_path, db_path=db_path,
+                             pg_conninfo=pg_conninfo, project_id=project_id)
+    finally:
+        Path(temp_path).unlink()
+
+    result["repo_id"] = parsed_id
+    return result
+
+
 def derive_prompt(domain: str | None = None, db_path: str = DEFAULT_DB) -> dict:
     """Build a derive prompt from the current network.
 

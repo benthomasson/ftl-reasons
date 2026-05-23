@@ -579,6 +579,23 @@ def cmd_import_json(args):
         print(f"Imported {result['nogoods_imported']} nogoods")
 
 
+def cmd_import_hf(args):
+    try:
+        result = api.import_hf(
+            repo_id=args.repo_id,
+            init=args.init,
+            token=args.token,
+            **_backend_kwargs(args),
+        )
+    except (RuntimeError, FileExistsError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Imported {result['nodes_imported']} nodes from {result['repo_id']}")
+    if result['nogoods_imported']:
+        print(f"Imported {result['nogoods_imported']} nogoods")
+
+
 def cmd_export(args):
     data = api.export_network(visible_to=_parse_visible_to(args), **_backend_kwargs(args))
     output = json.dumps(data, indent=2)
@@ -1651,6 +1668,13 @@ def main():
     p = sub.add_parser("import-json", help="Import network from JSON (produced by export)")
     p.add_argument("json_file", help="Path to JSON file")
 
+    # import-hf
+    p = sub.add_parser("import-hf", help="Import network from HuggingFace repo")
+    p.add_argument("repo_id", help="HuggingFace repo (user/repo or URL)")
+    p.add_argument("--init", action="store_true",
+                   help="Initialize reasons.db if it doesn't exist")
+    p.add_argument("--token", help="HuggingFace token (default: from HF_TOKEN or ~/.cache/huggingface/token)")
+
     # export
     p = sub.add_parser("export", help="Export network as JSON")
     p.add_argument("-o", "--output", default="network.json", nargs="?", const="network.json",
@@ -1856,6 +1880,7 @@ def main():
         "sync-agent": cmd_sync_agent,
         "import-beliefs": cmd_import_beliefs,
         "import-json": cmd_import_json,
+        "import-hf": cmd_import_hf,
         "export": cmd_export,
         "export-markdown": cmd_export_markdown,
         "export-card": cmd_export_card,
