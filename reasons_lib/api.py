@@ -16,6 +16,7 @@ from itertools import combinations
 from pathlib import Path
 
 from . import Justification
+from .metadata import build_meta
 from .network import Network
 from .storage import Storage
 
@@ -74,19 +75,30 @@ def _pg_dispatch(pg_conninfo, project_id, method_name, **kwargs):
 
 
 def init_db(db_path: str = DEFAULT_DB, force: bool = False,
+            project_name: str = "",
             pg_conninfo=None, project_id=None) -> dict:
     """Initialize a new RMS database.
+
+    Args:
+        db_path: Path to the database file.
+        force: Overwrite existing database if True.
+        project_name: Name for this belief network (defaults to DB filename stem).
 
     Returns: {"db_path": str, "created": bool}
     """
     if pg_conninfo:
-        return _pg_dispatch(pg_conninfo, project_id, "init_db")
+        return _pg_dispatch(pg_conninfo, project_id, "init_db",
+                            project_name=project_name)
     p = Path(db_path)
     if p.exists() and not force:
         raise FileExistsError(f"Database already exists: {db_path}")
     if p.exists() and force:
         p.unlink()
     store = Storage(db_path)
+    if project_name:
+        net = store.load()
+        net.meta["project_name"] = project_name
+        store.save(net)
     store.close()
     return {"db_path": str(p), "created": True}
 
@@ -873,31 +885,38 @@ def export_network(visible_to: list[str] | None = None, db_path: str = DEFAULT_D
                    pg_conninfo=None, project_id=None) -> dict:
     """Export the entire network as a dict.
 
-    Returns: {"nodes": dict, "nogoods": list}
+    Returns: {"meta": dict, "nodes": dict, "nogoods": list, "repos": dict}
     """
     if pg_conninfo:
         return _pg_dispatch(pg_conninfo, project_id, "export_network",
                             visible_to=visible_to)
 
     with _with_network(db_path) as net:
+        nodes = {
+            nid: {
+                "text": n.text,
+                "truth_value": n.truth_value,
+                "justifications": [
+                    {"type": j.type, "antecedents": j.antecedents, "outlist": j.outlist, "label": j.label}
+                    for j in n.justifications
+                ],
+                "source": n.source,
+                "source_url": n.source_url,
+                "source_hash": n.source_hash,
+                "date": n.date,
+                "metadata": {k: v for k, v in n.metadata.items() if not k.startswith("_")},
+            }
+            for nid, n in sorted(net.nodes.items())
+            if visible_to is None or _is_visible(n, visible_to)
+        }
+        meta = build_meta(
+            project_name=net.meta.get("project_name", ""),
+            node_count=len(nodes),
+            created_at=net.meta.get("created_at", ""),
+        )
         return {
-            "nodes": {
-                nid: {
-                    "text": n.text,
-                    "truth_value": n.truth_value,
-                    "justifications": [
-                        {"type": j.type, "antecedents": j.antecedents, "outlist": j.outlist, "label": j.label}
-                        for j in n.justifications
-                    ],
-                    "source": n.source,
-                    "source_url": n.source_url,
-                    "source_hash": n.source_hash,
-                    "date": n.date,
-                    "metadata": {k: v for k, v in n.metadata.items() if not k.startswith("_")},
-                }
-                for nid, n in sorted(net.nodes.items())
-                if visible_to is None or _is_visible(n, visible_to)
-            },
+            "meta": meta,
+            "nodes": nodes,
             "nogoods": [
                 {"id": ng.id, "nodes": ng.nodes, "discovered": ng.discovered, "resolution": ng.resolution}
                 for ng in net.nogoods
@@ -1144,6 +1163,12 @@ def import_json(json_file: str, db_path: str = DEFAULT_DB,
         return _pg_dispatch(pg_conninfo, project_id, "import_json", data=data)
 
     with _with_network(db_path, write=True) as net:
+        imported_meta = data.get("meta")
+        if imported_meta and isinstance(imported_meta, dict):
+            for key in ("schema_version", "project_name", "created_at"):
+                if key in imported_meta:
+                    net.meta[key] = imported_meta[key]
+
         # Topological sort: add nodes whose antecedents are already in the network first
         remaining = dict(data.get("nodes", {}))
         added = set(net.nodes.keys())
@@ -1370,6 +1395,9 @@ def export_markdown(visible_to: list[str] | None = None, db_path: str = DEFAULT_
                 resolution=ngdata.get("resolution", ""),
             ))
         repos = data.get("repos", {})
+        meta = data.get("meta")
+        if meta:
+            net.meta = dict(meta)
         return _export(net, repos=repos)
 
     with _with_network(db_path) as net:
@@ -1381,6 +1409,7 @@ def export_markdown(visible_to: list[str] | None = None, db_path: str = DEFAULT_
                     filtered.nodes[nid] = node
             filtered.nogoods = [ng for ng in net.nogoods if all(n in filtered.nodes for n in ng.nodes)]
             filtered.repos = net.repos
+            filtered.meta = net.meta
             return _export(filtered, repos=filtered.repos)
         return _export(net, repos=net.repos)
 

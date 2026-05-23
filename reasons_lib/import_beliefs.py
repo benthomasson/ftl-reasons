@@ -18,6 +18,33 @@ from . import Justification, Node, Nogood
 from .network import Network
 
 
+def strip_frontmatter(text: str) -> tuple[str, dict[str, str]]:
+    """Strip YAML frontmatter from markdown text if present.
+
+    Returns (body_text, frontmatter_dict). Frontmatter is a simple
+    key: value parse (no nested structures, no YAML library needed).
+    If no frontmatter is present, returns (text, {}).
+    """
+    if not text.startswith("---"):
+        return text, {}
+    lines = text.split("\n")
+    end = -1
+    for i, line in enumerate(lines[1:], 1):
+        if line.strip() == "---":
+            end = i
+            break
+    if end < 0:
+        return text, {}
+    fm = {}
+    for line in lines[1:end]:
+        if ":" in line:
+            key, _, val = line.partition(":")
+            val = val.strip().strip('"').strip("'")
+            fm[key.strip()] = val
+    body = "\n".join(lines[end + 1:])
+    return body, fm
+
+
 def parse_repos(text: str) -> dict[str, str]:
     """Parse the ## Repos section from a beliefs.md file.
 
@@ -141,6 +168,13 @@ def import_into_network(
 
     Returns a summary dict with counts of what was imported.
     """
+    beliefs_text, frontmatter = strip_frontmatter(beliefs_text)
+
+    if frontmatter:
+        for key in ("schema_version", "project_name", "created_at"):
+            if key in frontmatter and frontmatter[key]:
+                network.meta[key] = frontmatter[key]
+
     # Parse and store repos
     repos = parse_repos(beliefs_text)
     network.repos.update(repos)

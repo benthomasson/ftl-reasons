@@ -9,7 +9,7 @@ Requires psycopg v3: pip install 'psycopg[binary]>=3.1'
 import json
 import re
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timezone
 
 try:
     import psycopg
@@ -120,7 +120,8 @@ class PgApi:
 
     # ── Schema ──────────────────────────────────────────────────
 
-    def init_db(self):
+    def init_db(self, project_name: str = ""):
+        from .metadata import SCHEMA_VERSION
         with self.conn.cursor() as cur:
             cur.execute(SCHEMA)
             cur.execute(INDEXES)
@@ -131,6 +132,20 @@ class PgApi:
             )
             if not cur.fetchone():
                 cur.execute("ALTER TABLE rms_nodes ADD COLUMN source_url TEXT DEFAULT ''")
+            now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            pname = project_name or self.project_id
+            for key, val in [
+                ("schema_version", SCHEMA_VERSION),
+                ("project_name", pname),
+                ("created_at", now),
+                ("updated_at", now),
+            ]:
+                cur.execute(
+                    "INSERT INTO rms_network_meta (key, project_id, value) "
+                    "VALUES (%s, %s, %s) "
+                    "ON CONFLICT (key, project_id) DO NOTHING",
+                    (key, self.project_id, val),
+                )
         self.conn.commit()
         return {"project_id": self.project_id, "created": True}
 
@@ -1280,7 +1295,23 @@ class PgApi:
                 })
 
         repos = self.list_repos()["repos"]
-        return {"nodes": nodes, "nogoods": nogoods, "repos": repos}
+
+        from .metadata import build_meta
+        stored_meta = {}
+        with self.conn.cursor() as cur2:
+            cur2.execute(
+                "SELECT key, value FROM rms_network_meta WHERE project_id = %s",
+                (pid,),
+            )
+            for key, value in cur2.fetchall():
+                if key != "next_nogood_id":
+                    stored_meta[key] = value
+        meta = build_meta(
+            project_name=stored_meta.get("project_name", ""),
+            node_count=len(nodes),
+            created_at=stored_meta.get("created_at", ""),
+        )
+        return {"meta": meta, "nodes": nodes, "nogoods": nogoods, "repos": repos}
 
     def remove_justification(self, node_id, index):
         pid = self.project_id
@@ -2103,6 +2134,19 @@ class PgApi:
         nodes_imported = 0
         skipped = 0
 
+        imported_meta = data.get("meta")
+        if imported_meta and isinstance(imported_meta, dict):
+            with self.conn.cursor() as cur:
+                for key in ("schema_version", "project_name", "created_at"):
+                    if key in imported_meta and imported_meta[key]:
+                        cur.execute(
+                            "INSERT INTO rms_network_meta (key, project_id, value) "
+                            "VALUES (%s, %s, %s) "
+                            "ON CONFLICT (key, project_id) DO UPDATE SET value = EXCLUDED.value",
+                            (key, pid, str(imported_meta[key])),
+                        )
+            self.conn.commit()
+
         with self.conn.cursor() as cur:
             cur.execute(
                 "SELECT id FROM rms_nodes WHERE project_id = %s", (pid,),
@@ -2229,7 +2273,20 @@ class PgApi:
 
     def import_beliefs(self, beliefs_text, nogoods_text=None):
         """Import beliefs from markdown text."""
-        from .import_beliefs import parse_beliefs, parse_nogoods
+        from .import_beliefs import parse_beliefs, parse_nogoods, strip_frontmatter
+
+        beliefs_text, frontmatter = strip_frontmatter(beliefs_text)
+        if frontmatter:
+            with self.conn.cursor() as cur:
+                for key in ("schema_version", "project_name", "created_at"):
+                    if key in frontmatter and frontmatter[key]:
+                        cur.execute(
+                            "INSERT INTO rms_network_meta (key, project_id, value) "
+                            "VALUES (%s, %s, %s) "
+                            "ON CONFLICT (key, project_id) DO UPDATE SET value = EXCLUDED.value",
+                            (key, self.project_id, frontmatter[key]),
+                        )
+            self.conn.commit()
 
         pid = self.project_id
         claims = parse_beliefs(beliefs_text)

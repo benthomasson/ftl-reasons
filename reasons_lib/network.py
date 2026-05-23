@@ -23,6 +23,7 @@ class Network:
         self._next_nogood_id: int = 1
         self.repos: dict[str, str] = {}  # name → path mapping
         self.log: list[dict] = []  # propagation audit trail
+        self.meta: dict[str, str] = {}  # schema_version, project_name, etc.
 
     def _rebuild_dependents(self) -> None:
         """Rebuild the dependents reverse index from justifications.
