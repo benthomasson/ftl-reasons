@@ -24,7 +24,6 @@ def _node_depth(nid, nodes, memo=None):
 
 def export_card(
     network: Network,
-    repos: dict[str, str] | None = None,
     domain: list[str] | None = None,
     license: str = "mit",
     base_network: str | None = None,
@@ -34,7 +33,6 @@ def export_card(
 
     Args:
         network: The network to export
-        repos: Optional repo name -> path mapping
         domain: Domain tags for the card frontmatter
         license: License identifier (default: mit)
         base_network: Parent EEM this was derived from

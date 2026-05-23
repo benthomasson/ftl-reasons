@@ -12,7 +12,7 @@ requires-python = ">=3.10"
 dependencies = []
 
 [project.optional-dependencies]
-test = ["pytest", "pytest-cov"]
+test = ["pytest", "pytest-cov", "pyyaml"]
 pg = ["psycopg[binary]>=3.1"]
 test-pg = ["psycopg[binary]>=3.1", "pytest", "pytest-cov"]
 cluster = ["sentence-transformers>=2.2", "scikit-learn>=1.2"]

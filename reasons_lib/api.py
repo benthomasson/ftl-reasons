@@ -1465,7 +1465,7 @@ def export_card(visible_to: list[str] | None = None, db_path: str = DEFAULT_DB,
         meta = data.get("meta")
         if meta:
             net.meta = dict(meta)
-        return _export_card(net, repos=repos, **card_kwargs)
+        return _export_card(net, **card_kwargs)
 
     with _with_network(db_path) as net:
         if visible_to is not None:
@@ -1477,8 +1477,8 @@ def export_card(visible_to: list[str] | None = None, db_path: str = DEFAULT_DB,
             filtered.nogoods = [ng for ng in net.nogoods if all(n in filtered.nodes for n in ng.nodes)]
             filtered.repos = net.repos
             filtered.meta = net.meta
-            return _export_card(filtered, repos=filtered.repos, **card_kwargs)
-        return _export_card(net, repos=net.repos, **card_kwargs)
+            return _export_card(filtered, **card_kwargs)
+        return _export_card(net, **card_kwargs)
 
 
 def check_stale(
