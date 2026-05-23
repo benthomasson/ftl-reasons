@@ -1410,6 +1410,76 @@ def export_markdown(visible_to: list[str] | None = None, db_path: str = DEFAULT_
         return _export(net, repos=net.repos)
 
 
+def export_card(visible_to: list[str] | None = None, db_path: str = DEFAULT_DB,
+                pg_conninfo=None, project_id=None,
+                domain=None, license="mit", base_network=None,
+                source_repos=None) -> str:
+    """Export the network as a HuggingFace EEM card (README.md).
+
+    Returns: the markdown string
+    """
+    from .export_card import export_card as _export_card
+
+    card_kwargs = dict(domain=domain, license=license,
+                       base_network=base_network, source_repos=source_repos)
+
+    if pg_conninfo:
+        data = export_network(visible_to=visible_to, pg_conninfo=pg_conninfo,
+                              project_id=project_id)
+        from . import Node, Justification, Nogood
+        from .network import Network
+        net = Network()
+        for nid, ndata in data.get("nodes", {}).items():
+            node = Node(nid, ndata.get("text", ""))
+            node.truth_value = ndata.get("truth_value", "OUT")
+            node.source = ndata.get("source", "")
+            node.source_url = ndata.get("source_url", "")
+            node.source_hash = ndata.get("source_hash", "")
+            node.date = ndata.get("date", "")
+            node.metadata = ndata.get("metadata", {})
+            for jdata in ndata.get("justifications", []):
+                j = Justification(
+                    type=jdata.get("type", "SL"),
+                    antecedents=jdata.get("antecedents", []),
+                    outlist=jdata.get("outlist", []),
+                    label=jdata.get("label", ""),
+                )
+                node.justifications.append(j)
+            net.nodes[nid] = node
+        for nid, node in net.nodes.items():
+            for j in node.justifications:
+                for ant_id in j.antecedents:
+                    if ant_id in net.nodes:
+                        net.nodes[ant_id].dependents.add(nid)
+                for out_id in j.outlist:
+                    if out_id in net.nodes:
+                        net.nodes[out_id].dependents.add(nid)
+        for ngdata in data.get("nogoods", []):
+            net.nogoods.append(Nogood(
+                id=ngdata.get("id", ""),
+                nodes=ngdata.get("nodes", []),
+                discovered=ngdata.get("discovered", ""),
+                resolution=ngdata.get("resolution", ""),
+            ))
+        meta = data.get("meta")
+        if meta:
+            net.meta = dict(meta)
+        return _export_card(net, **card_kwargs)
+
+    with _with_network(db_path) as net:
+        if visible_to is not None:
+            from .network import Network
+            filtered = Network()
+            for nid, node in net.nodes.items():
+                if _is_visible(node, visible_to):
+                    filtered.nodes[nid] = node
+            filtered.nogoods = [ng for ng in net.nogoods if all(n in filtered.nodes for n in ng.nodes)]
+            filtered.repos = net.repos
+            filtered.meta = net.meta
+            return _export_card(filtered, **card_kwargs)
+        return _export_card(net, **card_kwargs)
+
+
 def check_stale(
     repos: dict[str, str] | None = None,
     upgrade_hashes: bool = False,

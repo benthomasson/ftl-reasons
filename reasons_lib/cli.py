@@ -598,6 +598,22 @@ def cmd_export_markdown(args):
         print(f"Written to {args.output}")
 
 
+def cmd_export_card(args):
+    md = api.export_card(
+        visible_to=_parse_visible_to(args),
+        domain=args.domain,
+        license=args.license,
+        base_network=args.base_network,
+        source_repos=args.source_repos,
+        **_backend_kwargs(args),
+    )
+    if args.output == "-":
+        print(md)
+    else:
+        Path(args.output).write_text(md)
+        print(f"Written to {args.output}")
+
+
 def cmd_hash_sources(args):
     result = api.hash_sources(force=args.force, **_backend_kwargs(args))
 
@@ -1647,6 +1663,16 @@ def main():
                    help="Output file (default: beliefs.md). Use --output=- for stdout")
     p.add_argument("--visible-to", metavar="TAG,TAG", help="Only export nodes whose access_tags are a subset of these tags")
 
+    # export-card
+    p = sub.add_parser("export-card", help="Export network as HuggingFace EEM card (README.md)")
+    p.add_argument("-o", "--output", default="README.md", nargs="?", const="README.md",
+                   help="Output file (default: README.md). Use --output=- for stdout")
+    p.add_argument("--domain", nargs="*", help="Domain tags (e.g. kubernetes devops)")
+    p.add_argument("--license", default="mit", help="License identifier (default: mit)")
+    p.add_argument("--base-network", help="Parent EEM this was derived from")
+    p.add_argument("--source-repos", nargs="*", help="Source repository identifiers")
+    p.add_argument("--visible-to", metavar="TAG,TAG", help="Only export nodes whose access_tags are a subset of these tags")
+
     # hash-sources
     p = sub.add_parser("hash-sources", help="Backfill source hashes for nodes without them")
     p.add_argument("--force", action="store_true", help="Re-hash all nodes, even those with existing hashes")
@@ -1832,6 +1858,7 @@ def main():
         "import-json": cmd_import_json,
         "export": cmd_export,
         "export-markdown": cmd_export_markdown,
+        "export-card": cmd_export_card,
         "hash-sources": cmd_hash_sources,
         "check-stale": cmd_check_stale,
         "compact": cmd_compact,
