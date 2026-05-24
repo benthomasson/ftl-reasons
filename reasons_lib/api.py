@@ -1298,10 +1298,9 @@ def import_hf(repo_id: str, init: bool = False, token: str | None = None,
     import json as json_mod
     import tempfile
 
-    from .hf import download_network, _parse_repo_id
+    from .hf import download_network
 
-    parsed_id = _parse_repo_id(repo_id)
-    json_str = download_network(parsed_id, token=token)
+    json_str = download_network(repo_id, token=token)
 
     db_exists = Path(db_path).exists()
     if not db_exists and (init or not pg_conninfo):
@@ -1321,7 +1320,8 @@ def import_hf(repo_id: str, init: bool = False, token: str | None = None,
     finally:
         Path(temp_path).unlink()
 
-    result["repo_id"] = parsed_id
+    from .hf import _parse_repo_id
+    result["repo_id"] = _parse_repo_id(repo_id)
     return result
 
 
