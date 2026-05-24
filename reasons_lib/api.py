@@ -1301,7 +1301,7 @@ def import_hf(repo_id: str, init: bool = False, token: str | None = None,
     from .hf import download_network, _parse_repo_id
 
     parsed_id = _parse_repo_id(repo_id)
-    json_str = download_network(repo_id, token=token)
+    json_str = download_network(parsed_id, token=token)
 
     db_exists = Path(db_path).exists()
     if init or (not db_exists and not pg_conninfo):

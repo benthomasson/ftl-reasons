@@ -148,12 +148,13 @@ class TestImportHfApi:
         assert Path(db).exists()
 
     @patch("reasons_lib.hf.urlopen")
-    def test_auto_init_when_no_db(self, mock_urlopen, tmp_path):
+    def test_auto_init_sets_project_name(self, mock_urlopen, tmp_path):
         mock_urlopen.return_value = _mock_response(SAMPLE_NETWORK)
         db = str(tmp_path / "test.db")
-        result = api.import_hf("user/repo", init=False, token="tok", db_path=db)
-        assert result["nodes_imported"] == 2
+        api.import_hf("user/repo", init=False, token="tok", db_path=db)
         assert Path(db).exists()
+        data = api.export_network(db_path=db)
+        assert data["meta"]["project_name"] == "test-eem"
 
     @patch("reasons_lib.hf.urlopen")
     def test_import_into_existing_db(self, mock_urlopen, tmp_path):
@@ -164,9 +165,10 @@ class TestImportHfApi:
         assert result["nodes_imported"] == 2
 
     @patch("reasons_lib.hf.urlopen")
-    def test_project_name_from_meta(self, mock_urlopen, tmp_path):
+    def test_import_hf_with_url(self, mock_urlopen, tmp_path):
         mock_urlopen.return_value = _mock_response(SAMPLE_NETWORK)
         db = str(tmp_path / "test.db")
-        api.import_hf("user/repo", init=True, token="tok", db_path=db)
-        status = api.get_status(db_path=db)
-        assert status["total"] == 2
+        result = api.import_hf(
+            "https://huggingface.co/user/repo", init=True, token="tok", db_path=db)
+        assert result["nodes_imported"] == 2
+        assert result["repo_id"] == "user/repo"
