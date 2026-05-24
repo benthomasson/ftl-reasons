@@ -1304,7 +1304,7 @@ def import_hf(repo_id: str, init: bool = False, token: str | None = None,
     json_str = download_network(parsed_id, token=token)
 
     db_exists = Path(db_path).exists()
-    if init or (not db_exists and not pg_conninfo):
+    if not db_exists and (init or not pg_conninfo):
         data = json_mod.loads(json_str)
         project_name = data.get("meta", {}).get("project_name", "")
         init_db(db_path=db_path, force=False,

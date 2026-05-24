@@ -165,6 +165,14 @@ class TestImportHfApi:
         assert result["nodes_imported"] == 2
 
     @patch("reasons_lib.hf.urlopen")
+    def test_init_flag_with_existing_db(self, mock_urlopen, tmp_path):
+        mock_urlopen.return_value = _mock_response(SAMPLE_NETWORK)
+        db = str(tmp_path / "test.db")
+        api.init_db(db_path=db)
+        result = api.import_hf("user/repo", init=True, token="tok", db_path=db)
+        assert result["nodes_imported"] == 2
+
+    @patch("reasons_lib.hf.urlopen")
     def test_import_hf_with_url(self, mock_urlopen, tmp_path):
         mock_urlopen.return_value = _mock_response(SAMPLE_NETWORK)
         db = str(tmp_path / "test.db")
