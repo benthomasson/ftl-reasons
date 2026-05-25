@@ -596,6 +596,41 @@ def cmd_import_hf(args):
         print(f"Imported {result['nogoods_imported']} nogoods")
 
 
+def cmd_import_api(args):
+    try:
+        result = api.import_api(
+            url=args.url,
+            agent_id=args.agent_id,
+            api_key=args.api_key,
+            init=args.init,
+            **_backend_kwargs(args),
+        )
+    except (RuntimeError, FileExistsError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Imported {result['nodes_imported']} nodes")
+    if result['nogoods_imported']:
+        print(f"Imported {result['nogoods_imported']} nogoods")
+
+
+def cmd_export_api(args):
+    try:
+        result = api.export_api(
+            url=args.url,
+            agent_id=args.agent_id,
+            api_key=args.api_key,
+            **_backend_kwargs(args),
+        )
+    except RuntimeError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Exported {result['nodes_exported']} nodes")
+    if result['errors']:
+        print(f"Errors: {result['errors']}")
+
+
 def cmd_export(args):
     data = api.export_network(visible_to=_parse_visible_to(args), **_backend_kwargs(args))
     output = json.dumps(data, indent=2)
@@ -1675,6 +1710,20 @@ def main():
                    help="Initialize reasons.db if it doesn't exist")
     p.add_argument("--token", help="HuggingFace token (default: from HF_TOKEN or ~/.cache/huggingface/token)")
 
+    # import-api
+    p = sub.add_parser("import-api", help="Import beliefs from agentic-mind-service")
+    p.add_argument("--url", help="Service URL (default: MIND_SERVICE_URL env)")
+    p.add_argument("--agent-id", help="Agent UUID (default: MIND_AGENT_ID env)")
+    p.add_argument("--api-key", help="API key (default: MIND_API_KEY env)")
+    p.add_argument("--init", action="store_true",
+                   help="Initialize reasons.db if it doesn't exist")
+
+    # export-api
+    p = sub.add_parser("export-api", help="Export beliefs to agentic-mind-service")
+    p.add_argument("--url", help="Service URL (default: MIND_SERVICE_URL env)")
+    p.add_argument("--agent-id", help="Agent UUID (default: MIND_AGENT_ID env)")
+    p.add_argument("--api-key", help="API key (default: MIND_API_KEY env)")
+
     # export
     p = sub.add_parser("export", help="Export network as JSON")
     p.add_argument("-o", "--output", default="network.json", nargs="?", const="network.json",
@@ -1881,6 +1930,8 @@ def main():
         "import-beliefs": cmd_import_beliefs,
         "import-json": cmd_import_json,
         "import-hf": cmd_import_hf,
+        "import-api": cmd_import_api,
+        "export-api": cmd_export_api,
         "export": cmd_export,
         "export-markdown": cmd_export_markdown,
         "export-card": cmd_export_card,
