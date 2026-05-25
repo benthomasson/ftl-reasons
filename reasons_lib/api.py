@@ -1325,6 +1325,86 @@ def import_hf(repo_id: str, init: bool = False, token: str | None = None,
     return result
 
 
+def import_api(url: str | None = None, agent_id: str | None = None,
+               api_key: str | None = None, init: bool = False,
+               db_path: str = DEFAULT_DB,
+               pg_conninfo=None, project_id=None) -> dict:
+    """Import beliefs from agentic-mind-service.
+
+    Downloads the full network via GET /export and imports it locally.
+
+    Returns: {"nodes_imported": int, "nogoods_imported": int}
+    """
+    import json as json_mod
+    import tempfile
+
+    from .mind_service import _resolve_config, fetch_export
+
+    resolved_url, resolved_agent_id, resolved_api_key = _resolve_config(
+        url, agent_id, api_key)
+    json_str = fetch_export(resolved_url, resolved_agent_id, resolved_api_key)
+
+    db_exists = Path(db_path).exists()
+    if not db_exists and (init or not pg_conninfo):
+        data = json_mod.loads(json_str)
+        project_name = data.get("meta", {}).get("project_name", "")
+        init_db(db_path=db_path, force=False,
+                project_name=project_name,
+                pg_conninfo=pg_conninfo, project_id=project_id)
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+        f.write(json_str)
+        temp_path = f.name
+
+    try:
+        return import_json(temp_path, db_path=db_path,
+                           pg_conninfo=pg_conninfo, project_id=project_id)
+    finally:
+        Path(temp_path).unlink()
+
+
+def export_api(url: str | None = None, agent_id: str | None = None,
+               api_key: str | None = None,
+               db_path: str = DEFAULT_DB,
+               pg_conninfo=None, project_id=None) -> dict:
+    """Export local beliefs to agentic-mind-service.
+
+    Pushes each node via POST /beliefs. Idempotent on node_id.
+
+    Returns: {"nodes_exported": int, "errors": int}
+    """
+    from .mind_service import _resolve_config, push_belief
+
+    resolved_url, resolved_agent_id, resolved_api_key = _resolve_config(
+        url, agent_id, api_key)
+
+    data = export_network(db_path=db_path, pg_conninfo=pg_conninfo,
+                          project_id=project_id)
+
+    exported = 0
+    errors = 0
+    for nid, ndata in data.get("nodes", {}).items():
+        sl_parts = []
+        for j in ndata.get("justifications", []):
+            if j.get("type") == "SL" and j.get("antecedents"):
+                sl_parts.extend(j["antecedents"])
+        sl = ",".join(sl_parts) if sl_parts else ""
+
+        try:
+            push_belief(
+                resolved_url, resolved_agent_id, resolved_api_key,
+                node_id=nid,
+                text=ndata.get("text", ""),
+                sl=sl,
+                source=ndata.get("source", ""),
+            )
+            exported += 1
+        except Exception:
+            errors += 1
+
+    return {"nodes_exported": exported, "errors": errors}
+
+
 def derive_prompt(domain: str | None = None, db_path: str = DEFAULT_DB) -> dict:
     """Build a derive prompt from the current network.
 
