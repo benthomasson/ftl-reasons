@@ -1338,7 +1338,6 @@ def import_api(url: str | None = None, agent_id: str | None = None,
 
     Returns: {"nodes_imported": int, "nogoods_imported": int}
     """
-    import json as json_mod
     import tempfile
 
     from .mind_service import _resolve_config, fetch_export
@@ -1349,7 +1348,7 @@ def import_api(url: str | None = None, agent_id: str | None = None,
 
     db_exists = Path(db_path).exists()
     if not db_exists and (init or not pg_conninfo):
-        data = json_mod.loads(json_str)
+        data = json.loads(json_str)
         project_name = data.get("meta", {}).get("project_name", "")
         init_db(db_path=db_path, force=False,
                 project_name=project_name,
