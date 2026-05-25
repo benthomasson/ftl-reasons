@@ -3,7 +3,7 @@
 import json
 from io import BytesIO
 from pathlib import Path
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -217,6 +217,22 @@ class TestExportApi:
         derived_body = [b for b in bodies if b["node_id"] == "d"][0]
         assert "a" in derived_body["sl"]
         assert "b" in derived_body["sl"]
+
+    @patch("reasons_lib.mind_service.urlopen")
+    def test_export_counts_errors(self, mock_urlopen, tmp_path):
+        from urllib.error import HTTPError
+        mock_urlopen.side_effect = [
+            _mock_response({"node_id": "a"}),
+            HTTPError("url", 500, "Server Error", {}, BytesIO(b"")),
+        ]
+        db = str(tmp_path / "test.db")
+        api.init_db(db_path=db)
+        api.add_node("a", "Node A", db_path=db)
+        api.add_node("b", "Node B", db_path=db)
+        result = api.export_api(
+            url="http://localhost", agent_id="agent-1", api_key="k", db_path=db)
+        assert result["nodes_exported"] == 1
+        assert result["errors"] == 1
 
     @patch("reasons_lib.mind_service.urlopen")
     def test_missing_config_raises(self, mock_urlopen, monkeypatch):

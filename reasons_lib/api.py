@@ -8,6 +8,7 @@ All functions return dicts suitable for JSON serialization.
 """
 
 import json
+import logging
 import re
 import sqlite3
 import sys
@@ -20,6 +21,8 @@ from .metadata import build_meta
 from .network import Network
 from .storage import Storage
 
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_DB = "reasons.db"
 
@@ -1399,7 +1402,8 @@ def export_api(url: str | None = None, agent_id: str | None = None,
                 source=ndata.get("source", ""),
             )
             exported += 1
-        except Exception:
+        except Exception as exc:
+            logger.warning("Failed to push node %s: %s", nid, exc)
             errors += 1
 
     return {"nodes_exported": exported, "errors": errors}
