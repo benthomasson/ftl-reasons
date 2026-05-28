@@ -1223,6 +1223,7 @@ def cmd_list(args):
         not_reviewed_since=args.not_reviewed_since,
         never_reviewed=args.never_reviewed,
         by_impact=args.by_impact,
+        label=args.label,
         **_backend_kwargs(args),
     )
 
@@ -1901,6 +1902,7 @@ def main():
                    help="Derived beliefs that have never been reviewed")
     p.add_argument("--by-impact", action="store_true",
                    help="Sort output by dependent count (descending)")
+    p.add_argument("--label", help="Filter to nodes with a justification matching this label")
 
     args = parser.parse_args()
     if not args.command:

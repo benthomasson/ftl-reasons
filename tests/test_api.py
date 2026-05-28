@@ -262,6 +262,31 @@ class TestListNodesDepth:
         ids = [n["id"] for n in result["nodes"]]
         assert ids == ["mid"]
 
+    def test_list_by_label(self, db_path):
+        api.add_node("a", "Node A", db_path=db_path)
+        api.add_node("b", "Node B", sl="a", label="WARNING", db_path=db_path)
+        api.add_node("c", "Node C", sl="a", label="INFO", db_path=db_path)
+
+        result = api.list_nodes(label="WARNING", db_path=db_path)
+        ids = [n["id"] for n in result["nodes"]]
+        assert ids == ["b"]
+
+    def test_list_by_label_no_match(self, db_path):
+        api.add_node("a", "Node A", db_path=db_path)
+        api.add_node("b", "Node B", sl="a", label="INFO", db_path=db_path)
+
+        result = api.list_nodes(label="WARNING", db_path=db_path)
+        assert result["count"] == 0
+
+    def test_list_by_label_premise_excluded(self, db_path):
+        api.add_node("a", "Premise", db_path=db_path)
+        api.add_node("b", "Derived", sl="a", label="WARNING", db_path=db_path)
+
+        result = api.list_nodes(label="WARNING", db_path=db_path)
+        ids = [n["id"] for n in result["nodes"]]
+        assert "a" not in ids
+        assert "b" in ids
+
 
 class TestFtsSearch:
 

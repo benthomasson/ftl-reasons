@@ -1093,7 +1093,7 @@ class PgApi:
         }
 
     def list_nodes(self, status=None, premises_only=False, has_dependents=False,
-                   namespace=None, visible_to=None):
+                   namespace=None, visible_to=None, label=None):
         pid = self.project_id
         conditions = ["n.project_id = %s"]
         params = [pid]
@@ -1111,6 +1111,14 @@ class PgApi:
         if namespace:
             conditions.append("n.id LIKE %s")
             params.append(f"{namespace}:%")
+
+        if label:
+            conditions.append(
+                "EXISTS (SELECT 1 FROM rms_justifications j "
+                "WHERE j.node_id = n.id AND j.project_id = n.project_id "
+                "AND j.label = %s)"
+            )
+            params.append(label)
 
         where = " AND ".join(conditions)
 
