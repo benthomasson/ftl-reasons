@@ -2032,6 +2032,7 @@ def list_nodes(
     not_reviewed_since: int | None = None,
     never_reviewed: bool = False,
     by_impact: bool = False,
+    label: str | None = None,
     db_path: str = DEFAULT_DB,
     pg_conninfo=None, project_id=None,
 ) -> dict:
@@ -2059,7 +2060,7 @@ def list_nodes(
         return _pg_dispatch(pg_conninfo, project_id, "list_nodes",
                             status=status, premises_only=premises_only,
                             has_dependents=has_dependents, namespace=namespace,
-                            visible_to=visible_to)
+                            visible_to=visible_to, label=label)
     from datetime import datetime, timedelta
 
     with _with_network(db_path) as net:
@@ -2079,6 +2080,8 @@ def list_nodes(
             if has_dependents and not node.dependents:
                 continue
             if challenged and not node.metadata.get("challenges"):
+                continue
+            if label and not any(j.label == label for j in node.justifications):
                 continue
             if visible_to is not None and not _is_visible(node, visible_to):
                 continue
