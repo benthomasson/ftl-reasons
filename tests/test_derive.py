@@ -18,6 +18,7 @@ from reasons_lib.derive import (
     _get_depth,
     _tokenize_id,
     _jaccard,
+    _build_derived_section,
 )
 
 
@@ -361,6 +362,40 @@ def test_build_prompt_with_budget(simple_network):
     assert len(prompt_small) < len(prompt_large)
     assert stats_small["budget"] == 2
     assert stats_large["budget"] == 100
+
+
+def test_build_derived_section_cap():
+    nodes = {"p": {"text": "Premise", "truth_value": "IN", "justifications": []}}
+    derived = {}
+    for i in range(10):
+        nid = f"d-{i}"
+        nodes[nid] = {
+            "text": f"Derived {i}",
+            "truth_value": "IN",
+            "justifications": [{"type": "SL", "antecedents": ["p"], "outlist": []}],
+        }
+        derived[nid] = nodes[nid]
+
+    section = _build_derived_section(nodes, derived, max_derived=3)
+    assert section.count("####") == 3
+    assert "7 more derived conclusions omitted" in section
+
+
+def test_build_derived_section_under_cap():
+    nodes = {"p": {"text": "Premise", "truth_value": "IN", "justifications": []}}
+    derived = {}
+    for i in range(3):
+        nid = f"d-{i}"
+        nodes[nid] = {
+            "text": f"Derived {i}",
+            "truth_value": "IN",
+            "justifications": [{"type": "SL", "antecedents": ["p"], "outlist": []}],
+        }
+        derived[nid] = nodes[nid]
+
+    section = _build_derived_section(nodes, derived, max_derived=10)
+    assert section.count("####") == 3
+    assert "omitted" not in section
 
 
 # --- Sampling tests ---
