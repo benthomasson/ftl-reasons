@@ -935,7 +935,8 @@ def _derive_one_round(args, round_num=None, report_state=None,
         budget=args.budget, sample=args.sample, seed=args.seed,
         min_depth=args.min_depth, max_depth_filter=args.max_depth,
         premises_only=args.premises, has_dependents=args.has_dependents,
-        cluster=args.cluster, cluster_cache=cluster_cache,
+        cluster=args.cluster, intra_cluster=args.intra_cluster,
+        round_num=round_num or 0, cluster_cache=cluster_cache,
         embedding_model=args.embedding_model, n_clusters=args.n_clusters,
         prompt_template=prompt_template,
     )
@@ -950,8 +951,11 @@ def _derive_one_round(args, round_num=None, report_state=None,
         hi = stats.get("max_depth_filter", "∞")
         print(f"{prefix}Depth filter: {lo}–{hi}", file=sys.stderr)
     if stats.get("cluster"):
-        print(f"{prefix}Clustering: {stats['n_clusters']} clusters, "
+        cluster_mode = "intra" if stats.get("intra_cluster") else "inter"
+        print(f"{prefix}Clustering ({cluster_mode}): {stats['n_clusters']} clusters, "
               f"model={stats['embedding_model']}", file=sys.stderr)
+        if stats.get("focus_cluster") is not None:
+            print(f"{prefix}Focus: cluster {stats['focus_cluster']}", file=sys.stderr)
     elif stats.get("sample"):
         print(f"{prefix}Sampling: {stats['budget']} beliefs (random)", file=sys.stderr)
     elif stats.get("budget", 300) != 300:
@@ -1086,13 +1090,18 @@ def cmd_derive(args):
             sys.exit(1)
         prompt_template = prompt_path.read_text()
 
-    if args.cluster and args.sample:
-        print("Error: --cluster and --sample are mutually exclusive.",
+    if (args.cluster or args.intra_cluster) and args.sample:
+        print("Error: --cluster/--intra-cluster and --sample are mutually exclusive.",
+              file=sys.stderr)
+        sys.exit(1)
+
+    if args.cluster and args.intra_cluster:
+        print("Error: --cluster and --intra-cluster are mutually exclusive.",
               file=sys.stderr)
         sys.exit(1)
 
     cluster_cache = None
-    if args.cluster:
+    if args.cluster or args.intra_cluster:
         try:
             from .cluster import ClusterCache
             print("Loading embedding model...", file=sys.stderr)
@@ -1126,6 +1135,7 @@ def cmd_derive(args):
                 "budget": args.budget,
                 "sample": args.sample,
                 "cluster": args.cluster,
+                "intra_cluster": args.intra_cluster,
                 "embedding_model": args.embedding_model,
                 "n_clusters": args.n_clusters,
                 "prompt_file": args.prompt_file,
@@ -1670,11 +1680,13 @@ def main():
                    help="Suppress JSON report generation")
     p.add_argument("--cluster", action="store_true",
                    help="Use semantic clustering to sample across domains")
+    p.add_argument("--intra-cluster", action="store_true",
+                   help="Focus on one cluster per round (rotate in --exhaust mode)")
     p.add_argument("--embedding-model", default=None,
-                   help="Sentence-transformers model for --cluster "
+                   help="Sentence-transformers model for --cluster/--intra-cluster "
                         "(default: all-MiniLM-L6-v2)")
     p.add_argument("--n-clusters", type=int, default=None,
-                   help="Override automatic cluster count for --cluster")
+                   help="Override automatic cluster count for --cluster/--intra-cluster")
     p.add_argument("--prompt-file", default=None,
                    help="Custom prompt template file (overrides built-in DERIVE_PROMPT)")
 
