@@ -242,10 +242,12 @@ def repair_smuggled_beliefs(review_results, nodes, model="claude",
             if not dry_run:
                 first_just = node.get("justifications", [{}])[0]
                 original_ants = first_just.get("antecedents", [])
+                original_outlist = first_just.get("outlist", [])
                 new_ants = list(original_ants) + matched_ids
                 api.add_justification(
                     belief_id,
                     sl=",".join(new_ants),
+                    unless=",".join(original_outlist) if original_outlist else "",
                     label=f"repair-smuggled: {claim[:60]}",
                     db_path=db_path,
                 )

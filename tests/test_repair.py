@@ -218,8 +218,7 @@ class TestRepairSmuggledBeliefs:
         assert repairs[0]["status"] == "repaired"
         assert repairs[0]["matched_premises"] == ["premise-a"]
         mock_add.assert_called_once()
-        call_kwargs = mock_add.call_args
-        assert "premise-a" in call_kwargs[1]["sl"] or "premise-a" in call_kwargs[0][1] if call_kwargs[0] else call_kwargs[1]["sl"]
+        assert "premise-a" in mock_add.call_args[1]["sl"]
 
     def test_dry_run_no_apply(self):
         nodes = _make_repair_nodes()
@@ -356,6 +355,96 @@ class TestRepairSmuggledBeliefs:
 
         assert repairs[0]["status"] == "error"
         assert "not found" in repairs[0]["error"]
+
+    def test_preserves_outlist(self):
+        """Repaired justification should preserve the original outlist."""
+        nodes = _make_repair_nodes()
+        nodes["premise-d"] = {
+            "text": "Pressure is normal", "truth_value": "IN", "justifications": [],
+        }
+        nodes["blocker-x"] = {
+            "text": "Experiment was invalid", "truth_value": "OUT", "justifications": [],
+        }
+        nodes["derived-boil"]["justifications"][0]["outlist"] = ["blocker-x"]
+
+        review_results = [{
+            "id": "derived-boil", "valid": False, "comment": "smuggled",
+        }]
+        search_results = [
+            {"id": "premise-d", "text": "Pressure is normal",
+             "truth_value": "IN", "source": "", "match": True},
+        ]
+        extract_resp = self._mock_result("Normal pressure assumed")
+        match_resp = self._mock_result(
+            '{"matched_ids": ["premise-d"], "rationale": "match"}'
+        )
+
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run", side_effect=[extract_resp, match_resp]), \
+             patch("reasons_lib.api.add_justification") as mock_add:
+            repairs = repair_smuggled_beliefs(
+                review_results, nodes, db_path="test.db",
+                search_fn=self._mock_search(search_results),
+            )
+
+        assert repairs[0]["status"] == "repaired"
+        mock_add.assert_called_once()
+        assert mock_add.call_args[1]["unless"] == "blocker-x"
+
+    def test_multiple_invalid_beliefs(self):
+        """Processes multiple invalid beliefs in one batch."""
+        nodes = _make_repair_nodes()
+        nodes["premise-d"] = {
+            "text": "Steam is gaseous water", "truth_value": "IN", "justifications": [],
+        }
+        nodes["derived-steam"] = {
+            "text": "Steam was produced",
+            "truth_value": "IN",
+            "justifications": [{
+                "type": "SL",
+                "antecedents": ["premise-c"],
+                "outlist": [],
+                "label": "",
+            }],
+        }
+        review_results = [
+            {"id": "derived-boil", "valid": False, "comment": "smuggled boiling"},
+            {"id": "derived-steam", "valid": False, "comment": "smuggled steam"},
+        ]
+        extract_resp1 = self._mock_result("Water boils at 100C")
+        match_resp1 = self._mock_result(
+            '{"matched_ids": ["premise-a"], "rationale": "match"}'
+        )
+        extract_resp2 = self._mock_result("Steam is gaseous water")
+        match_resp2 = self._mock_result(
+            '{"matched_ids": ["premise-d"], "rationale": "match"}'
+        )
+        search1 = [
+            {"id": "premise-a", "text": "Water boils at 100C at sea level",
+             "truth_value": "IN", "source": "", "match": True},
+        ]
+        search2 = [
+            {"id": "premise-d", "text": "Steam is gaseous water",
+             "truth_value": "IN", "source": "", "match": True},
+        ]
+        call_count = [0]
+        def mock_search(query, **kw):
+            call_count[0] += 1
+            return json.dumps(search1 if call_count[0] == 1 else search2)
+
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run", side_effect=[
+                 extract_resp1, match_resp1, extract_resp2, match_resp2,
+             ]), \
+             patch("reasons_lib.api.add_justification"):
+            repairs = repair_smuggled_beliefs(
+                review_results, nodes, db_path="test.db",
+                search_fn=mock_search,
+            )
+
+        assert len(repairs) == 2
+        assert repairs[0]["status"] == "repaired"
+        assert repairs[1]["status"] == "repaired"
 
     def test_skips_valid_beliefs(self):
         """Only processes beliefs where valid=False."""
