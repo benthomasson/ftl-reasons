@@ -2399,6 +2399,70 @@ def review_beliefs(
     }
 
 
+def repair_smuggled(
+    review_file: str | None = None,
+    belief_ids: list[str] | None = None,
+    model: str = "claude",
+    timeout: int = 300,
+    dry_run: bool = False,
+    db_path: str = DEFAULT_DB,
+) -> dict:
+    """Repair smuggled premises by searching for and linking existing premises.
+
+    Two input modes:
+        review_file: path to a review-beliefs JSON report — extract invalid results
+        belief_ids: re-review these beliefs inline, then repair invalids
+
+    Returns dict with repairs list and summary counts.
+    """
+    from .repair import repair_smuggled_beliefs
+
+    if review_file:
+        import json as _json
+        with open(review_file) as f:
+            report = _json.load(f)
+        review_results = report.get("results", [])
+    elif belief_ids:
+        result = review_beliefs(
+            belief_ids=belief_ids, model=model, timeout=timeout,
+            dry_run=True, db_path=db_path,
+        )
+        review_results = result["results"]
+    else:
+        raise ValueError("Provide either review_file or belief_ids")
+
+    invalid = [r for r in review_results if not r.get("valid", True)]
+
+    if not invalid:
+        return {
+            "repairs": [],
+            "total_invalid": 0,
+            "repaired": 0,
+            "no_candidates": 0,
+            "no_match": 0,
+            "extraction_failed": 0,
+            "errors": 0,
+        }
+
+    net = export_network(db_path=db_path)
+    nodes = net.get("nodes", {})
+
+    repairs = repair_smuggled_beliefs(
+        invalid, nodes, model=model, timeout=timeout,
+        db_path=db_path, dry_run=dry_run,
+    )
+
+    return {
+        "repairs": repairs,
+        "total_invalid": len(invalid),
+        "repaired": sum(1 for r in repairs if r["status"] == "repaired"),
+        "no_candidates": sum(1 for r in repairs if r["status"] == "no_candidates"),
+        "no_match": sum(1 for r in repairs if r["status"] == "no_match"),
+        "extraction_failed": sum(1 for r in repairs if r["status"] == "extraction_failed"),
+        "errors": sum(1 for r in repairs if r["status"] == "error"),
+    }
+
+
 def detect_contradictions(
     belief_ids: list[str] | None = None,
     model: str = "claude",
