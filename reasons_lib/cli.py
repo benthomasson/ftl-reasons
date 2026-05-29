@@ -1424,6 +1424,48 @@ def cmd_review_beliefs(args):
                 print(f"  ERROR retracting {r['id']}: {e}", file=sys.stderr)
 
 
+def cmd_repair_smuggled(args):
+    _require_sqlite(args, "repair-smuggled")
+
+    model = getattr(args, "model", None) or "claude"
+    review_file = getattr(args, "review_file", None)
+    belief_ids = args.ids if args.ids else None
+
+    if not review_file and not belief_ids:
+        print("Error: provide either --review-file or belief IDs", file=sys.stderr)
+        sys.exit(1)
+
+    result = api.repair_smuggled(
+        review_file=review_file,
+        belief_ids=belief_ids,
+        model=model,
+        timeout=args.timeout,
+        dry_run=args.dry_run,
+        db_path=args.db,
+    )
+
+    repairs = result["repairs"]
+    for r in repairs:
+        status = r["status"].upper()
+        print(f"  [{status}] {r['id']}")
+        if r.get("smuggled_claim"):
+            print(f"    Smuggled: {r['smuggled_claim']}")
+        if r.get("matched_premises"):
+            print(f"    Linked: {', '.join(r['matched_premises'])}")
+        if r.get("rationale"):
+            print(f"    Rationale: {r['rationale']}")
+        if r.get("error"):
+            print(f"    Error: {r['error']}")
+
+    print(f"\nTotal invalid: {result['total_invalid']}")
+    print(f"  Repaired: {result['repaired']}  No candidates: {result['no_candidates']}"
+          f"  No match: {result['no_match']}  Extract failed: {result['extraction_failed']}"
+          f"  Errors: {result['errors']}")
+
+    if args.dry_run:
+        print("\n  (dry run -- no changes applied)")
+
+
 def cmd_contradictions(args):
     _require_sqlite(args, "detect-contradictions")
 
@@ -1880,6 +1922,19 @@ def main():
     p.add_argument("--no-report", action="store_true",
                    help="Skip JSON report generation")
 
+    # repair-smuggled
+    p = sub.add_parser("repair-smuggled",
+        help="Repair smuggled premises by finding and linking existing premises")
+    p.add_argument("ids", nargs="*", help="Belief IDs to review and repair")
+    p.add_argument("--review-file", default=None,
+                   help="Path to review-beliefs JSON report")
+    p.add_argument("-m", "--model", default=None,
+                   help="Model to use (default: claude)")
+    p.add_argument("--timeout", type=int, default=300,
+                   help="LLM timeout in seconds (default: 300)")
+    p.add_argument("--dry-run", action="store_true",
+                   help="Report findings without applying repairs")
+
     # contradictions
     p = sub.add_parser("contradictions", help="Detect contradictions between IN beliefs")
     p.add_argument("ids", nargs="*", help="Specific belief IDs to check (default: all IN)")
@@ -1973,6 +2028,7 @@ def main():
         "list-gated": cmd_list_gated,
         "list-negative": cmd_list_negative,
         "review-beliefs": cmd_review_beliefs,
+        "repair-smuggled": cmd_repair_smuggled,
         "contradictions": cmd_contradictions,
         "namespaces": cmd_namespaces,
     }
