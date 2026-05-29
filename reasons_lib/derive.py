@@ -318,11 +318,15 @@ def _build_beliefs_section(nodes, derived, agents=None, max_beliefs=300,
     return "\n".join(lines), None
 
 
-def _build_derived_section(nodes, derived):
+def _build_derived_section(nodes, derived, max_derived=300):
     """Build the derived conclusions section for the derive prompt."""
     memo = {}
     lines = []
+    count = 0
     for k in sorted(derived, key=lambda x: -_get_depth(x, nodes, derived, memo)):
+        if count >= max_derived:
+            lines.append(f"\n... ({len(derived) - count} more derived conclusions omitted)")
+            break
         depth = _get_depth(k, nodes, derived, memo)
         text = nodes[k]["text"][:150]
         justs = derived[k]["justifications"]
@@ -335,6 +339,7 @@ def _build_derived_section(nodes, derived):
         lines.append(f"- Antecedents: {', '.join(antes)}")
         if outlist:
             lines.append(f"- Unless: {', '.join(outlist)}")
+        count += 1
 
     return "\n".join(lines) if lines else "(No derived conclusions yet)"
 
@@ -494,7 +499,7 @@ def build_prompt(nodes, domain=None, topic=None, budget=300, sample=False,
         cluster=cluster, cluster_cache=cluster_cache,
         embedding_model=embedding_model, n_clusters=n_clusters,
     )
-    derived_section = _build_derived_section(nodes, derived)
+    derived_section = _build_derived_section(nodes, derived, max_derived=budget)
 
     template = prompt_template or DERIVE_PROMPT
     try:
