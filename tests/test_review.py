@@ -358,6 +358,40 @@ class TestReviewBeliefsApi:
         # Only derived-abc depends on derived-ab
         assert result["reviewed"] == 1
 
+    def test_namespace_filter(self, db_path):
+        api.add_node("eng:premise-x", "X is true", db_path=db_path)
+        api.add_node("eng:derived-x", "X derived", sl="eng:premise-x",
+                      label="eng", db_path=db_path)
+        mock_response = json.dumps([
+            {"id": "eng:derived-x", "valid": True, "sufficient": True,
+             "necessary": True, "unnecessary_antecedents": [], "comment": "ok"},
+        ])
+        mock_result = type("R", (), {"returncode": 0, "stdout": mock_response, "stderr": ""})()
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+            result = api.review_beliefs(namespace="eng", db_path=db_path)
+        assert result["reviewed"] == 1
+        assert result["results"][0]["id"] == "eng:derived-x"
+
+    def test_empty_namespace_filters_local(self, db_path):
+        api.add_node("eng:premise-x", "X is true", db_path=db_path)
+        api.add_node("eng:derived-x", "X derived", sl="eng:premise-x",
+                      label="eng", db_path=db_path)
+        mock_response = json.dumps([
+            {"id": "derived-ab", "valid": True, "sufficient": True,
+             "necessary": True, "unnecessary_antecedents": [], "comment": "ok"},
+            {"id": "derived-abc", "valid": True, "sufficient": True,
+             "necessary": True, "unnecessary_antecedents": [], "comment": "ok"},
+        ])
+        mock_result = type("R", (), {"returncode": 0, "stdout": mock_response, "stderr": ""})()
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+            result = api.review_beliefs(namespace="", db_path=db_path)
+        # Only local derived beliefs (no colon in ID)
+        assert result["reviewed"] == 2
+        ids = [r["id"] for r in result["results"]]
+        assert "eng:derived-x" not in ids
+
     def test_returns_summary_counts(self, db_path):
         mock_response = json.dumps([
             {"id": "derived-ab", "valid": False, "sufficient": True,
