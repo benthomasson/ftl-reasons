@@ -1317,6 +1317,7 @@ def cmd_review_beliefs(args):
                 "belief_ids": args.ids or None,
                 "min_depth": args.min_depth,
                 "depends_on": args.depends_on,
+                "namespace": args.namespace,
                 "sample": args.sample,
                 "visible_to": _parse_visible_to(args),
             },
@@ -1342,6 +1343,7 @@ def cmd_review_beliefs(args):
         timeout=args.timeout,
         min_depth=args.min_depth,
         depends_on=args.depends_on,
+        namespace=args.namespace,
         sample=args.sample,
         visible_to=_parse_visible_to(args),
         dry_run=args.dry_run,
@@ -1849,6 +1851,8 @@ def main():
                    help="Only review beliefs at this depth or deeper")
     p.add_argument("--depends-on", default=None,
                    help="Only review beliefs depending on this node")
+    p.add_argument("-n", "--namespace", default=None,
+                   help="Filter by agent namespace (use empty string '' for local beliefs only)")
     p.add_argument("--sample", type=int, default=None,
                    help="Randomly sample N beliefs to review")
     p.add_argument("--dry-run", action="store_true",

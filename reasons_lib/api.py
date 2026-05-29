@@ -2295,6 +2295,7 @@ def review_beliefs(
     timeout: int = 300,
     min_depth: int | None = None,
     depends_on: str | None = None,
+    namespace: str | None = None,
     sample: int | None = None,
     visible_to: list[str] | None = None,
     dry_run: bool = False,
@@ -2354,6 +2355,15 @@ def review_beliefs(
                 for j in v.get("justifications", [])
             )
         }
+
+    if namespace is not None:
+        if namespace == "":
+            candidates = {k: v for k, v in candidates.items() if ":" not in k}
+        else:
+            candidates = {
+                k: v for k, v in candidates.items()
+                if k.startswith(f"{namespace}:")
+            }
 
     if sample is not None and len(candidates) > sample:
         import random
