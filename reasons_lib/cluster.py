@@ -147,6 +147,60 @@ def cluster_beliefs(beliefs, budget, seed=None, n_clusters=None,
     }
 
 
+def cluster_beliefs_intra(beliefs, budget, round_num=0, seed=None,
+                          n_clusters=None, cache=None,
+                          model_name=DEFAULT_MODEL):
+    """Cluster beliefs and focus budget on one cluster per round.
+
+    Rotates through clusters via round_num % k, giving the LLM
+    topically adjacent beliefs that are more likely to combine.
+
+    Returns:
+        (selected_ids, cluster_stats) with focus_cluster index.
+    """
+    _require_cluster_deps()
+
+    if len(beliefs) <= budget:
+        return list(beliefs.keys()), {
+            "n_clusters": 1,
+            "cluster_sizes": [len(beliefs)],
+            "embedding_model": model_name,
+            "focus_cluster": 0,
+        }
+
+    if cache is None:
+        cache = ClusterCache(model_name)
+
+    ids, embeddings = cache.embed(beliefs)
+
+    k = _auto_k(len(beliefs), n_clusters, max_k=min(budget // 3, 20))
+
+    km = KMeans(n_clusters=k, random_state=seed, n_init=10)
+    labels = km.fit_predict(embeddings)
+
+    clusters = {}
+    for i, nid in enumerate(ids):
+        clusters.setdefault(labels[i], []).append(nid)
+
+    cluster_sizes = [len(clusters[c]) for c in sorted(clusters)]
+
+    sorted_labels = sorted(clusters, key=lambda c: -len(clusters[c]))
+    focus_idx = round_num % k
+    focus_label = sorted_labels[focus_idx]
+    members = clusters[focus_label]
+
+    rng = random.Random(seed)
+    alloc = min(budget, len(members))
+    selected = rng.sample(members, alloc)
+
+    return selected, {
+        "n_clusters": k,
+        "cluster_sizes": cluster_sizes,
+        "embedding_model": cache.model_name,
+        "focus_cluster": focus_idx,
+    }
+
+
 def list_clusters(beliefs, n_clusters=None, seed=None, cache=None,
                   model_name=DEFAULT_MODEL):
     """Cluster beliefs and return full cluster assignments.

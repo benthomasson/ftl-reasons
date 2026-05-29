@@ -964,6 +964,27 @@ def test_build_prompt_cluster_with_agents(agent_network):
     assert "Agent: agent-b" in prompt
 
 
+@skip_no_cluster
+def test_build_prompt_with_intra_cluster(simple_network):
+    nodes = api.export_network(db_path=simple_network)["nodes"]
+    prompt, stats = build_prompt(nodes, intra_cluster=True, budget=10, seed=42)
+    assert stats.get("cluster") is True
+    assert stats.get("intra_cluster") is True
+    assert "focus_cluster" in stats
+    assert "n_clusters" in stats
+    assert len(prompt) > 0
+
+
+@skip_no_cluster
+def test_intra_cluster_rotation():
+    from reasons_lib.cluster import cluster_beliefs_intra
+    beliefs = {f"b-{i}": f"Belief about topic {i % 3}" for i in range(30)}
+    ids_r0, stats_r0 = cluster_beliefs_intra(beliefs, budget=5, round_num=0, seed=42)
+    ids_r1, stats_r1 = cluster_beliefs_intra(beliefs, budget=5, round_num=1, seed=42)
+    assert stats_r0["focus_cluster"] != stats_r1["focus_cluster"]
+    assert set(ids_r0) != set(ids_r1)
+
+
 def test_build_prompt_custom_template(simple_network):
     data = api.export_network(db_path=simple_network)
     template = "Custom prompt with {total_in} beliefs and depth {max_depth}. {beliefs_section}{derived_section}{domain_context}{cross_agent_task}{agents_stats}{total_derived}"

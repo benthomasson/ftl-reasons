@@ -165,7 +165,8 @@ def _sample_beliefs(belief_ids, budget, rng=None):
 
 def _build_beliefs_section(nodes, derived, agents=None, max_beliefs=300,
                            sample=False, seed=None,
-                           cluster=False, cluster_cache=None,
+                           cluster=False, intra_cluster=False,
+                           round_num=0, cluster_cache=None,
                            embedding_model=None, n_clusters=None):
     """Build a compact beliefs section for the derive prompt.
 
@@ -174,6 +175,8 @@ def _build_beliefs_section(nodes, derived, agents=None, max_beliefs=300,
         sample: If True, randomly sample beliefs instead of alphabetical truncation.
         seed: Random seed for reproducible sampling.
         cluster: If True, use semantic clustering to sample across domains.
+        intra_cluster: If True, focus budget on one cluster per round.
+        round_num: Current round number (for intra-cluster rotation).
         cluster_cache: Optional ClusterCache for embedding reuse across rounds.
         embedding_model: Sentence-transformers model name for clustering.
         n_clusters: Override automatic cluster count.
@@ -186,7 +189,15 @@ def _build_beliefs_section(nodes, derived, agents=None, max_beliefs=300,
     in_nodes = {k: v for k, v in nodes.items()
                 if v.get("truth_value") == "IN" and k not in derived}
 
-    if cluster:
+    if intra_cluster:
+        from .cluster import cluster_beliefs_intra as _cluster_intra
+        belief_texts = {k: v["text"] for k, v in in_nodes.items()}
+        selected_ids, cluster_stats = _cluster_intra(
+            belief_texts, max_beliefs, round_num=round_num, seed=seed,
+            n_clusters=n_clusters, cache=cluster_cache,
+            model_name=embedding_model or "all-MiniLM-L6-v2",
+        )
+    elif cluster:
         from .cluster import cluster_beliefs as _cluster
         belief_texts = {k: v["text"] for k, v in in_nodes.items()}
         selected_ids, cluster_stats = _cluster(
@@ -194,6 +205,7 @@ def _build_beliefs_section(nodes, derived, agents=None, max_beliefs=300,
             cache=cluster_cache, model_name=embedding_model or "all-MiniLM-L6-v2",
         )
 
+    if intra_cluster or cluster:
         if agents:
             for agent_name in sorted(agents, key=lambda a: -len(agents[a])):
                 agent_sel = sorted(k for k in selected_ids
@@ -405,7 +417,8 @@ def parse_proposals(response):
 def build_prompt(nodes, domain=None, topic=None, budget=300, sample=False,
                  seed=None, min_depth=None, max_depth_filter=None,
                  premises_only=False, has_dependents=False,
-                 cluster=False, cluster_cache=None, embedding_model=None,
+                 cluster=False, intra_cluster=False, round_num=0,
+                 cluster_cache=None, embedding_model=None,
                  n_clusters=None, prompt_template=None):
     """Build the full derive prompt from a network's nodes dict.
 
@@ -496,7 +509,8 @@ def build_prompt(nodes, domain=None, topic=None, budget=300, sample=False,
     beliefs_section, cluster_stats = _build_beliefs_section(
         nodes, derived, agents, max_beliefs=budget,
         sample=sample, seed=seed,
-        cluster=cluster, cluster_cache=cluster_cache,
+        cluster=cluster, intra_cluster=intra_cluster,
+        round_num=round_num, cluster_cache=cluster_cache,
         embedding_model=embedding_model, n_clusters=n_clusters,
     )
     derived_section = _build_derived_section(nodes, derived, max_derived=budget)
@@ -543,11 +557,14 @@ def build_prompt(nodes, domain=None, topic=None, budget=300, sample=False,
         stats["max_depth_filter"] = max_depth_filter
     stats["budget"] = budget
     stats["sample"] = sample
-    if cluster and cluster_stats:
+    if (cluster or intra_cluster) and cluster_stats:
         stats["cluster"] = True
+        stats["intra_cluster"] = intra_cluster
         stats["n_clusters"] = cluster_stats["n_clusters"]
         stats["cluster_sizes"] = cluster_stats["cluster_sizes"]
         stats["embedding_model"] = cluster_stats["embedding_model"]
+        if "focus_cluster" in cluster_stats:
+            stats["focus_cluster"] = cluster_stats["focus_cluster"]
 
     return prompt, stats
 
