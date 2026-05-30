@@ -1,12 +1,13 @@
-"""Repair smuggled premises by search-and-link.
+"""Research and repair flagged beliefs.
 
-Given beliefs flagged invalid by review-beliefs (smuggled premise —
-conclusion introduces facts not present in any antecedent), this module:
-1. Extracts the specific smuggled claim via LLM
-2. Searches the belief network for matching premises
-3. Wires found premises as new antecedents via add_justification
+Three patterns for resolving beliefs flagged invalid by review-beliefs:
 
-Requires two LLM calls per invalid belief (extract + match).
+1. Search-and-link — belief is sound but missing an antecedent; find and wire it
+2. Soften — belief overstates the evidence; weaken text to match antecedents
+3. Abandon — dependency tree too broken to repair; retract
+
+The `research_beliefs` orchestrator triages each invalid belief via LLM,
+then executes the appropriate pattern.
 """
 
 import json
@@ -62,6 +63,62 @@ Respond with ONLY a JSON object in this exact format:
 {{"matched_ids": ["premise-id-1", "premise-id-2"], "rationale": "brief explanation"}}
 
 If no match: {{"matched_ids": [], "rationale": "brief explanation"}}"""
+
+TRIAGE_PROMPT = """\
+You are triaging a derived belief that was flagged as invalid in a Truth Maintenance System.
+Your task: decide which repair pattern is most appropriate.
+
+## Invalid belief
+
+{belief_context}
+
+## Review finding
+
+{review_comment}
+
+## Dependency info
+
+- Belief depth: {depth}
+- Flagged ancestors in this batch: {flagged_ancestors}
+
+## Patterns
+
+1. **search_and_link** — The core claim is sound, but the derivation is missing an antecedent
+   that probably exists elsewhere in the network. Choose this when the conclusion is reasonable
+   but the justification chain has a gap that could be filled by finding an existing premise.
+
+2. **soften** — The claim overstates what the antecedents support. The insight is partially
+   valid but the wording is too strong (e.g., "sole mechanism" when evidence only supports
+   "primary mechanism"). Choose this when weakening the text would make it follow from
+   the antecedents.
+
+3. **abandon** — The belief sits atop a broken dependency chain or makes claims too far
+   removed from the evidence to repair. Choose this when neither linking nor softening
+   can make the derivation sound.
+
+Respond with ONLY a JSON object:
+{{"pattern": "search_and_link" | "soften" | "abandon", "rationale": "brief explanation"}}"""
+
+SOFTEN_PROMPT = """\
+You are rewriting a derived belief to match what its antecedents actually support.
+The original belief was flagged as invalid because it overstates the evidence.
+
+## Original belief
+
+{belief_text}
+
+## Antecedents (the evidence)
+
+{antecedents}
+
+Rewrite the belief so it follows strictly from the antecedents. Weaken any absolute claims
+to qualified ones (e.g., "the mechanism" -> "a primary mechanism", "ensures" -> "supports").
+Preserve the core insight but remove unsupported specificity.
+
+Respond with ONLY a JSON object:
+{{"softened_text": "the rewritten claim", "rationale": "what was weakened and why"}}"""
+
+VALID_PATTERNS = {"search_and_link", "soften", "abandon"}
 
 
 def parse_extract_response(response):
@@ -136,6 +193,278 @@ def find_matching_premises(smuggled_claim, candidates, model="claude",
     response = invoke_model(prompt, model=model, timeout=timeout)
     valid_ids = {c["id"] for c in candidates}
     return parse_match_response(response, valid_ids)
+
+
+def parse_triage_response(response):
+    """Extract triage result JSON from LLM response."""
+    decoder = json.JSONDecoder()
+    for i, ch in enumerate(response):
+        if ch != "{":
+            continue
+        try:
+            obj, _ = decoder.raw_decode(response, i)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        pattern = obj.get("pattern", "")
+        if pattern not in VALID_PATTERNS:
+            continue
+        return {
+            "pattern": pattern,
+            "rationale": obj.get("rationale", ""),
+        }
+    return {"pattern": "", "rationale": ""}
+
+
+def parse_soften_response(response):
+    """Extract softened text JSON from LLM response."""
+    decoder = json.JSONDecoder()
+    for i, ch in enumerate(response):
+        if ch != "{":
+            continue
+        try:
+            obj, _ = decoder.raw_decode(response, i)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        text = obj.get("softened_text", "")
+        if text:
+            return {
+                "softened_text": text,
+                "rationale": obj.get("rationale", ""),
+            }
+    return {"softened_text": "", "rationale": ""}
+
+
+def triage_belief(belief_context, review_comment, depth=0,
+                  flagged_ancestors=0, model="claude", timeout=300):
+    """LLM call: triage an invalid belief into a repair pattern."""
+    prompt = TRIAGE_PROMPT.format(
+        belief_context=belief_context,
+        review_comment=review_comment,
+        depth=depth,
+        flagged_ancestors=flagged_ancestors,
+    )
+    response = invoke_model(prompt, model=model, timeout=timeout)
+    return parse_triage_response(response)
+
+
+def soften_belief(belief_text, antecedents_text, model="claude", timeout=300):
+    """LLM call: produce a softened version of an overstated belief."""
+    prompt = SOFTEN_PROMPT.format(
+        belief_text=belief_text,
+        antecedents=antecedents_text,
+    )
+    response = invoke_model(prompt, model=model, timeout=timeout)
+    return parse_soften_response(response)
+
+
+def _compute_depth(node_id, nodes, memo=None):
+    """Compute derivation depth: 0 for premises, max(antecedent depths)+1."""
+    if memo is None:
+        memo = {}
+    if node_id in memo:
+        return memo[node_id]
+    node = nodes.get(node_id)
+    if not node or not node.get("justifications"):
+        memo[node_id] = 0
+        return 0
+    memo[node_id] = 0
+    max_d = 0
+    for j in node["justifications"]:
+        for a in j.get("antecedents", []):
+            max_d = max(max_d, _compute_depth(a, nodes, memo))
+    memo[node_id] = max_d + 1
+    return max_d + 1
+
+
+def _format_antecedents(node, nodes):
+    """Format antecedent texts for soften prompt."""
+    lines = []
+    for j in node.get("justifications", []):
+        for ant_id in j.get("antecedents", []):
+            ant = nodes.get(ant_id)
+            if ant:
+                lines.append(f"- {ant_id}: {ant.get('text', '')}")
+    return "\n".join(lines) if lines else "(no antecedents)"
+
+
+def _do_search_and_link(belief_id, node, nodes, comment, model, timeout,
+                        db_path, dry_run, search_fn):
+    """Execute Pattern 1: search-and-link for a single belief."""
+    from . import api
+
+    belief_context = format_belief_for_review(belief_id, nodes)
+
+    claim = extract_smuggled_claim(belief_context, comment,
+                                   model=model, timeout=timeout)
+    if not claim:
+        return "extraction_failed", claim, [], ""
+
+    existing_ants = set()
+    for j in node.get("justifications", []):
+        existing_ants.update(j.get("antecedents", []))
+
+    raw = search_fn(claim, format="json", db_path=db_path)
+    try:
+        search_results = json.loads(raw) if isinstance(raw, str) else raw
+    except (json.JSONDecodeError, TypeError):
+        search_results = []
+
+    candidates = []
+    for sr in search_results:
+        sid = sr.get("id", "")
+        if sid == belief_id or sid in existing_ants:
+            continue
+        if sr.get("truth_value") != "IN":
+            continue
+        sr_node = nodes.get(sid)
+        if sr_node and sr_node.get("justifications"):
+            continue
+        candidates.append({"id": sid, "text": sr.get("text", "")})
+
+    if not candidates:
+        return "no_candidates", claim, [], ""
+
+    match = find_matching_premises(claim, candidates,
+                                   model=model, timeout=timeout)
+    matched_ids = match.get("matched_ids", [])
+
+    if not matched_ids:
+        return "no_match", claim, [], match.get("rationale", "")
+
+    if not dry_run:
+        first_just = node.get("justifications", [{}])[0]
+        original_ants = first_just.get("antecedents", [])
+        original_outlist = first_just.get("outlist", [])
+        new_ants = list(original_ants) + matched_ids
+        api.add_justification(
+            belief_id,
+            sl=",".join(new_ants),
+            unless=",".join(original_outlist) if original_outlist else "",
+            label=f"research: linked {claim[:50]}",
+            db_path=db_path,
+        )
+
+    return "linked", claim, matched_ids, match.get("rationale", "")
+
+
+def research_beliefs(review_results, nodes, model="claude",
+                     timeout=300, db_path=None, dry_run=False,
+                     search_fn=None):
+    """Orchestrate triage and repair for invalid beliefs.
+
+    Triages each invalid belief into search_and_link, soften, or abandon,
+    then executes the appropriate pattern.
+
+    Returns list of research result dicts.
+    """
+    from . import api
+
+    if search_fn is None:
+        search_fn = lambda query, **kw: api.search(query, **kw)
+
+    invalid = [r for r in review_results if not r.get("valid", True)]
+    invalid_ids = {r["id"] for r in invalid}
+    depth_memo = {}
+    results = []
+
+    for r in invalid:
+        belief_id = r["id"]
+        result = {
+            "id": belief_id,
+            "pattern": None,
+            "status": "error",
+            "rationale": None,
+            "smuggled_claim": None,
+            "matched_premises": [],
+            "softened_text": None,
+            "error": None,
+        }
+
+        try:
+            node = nodes.get(belief_id)
+            if not node:
+                result["error"] = "belief not found in network"
+                results.append(result)
+                continue
+
+            belief_context = format_belief_for_review(belief_id, nodes)
+            comment = r.get("comment", "")
+            depth = _compute_depth(belief_id, nodes, depth_memo)
+
+            flagged_ancestors = 0
+            for j in node.get("justifications", []):
+                for ant_id in j.get("antecedents", []):
+                    if ant_id in invalid_ids:
+                        flagged_ancestors += 1
+
+            print(f"  Triaging {belief_id} (depth={depth})...",
+                  file=sys.stderr)
+            triage = triage_belief(belief_context, comment,
+                                   depth=depth,
+                                   flagged_ancestors=flagged_ancestors,
+                                   model=model, timeout=timeout)
+            pattern = triage.get("pattern", "")
+            result["pattern"] = pattern
+            result["rationale"] = triage.get("rationale", "")
+
+            if not pattern:
+                result["status"] = "triage_failed"
+                results.append(result)
+                continue
+
+            if pattern == "search_and_link":
+                print(f"  Pattern: search-and-link for {belief_id}...",
+                      file=sys.stderr)
+                status, claim, matched, rationale = _do_search_and_link(
+                    belief_id, node, nodes, comment, model, timeout,
+                    db_path, dry_run, search_fn,
+                )
+                result["status"] = status
+                result["smuggled_claim"] = claim
+                result["matched_premises"] = matched
+                if rationale:
+                    result["rationale"] = rationale
+
+            elif pattern == "soften":
+                print(f"  Pattern: soften for {belief_id}...",
+                      file=sys.stderr)
+                ant_text = _format_antecedents(node, nodes)
+                soften_result = soften_belief(
+                    node.get("text", ""), ant_text,
+                    model=model, timeout=timeout,
+                )
+                softened = soften_result.get("softened_text", "")
+                if not softened:
+                    result["status"] = "soften_failed"
+                    results.append(result)
+                    continue
+                result["softened_text"] = softened
+                result["rationale"] = soften_result.get("rationale", "")
+                if not dry_run:
+                    api.update_node(belief_id, text=softened, db_path=db_path)
+                result["status"] = "softened"
+
+            elif pattern == "abandon":
+                print(f"  Pattern: abandon for {belief_id}...",
+                      file=sys.stderr)
+                if not dry_run:
+                    api.retract_node(
+                        belief_id,
+                        reason=f"research: abandoned — {triage.get('rationale', '')}",
+                        db_path=db_path,
+                    )
+                result["status"] = "abandoned"
+
+        except Exception as exc:
+            result["error"] = str(exc)
+
+        results.append(result)
+
+    return results
 
 
 def repair_smuggled_beliefs(review_results, nodes, model="claude",
