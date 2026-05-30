@@ -1425,11 +1425,10 @@ class PgApi:
                 raise KeyError(f"Node '{node_id}' not found")
 
             if example is not None:
-                import json as _json
-                meta = _json.loads(row[1]) if row[1] else {}
+                meta = json.loads(row[1]) if row[1] else {}
                 meta["example"] = example
                 updates.append("metadata_json = %s")
-                params.append(_json.dumps(meta))
+                params.append(json.dumps(meta))
                 updated_fields.append("example")
 
             if not updates:

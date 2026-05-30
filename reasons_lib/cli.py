@@ -276,7 +276,8 @@ def cmd_show(args):
         print(f"\nRetract reason: {node['metadata']['retract_reason']}")
 
     if node["metadata"].get("example"):
-        print(f"\nExample:\n  {node['metadata']['example']}")
+        indented = node["metadata"]["example"].replace("\n", "\n  ")
+        print(f"\nExample:\n  {indented}")
 
     if node["dependents"]:
         print(f"\nDependents: {', '.join(node['dependents'])}")

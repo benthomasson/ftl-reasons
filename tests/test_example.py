@@ -132,6 +132,29 @@ class TestCmdShowExample:
         assert "Example:" in stdout
         assert "x = func()" in stdout
 
+    def test_show_multiline_example(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        code_snippet = "x = 1\ny = 2\nprint(x + y)"
+        api.add_node("n1", "A belief", example=code_snippet, db_path=db)
+        stdout, stderr, code = run_cli("show", "n1", db_path=db)
+        assert code == 0
+        lines = stdout.split("\n")
+        example_lines = []
+        capture = False
+        for line in lines:
+            if line.strip().startswith("Example:"):
+                capture = True
+                continue
+            if capture:
+                if line.startswith("  "):
+                    example_lines.append(line)
+                elif line.strip() == "":
+                    continue
+                else:
+                    break
+        assert len(example_lines) == 3
+        assert all(line.startswith("  ") for line in example_lines)
+
     def test_show_no_example(self, tmp_path):
         db = str(tmp_path / "test.db")
         api.add_node("n1", "A belief", db_path=db)
