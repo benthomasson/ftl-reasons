@@ -198,11 +198,13 @@ class PgApi:
 
     def add_node(self, node_id, text, sl="", cp="", unless="", label="",
                  source="", source_url="", access_tags=None,
-                 namespace=None):
+                 namespace=None, example=None):
         pid = self.project_id
         metadata = {}
         if access_tags:
             metadata["access_tags"] = sorted(access_tags)
+        if example is not None:
+            metadata["example"] = example
 
         if namespace:
             if ":" not in node_id:
@@ -1393,7 +1395,8 @@ class PgApi:
             "changed": changed,
         }
 
-    def update_node(self, node_id, text=None, source=None, source_url=None):
+    def update_node(self, node_id, text=None, source=None, source_url=None,
+                    example=None):
         pid = self.project_id
         updates = []
         params = []
@@ -1412,16 +1415,24 @@ class PgApi:
             params.append(source_url)
             updated_fields.append("source_url")
 
-        if not updates:
-            return {"node_id": node_id, "updated_fields": []}
-
         with self.conn.cursor() as cur:
             cur.execute(
-                "SELECT id FROM rms_nodes WHERE id = %s AND project_id = %s",
+                "SELECT id, metadata_json FROM rms_nodes WHERE id = %s AND project_id = %s",
                 (node_id, pid),
             )
-            if not cur.fetchone():
+            row = cur.fetchone()
+            if not row:
                 raise KeyError(f"Node '{node_id}' not found")
+
+            if example is not None:
+                meta = json.loads(row[1]) if row[1] else {}
+                meta["example"] = example
+                updates.append("metadata_json = %s")
+                params.append(json.dumps(meta))
+                updated_fields.append("example")
+
+            if not updates:
+                return {"node_id": node_id, "updated_fields": []}
 
             params.extend([node_id, pid])
             cur.execute(

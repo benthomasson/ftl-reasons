@@ -56,6 +56,7 @@ def cmd_add(args):
             namespace=getattr(args, "namespace", None),
             any_mode=getattr(args, "any", False),
             access_tags=access_tags,
+            example=getattr(args, "example", None),
             **_backend_kwargs(args),
         )
         print(f"Added {result['node_id']} [{result['truth_value']}] ({result['type']})")
@@ -274,6 +275,10 @@ def cmd_show(args):
     if node["metadata"].get("retract_reason"):
         print(f"\nRetract reason: {node['metadata']['retract_reason']}")
 
+    if node["metadata"].get("example"):
+        indented = node["metadata"]["example"].replace("\n", "\n  ")
+        print(f"\nExample:\n  {indented}")
+
     if node["dependents"]:
         print(f"\nDependents: {', '.join(node['dependents'])}")
 
@@ -347,8 +352,8 @@ def cmd_supersede(args):
 
 
 def cmd_update(args):
-    if not any([args.text, args.source, args.source_url]):
-        print("Error: at least one of --text, --source, or --source-url required",
+    if not any([args.text, args.source, args.source_url, args.example]):
+        print("Error: at least one of --text, --source, --source-url, or --example required",
               file=sys.stderr)
         sys.exit(1)
     try:
@@ -356,6 +361,7 @@ def cmd_update(args):
             args.node_id, text=args.text,
             source=args.source,
             source_url=args.source_url,
+            example=args.example,
             **_backend_kwargs(args),
         )
     except KeyError as e:
@@ -1618,6 +1624,7 @@ def main():
     p.add_argument("--source-url", help="URL for the source document")
     p.add_argument("-n", "--namespace", help="Namespace prefix (auto-creates ns:active premise)")
     p.add_argument("--access-tags", metavar="TAG,TAG", help="Data source provenance tags (comma-separated)")
+    p.add_argument("--example", default=None, help="Code example demonstrating the belief")
 
     # add-justification
     p = sub.add_parser("add-justification", help="Add a justification to an existing node")
@@ -1684,6 +1691,7 @@ def main():
     p.add_argument("--text", default=None, help="New text for the belief")
     p.add_argument("--source", default=None, help="Update source path")
     p.add_argument("--source-url", default=None, help="Update source URL")
+    p.add_argument("--example", default=None, help="Code example demonstrating the belief")
 
     # challenge
     p = sub.add_parser("challenge", help="Challenge a node — target goes OUT")
