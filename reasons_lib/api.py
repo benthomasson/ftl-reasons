@@ -199,7 +199,8 @@ def add_node(
         return _pg_dispatch(pg_conninfo, project_id, "add_node",
                             node_id=node_id, text=text, sl=sl, cp=cp, unless=unless,
                             label=label, source=source, source_url=source_url,
-                            access_tags=access_tags, namespace=namespace)
+                            access_tags=access_tags, namespace=namespace,
+                            example=example)
     outlist = [o.strip() for o in unless.split(",") if o.strip()] if unless else []
     justifications = []
     if sl:
@@ -253,7 +254,7 @@ def add_node(
         metadata = {}
         if access_tags:
             metadata["access_tags"] = sorted(set(access_tags))
-        if example:
+        if example is not None:
             metadata["example"] = example
 
         node = net.add_node(
@@ -772,7 +773,7 @@ def update_node(
     if pg_conninfo:
         return _pg_dispatch(pg_conninfo, project_id, "update_node",
                             node_id=node_id, text=text, source=source,
-                            source_url=source_url)
+                            source_url=source_url, example=example)
     with _with_network(db_path, write=True) as net:
         if node_id not in net.nodes:
             raise KeyError(f"Node '{node_id}' not found")
