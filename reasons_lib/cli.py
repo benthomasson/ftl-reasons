@@ -1466,6 +1466,50 @@ def cmd_repair_smuggled(args):
         print("\n  (dry run -- no changes applied)")
 
 
+def cmd_research(args):
+    _require_sqlite(args, "research")
+
+    model = getattr(args, "model", None) or "claude"
+    review_file = getattr(args, "review_file", None)
+    belief_ids = args.ids if args.ids else None
+
+    if not review_file and not belief_ids:
+        print("Error: provide either --review-file or belief IDs", file=sys.stderr)
+        sys.exit(1)
+
+    result = api.research(
+        review_file=review_file,
+        belief_ids=belief_ids,
+        model=model,
+        timeout=args.timeout,
+        dry_run=args.dry_run,
+        db_path=args.db,
+    )
+
+    for r in result["results"]:
+        status = r["status"].upper()
+        pattern = r.get("pattern") or "?"
+        print(f"  [{status}] {r['id']} ({pattern})")
+        if r.get("rationale"):
+            print(f"    {r['rationale']}")
+        if r.get("smuggled_claim"):
+            print(f"    Smuggled: {r['smuggled_claim']}")
+        if r.get("matched_premises"):
+            print(f"    Linked: {', '.join(r['matched_premises'])}")
+        if r.get("softened_text"):
+            print(f"    Softened: {r['softened_text']}")
+        if r.get("error"):
+            print(f"    Error: {r['error']}")
+
+    print(f"\nTotal invalid: {result['total_invalid']}")
+    print(f"  Linked: {result['linked']}  Softened: {result['softened']}"
+          f"  Abandoned: {result['abandoned']}  Failed: {result['failed']}"
+          f"  Errors: {result['errors']}")
+
+    if args.dry_run:
+        print("\n  (dry run -- no changes applied)")
+
+
 def cmd_contradictions(args):
     _require_sqlite(args, "detect-contradictions")
 
@@ -1935,6 +1979,19 @@ def main():
     p.add_argument("--dry-run", action="store_true",
                    help="Report findings without applying repairs")
 
+    # research
+    p = sub.add_parser("research",
+        help="Research flagged beliefs: search-and-link, soften, or abandon")
+    p.add_argument("ids", nargs="*", help="Belief IDs to research")
+    p.add_argument("--review-file", default=None,
+                   help="Path to review-beliefs JSON report")
+    p.add_argument("-m", "--model", default=None,
+                   help="Model to use (default: claude)")
+    p.add_argument("--timeout", type=int, default=300,
+                   help="LLM timeout in seconds (default: 300)")
+    p.add_argument("--dry-run", action="store_true",
+                   help="Report findings without applying changes")
+
     # contradictions
     p = sub.add_parser("contradictions", help="Detect contradictions between IN beliefs")
     p.add_argument("ids", nargs="*", help="Specific belief IDs to check (default: all IN)")
@@ -2029,6 +2086,7 @@ def main():
         "list-negative": cmd_list_negative,
         "review-beliefs": cmd_review_beliefs,
         "repair-smuggled": cmd_repair_smuggled,
+        "research": cmd_research,
         "contradictions": cmd_contradictions,
         "namespaces": cmd_namespaces,
     }
