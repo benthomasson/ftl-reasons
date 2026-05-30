@@ -448,6 +448,39 @@ class TestApiResearch:
         assert result["abandoned"] == 1
         assert len(result["results"]) == 1
 
+    def test_counts_add_up(self, tmp_path):
+        """Verify total_invalid == linked + softened + abandoned + failed + errors."""
+        db = str(tmp_path / "test.db")
+        api.add_node("premise-a", "A", db_path=db)
+        api.add_node("derived-a", "A ext", sl="premise-a", db_path=db)
+
+        review_file = tmp_path / "review.json"
+        review_file.write_text(json.dumps({
+            "results": [{
+                "id": "derived-a", "valid": False, "comment": "smuggled",
+            }],
+        }))
+
+        triage_resp = _mock_result(
+            '{"pattern": "search_and_link", "rationale": "gap"}'
+        )
+        extract_resp = _mock_result("   ")
+
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run",
+                   side_effect=[triage_resp, extract_resp]):
+            result = api.research(
+                review_file=str(review_file),
+                model="claude",
+                dry_run=True,
+                db_path=db,
+            )
+
+        total = (result["linked"] + result["softened"] + result["abandoned"]
+                 + result["failed"] + result["errors"])
+        assert total == result["total_invalid"]
+        assert result["failed"] == 1
+
     def test_no_invalid(self, tmp_path):
         db = str(tmp_path / "test.db")
         api.add_node("premise-a", "A", db_path=db)

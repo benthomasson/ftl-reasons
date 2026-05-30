@@ -2523,7 +2523,8 @@ def research(
         "softened": sum(1 for r in results if r["status"] == "softened"),
         "abandoned": sum(1 for r in results if r["status"] == "abandoned"),
         "failed": sum(1 for r in results if r["status"] in
-                       ("triage_failed", "no_candidates", "no_match", "soften_failed")),
+                       ("triage_failed", "no_candidates", "no_match",
+                        "soften_failed", "extraction_failed")),
         "errors": sum(1 for r in results if r["status"] == "error"),
     }
 
