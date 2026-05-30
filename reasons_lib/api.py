@@ -172,6 +172,7 @@ def add_node(
     namespace: str | None = None,
     any_mode: bool = False,
     access_tags: list[str] | None = None,
+    example: str | None = None,
     db_path: str = DEFAULT_DB,
     pg_conninfo=None, project_id=None,
 ) -> dict:
@@ -252,6 +253,8 @@ def add_node(
         metadata = {}
         if access_tags:
             metadata["access_tags"] = sorted(set(access_tags))
+        if example:
+            metadata["example"] = example
 
         node = net.add_node(
             id=node_id,
@@ -758,10 +761,11 @@ def update_node(
     text: str | None = None,
     source: str | None = None,
     source_url: str | None = None,
+    example: str | None = None,
     db_path: str = DEFAULT_DB,
     pg_conninfo=None, project_id=None,
 ) -> dict:
-    """Update a node's text, source, or source_url in place.
+    """Update a node's text, source, source_url, or example in place.
 
     Returns: {"node_id": str, "updated_fields": list[str]}
     """
@@ -783,6 +787,11 @@ def update_node(
         if source_url is not None:
             node.source_url = source_url
             updated.append("source_url")
+        if example is not None:
+            meta = node.metadata or {}
+            meta["example"] = example
+            node.metadata = meta
+            updated.append("example")
         return {"node_id": node_id, "updated_fields": updated}
 
 
