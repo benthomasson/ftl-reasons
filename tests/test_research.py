@@ -384,6 +384,26 @@ class TestResearchBeliefs:
         assert results[0]["status"] == "error"
         assert "not found" in results[0]["error"]
 
+    def test_search_and_link_extraction_failed(self):
+        """When extract returns empty, status should be extraction_failed."""
+        nodes = _make_nodes()
+        review_results = [{
+            "id": "derived-boil", "valid": False, "comment": "smuggled",
+        }]
+        triage_resp = _mock_result('{"pattern": "search_and_link", "rationale": "gap"}')
+        extract_resp = _mock_result("   ")
+
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run",
+                   side_effect=[triage_resp, extract_resp]):
+            results = research_beliefs(
+                review_results, nodes, db_path="test.db",
+                search_fn=_mock_search([]),
+            )
+
+        assert results[0]["status"] == "extraction_failed"
+        assert results[0]["pattern"] == "search_and_link"
+
     def test_skips_valid_beliefs(self):
         nodes = _make_nodes()
         review_results = [
@@ -396,6 +416,60 @@ class TestResearchBeliefs:
         )
 
         assert len(results) == 0
+
+
+# --- API wrapper ---
+
+class TestApiResearch:
+    def test_from_belief_ids(self, tmp_path):
+        """Test the belief_ids input path through api.research."""
+        db = str(tmp_path / "test.db")
+        api.add_node("premise-a", "A is true", db_path=db)
+        api.add_node("derived-a", "A extended", sl="premise-a", db_path=db)
+
+        review_resp = _mock_result(json.dumps([{
+            "id": "derived-a", "valid": False, "sufficient": True,
+            "necessary": True, "unnecessary_antecedents": [],
+            "comment": "overstated",
+        }]))
+        triage_resp = _mock_result('{"pattern": "abandon", "rationale": "broken"}')
+
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run",
+                   side_effect=[review_resp, triage_resp]):
+            result = api.research(
+                belief_ids=["derived-a"],
+                model="claude",
+                dry_run=True,
+                db_path=db,
+            )
+
+        assert result["total_invalid"] == 1
+        assert result["abandoned"] == 1
+        assert len(result["results"]) == 1
+
+    def test_no_invalid(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        api.add_node("premise-a", "A", db_path=db)
+        api.add_node("derived-a", "A ext", sl="premise-a", db_path=db)
+
+        review_resp = _mock_result(json.dumps([{
+            "id": "derived-a", "valid": True, "sufficient": True,
+            "necessary": True, "unnecessary_antecedents": [],
+            "comment": "fine",
+        }]))
+
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run",
+                   side_effect=[review_resp]):
+            result = api.research(
+                belief_ids=["derived-a"],
+                model="claude",
+                db_path=db,
+            )
+
+        assert result["total_invalid"] == 0
+        assert result["results"] == []
 
 
 # --- CLI ---

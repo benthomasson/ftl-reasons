@@ -301,7 +301,7 @@ def _do_search_and_link(belief_id, node, nodes, comment, model, timeout,
     claim = extract_smuggled_claim(belief_context, comment,
                                    model=model, timeout=timeout)
     if not claim:
-        return "no_candidates", claim, [], ""
+        return "extraction_failed", claim, [], ""
 
     existing_ants = set()
     for j in node.get("justifications", []):
