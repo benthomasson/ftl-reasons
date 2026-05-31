@@ -1304,6 +1304,23 @@ def cmd_list_negative(args):
           f"({result['candidates']} candidates from {result['total']} IN nodes)")
 
 
+def cmd_topics(args):
+    result = api.topics(
+        limit=args.limit,
+        **_backend_kwargs(args),
+    )
+    if getattr(args, "json", False):
+        import json
+        print(json.dumps(result, indent=2))
+        return
+    if not result["topics"]:
+        print("No topics found.")
+        return
+    for item in result["topics"]:
+        print(f"  {item['topic']} ({item['count']})")
+    print(f"\n{len(result['topics'])} topics from {result['total_nodes']} nodes")
+
+
 def cmd_review_beliefs(args):
     _require_sqlite(args, "review-beliefs")
     import json
@@ -1946,6 +1963,11 @@ def main():
 
     sub.add_parser("namespaces", help="List all agent namespaces in the database")
 
+    # topics
+    p = sub.add_parser("topics", help="Extract topics from node IDs by word frequency")
+    p.add_argument("--limit", type=int, default=20, help="Max topics to show (default: 20)")
+    p.add_argument("--json", action="store_true", help="Machine-readable JSON output")
+
     # review-beliefs
     p = sub.add_parser("review-beliefs", help="Review derived beliefs for validity, sufficiency, and necessity")
     p.add_argument("ids", nargs="*", help="Specific belief IDs to review (default: all derived)")
@@ -2092,6 +2114,7 @@ def main():
         "list": cmd_list,
         "list-gated": cmd_list_gated,
         "list-negative": cmd_list_negative,
+        "topics": cmd_topics,
         "review-beliefs": cmd_review_beliefs,
         "repair-smuggled": cmd_repair_smuggled,
         "research": cmd_research,
