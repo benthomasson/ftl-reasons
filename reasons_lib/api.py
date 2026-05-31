@@ -2131,6 +2131,41 @@ def list_nodes(
         return {"nodes": nodes, "count": len(nodes)}
 
 
+_TOPIC_STOP_WORDS = {
+    "a", "an", "the", "is", "are", "was", "were", "in", "on", "at", "to",
+    "for", "of", "and", "or", "not", "as", "by", "via", "can", "with",
+    "from", "than", "that", "this", "be", "has", "have", "it", "its",
+    "no", "do", "if", "so", "up", "out", "all", "but", "get", "set",
+    "only", "per", "use", "may", "one", "two", "new", "any", "each",
+    "must", "when", "how", "also", "into", "over", "more", "both",
+    "same", "own", "used", "using", "based", "does", "then",
+}
+
+
+def topics(
+    limit: int = 20,
+    db_path: str = DEFAULT_DB,
+    pg_conninfo=None, project_id=None,
+) -> dict:
+    """Extract topics from node IDs by word frequency.
+
+    Returns: {"topics": [{"topic": str, "count": int}, ...], "total_nodes": int}
+    """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "topics", limit=limit)
+    with _with_network(db_path) as net:
+        word_counts: dict[str, int] = {}
+        for nid in net.nodes:
+            for word in re.split(r'[-._:]', nid):
+                if word and len(word) > 2 and word not in _TOPIC_STOP_WORDS:
+                    word_counts[word] = word_counts.get(word, 0) + 1
+        ranked = sorted(word_counts, key=lambda w: (-word_counts[w], w))[:limit]
+        return {
+            "topics": [{"topic": t, "count": word_counts[t]} for t in ranked],
+            "total_nodes": len(net.nodes),
+        }
+
+
 def list_gated(
     visible_to: list[str] | None = None,
     db_path: str = DEFAULT_DB,
