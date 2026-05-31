@@ -1237,6 +1237,25 @@ class PgApi:
         gated_count = sum(len(b["gated"]) for b in blockers.values())
         return {"blockers": blockers, "gated_count": gated_count, "blocker_count": len(blockers)}
 
+    def topics(self, limit=20):
+        from reasons_lib.api import _TOPIC_STOP_WORDS
+        pid = self.project_id
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM rms_nodes WHERE project_id = %s", (pid,),
+            )
+            node_ids = [row[0] for row in cur.fetchall()]
+        word_counts: dict[str, int] = {}
+        for nid in node_ids:
+            for word in re.split(r'[-._:]', nid):
+                if word and len(word) > 2 and word not in _TOPIC_STOP_WORDS:
+                    word_counts[word] = word_counts.get(word, 0) + 1
+        ranked = sorted(word_counts, key=lambda w: (-word_counts[w], w))[:limit]
+        return {
+            "topics": [{"topic": t, "count": word_counts[t]} for t in ranked],
+            "total_nodes": len(node_ids),
+        }
+
     def export_network(self, visible_to=None):
         pid = self.project_id
         with self.conn.cursor() as cur:
