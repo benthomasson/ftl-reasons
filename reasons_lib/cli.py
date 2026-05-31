@@ -1771,8 +1771,8 @@ def main():
                    help="Randomly sample beliefs instead of alphabetical truncation")
     p.add_argument("--seed", type=int, default=None,
                    help="Random seed for reproducible sampling")
-    p.add_argument("--timeout", type=int, default=300,
-                   help="Model timeout in seconds (default: 300)")
+    p.add_argument("--timeout", type=int, default=600,
+                   help="Model timeout in seconds (default: 600)")
     p.add_argument("--premises", action="store_true",
                    help="Only include premises (no justifications)")
     p.add_argument("--has-dependents", action="store_true",
@@ -1907,8 +1907,8 @@ def main():
     p.add_argument("--format", choices=["compact", "markdown", "json", "minimal"],
                    default=None,
                    help="Output format for --no-synth (default: compact)")
-    p.add_argument("--timeout", type=int, default=300,
-                   help="LLM timeout in seconds (default: 300)")
+    p.add_argument("--timeout", type=int, default=600,
+                   help="LLM timeout in seconds (default: 600)")
     p.add_argument("-m", "--model", default=None,
                    help="Model to use (default: claude). Prefixes: ollama:<model>, api:<model>, vertex:<model>")
     p.add_argument("--simple", action="store_true",
@@ -1973,8 +1973,8 @@ def main():
     p.add_argument("ids", nargs="*", help="Specific belief IDs to review (default: all derived)")
     p.add_argument("-m", "--model", default=None,
                    help="Model to use (default: claude). Prefixes: ollama:<model>, api:<model>, vertex:<model>")
-    p.add_argument("--timeout", type=int, default=300,
-                   help="LLM timeout in seconds (default: 300)")
+    p.add_argument("--timeout", type=int, default=600,
+                   help="LLM timeout in seconds (default: 600)")
     p.add_argument("--min-depth", type=int, default=None,
                    help="Only review beliefs at this depth or deeper")
     p.add_argument("--depends-on", default=None,
@@ -2004,8 +2004,8 @@ def main():
                    help="Path to review-beliefs JSON report")
     p.add_argument("-m", "--model", default=None,
                    help="Model to use (default: claude)")
-    p.add_argument("--timeout", type=int, default=300,
-                   help="LLM timeout in seconds (default: 300)")
+    p.add_argument("--timeout", type=int, default=600,
+                   help="LLM timeout in seconds (default: 600)")
     p.add_argument("--dry-run", action="store_true",
                    help="Report findings without applying repairs")
 
@@ -2017,8 +2017,8 @@ def main():
                    help="Path to review-beliefs JSON report")
     p.add_argument("-m", "--model", default=None,
                    help="Model to use (default: claude)")
-    p.add_argument("--timeout", type=int, default=300,
-                   help="LLM timeout in seconds (default: 300)")
+    p.add_argument("--timeout", type=int, default=600,
+                   help="LLM timeout in seconds (default: 600)")
     p.add_argument("--dry-run", action="store_true",
                    help="Report findings without applying changes")
 
@@ -2027,8 +2027,8 @@ def main():
     p.add_argument("ids", nargs="*", help="Specific belief IDs to check (default: all IN)")
     p.add_argument("-m", "--model", default=None,
                    help="Model to use (default: claude). Prefixes: ollama:<model>, api:<model>, vertex:<model>")
-    p.add_argument("--timeout", type=int, default=300,
-                   help="LLM timeout in seconds (default: 300)")
+    p.add_argument("--timeout", type=int, default=600,
+                   help="LLM timeout in seconds (default: 600)")
     p.add_argument("--sample", type=int, default=None,
                    help="Randomly sample N beliefs to check")
     p.add_argument("--auto-apply", action="store_true",
