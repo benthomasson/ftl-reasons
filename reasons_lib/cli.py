@@ -262,6 +262,11 @@ def cmd_show(args):
         print(f"URL:    {node['source_url']}")
     if node["source_hash"]:
         print(f"Hash:   {node['source_hash']}")
+    if node["metadata"].get("pinned_sha"):
+        sha = node["metadata"]["pinned_sha"][:12]
+        lines = node["metadata"].get("pinned_lines", "")
+        line_info = f" (lines {lines})" if lines else ""
+        print(f"Pinned: {sha}{line_info}")
 
     if node["justifications"]:
         print(f"\nJustifications ({len(node['justifications'])}):")
@@ -775,6 +780,25 @@ def cmd_pin_update(args):
         print(f"\n{result['count']} updated, {result['errors']} errors")
     else:
         print(f"\n{result['count']} updated")
+
+
+def cmd_pin_lines(args):
+    _require_sqlite(args, "pin-lines")
+    try:
+        result = api.pin_lines(
+            node_id=args.node_id,
+            line_start=args.start,
+            line_end=args.end,
+            db_path=args.db,
+        )
+    except (KeyError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    lines = result["pinned_lines"]
+    sha = result["pinned_sha"][:12] if result.get("pinned_sha") else "(none)"
+    auto = " (auto-pinned SHA)" if result.get("auto_pinned") else ""
+    print(f"  PINNED  {result['node_id']}  lines {lines}  sha {sha}{auto}")
 
 
 def cmd_compact(args):
@@ -1943,6 +1967,12 @@ def main():
     p = sub.add_parser("pin-update", help="Bump pinned_sha to current HEAD for beliefs")
     p.add_argument("node_ids", nargs="+", help="Belief IDs to update")
 
+    # pin-lines
+    p = sub.add_parser("pin-lines", help="Pin a belief to specific source file lines")
+    p.add_argument("node_id", help="Belief ID to pin")
+    p.add_argument("start", type=int, help="Start line number (1-based)")
+    p.add_argument("end", type=int, help="End line number (inclusive)")
+
     # compact
     p = sub.add_parser("compact", help="Token-budgeted belief state summary")
     p.add_argument("--budget", type=int, default=500, help="Token budget (default: 500)")
@@ -2161,6 +2191,7 @@ def main():
         "check-stale": cmd_check_stale,
         "pin-sources": cmd_pin_sources,
         "pin-update": cmd_pin_update,
+        "pin-lines": cmd_pin_lines,
         "compact": cmd_compact,
         "convert-to-premise": cmd_convert_to_premise,
         "summarize": cmd_summarize,
