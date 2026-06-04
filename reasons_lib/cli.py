@@ -613,6 +613,31 @@ def cmd_import_hf(args):
         print(f"Imported {result['nogoods_imported']} nogoods")
 
 
+def cmd_pull(args):
+    cmd_import_hf(args)
+
+
+def cmd_publish(args):
+    try:
+        result = api.publish_hf(
+            repo_id=args.repo_id,
+            token=args.token,
+            private=getattr(args, "private", False),
+            domain=getattr(args, "domain", None),
+            license=getattr(args, "license", "mit"),
+            base_network=getattr(args, "base_network", None),
+            source_repos=getattr(args, "source_repos", None),
+            **_backend_kwargs(args),
+        )
+    except RuntimeError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Published to {result['url']}")
+    for f in result["files_uploaded"]:
+        print(f"  uploaded {f}")
+
+
 def cmd_import_api(args):
     try:
         result = api.import_api(
@@ -1999,10 +2024,27 @@ def main():
 
     # import-hf
     p = sub.add_parser("import-hf", help="Import network from HuggingFace repo")
-    p.add_argument("repo_id", help="HuggingFace repo (user/repo or URL)")
+    p.add_argument("repo_id", help="HuggingFace repo (bare name, user/repo, or URL)")
     p.add_argument("--init", action="store_true",
                    help="Initialize reasons.db if it doesn't exist")
     p.add_argument("--token", help="HuggingFace token (default: from HF_TOKEN or ~/.cache/huggingface/token)")
+
+    # pull (alias for import-hf with default org)
+    p = sub.add_parser("pull", help="Pull EEM from HuggingFace (default org: EEM-Hub)")
+    p.add_argument("repo_id", help="EEM name (bare name defaults to EEM-Hub/name)")
+    p.add_argument("--init", action="store_true",
+                   help="Initialize reasons.db if it doesn't exist")
+    p.add_argument("--token", help="HuggingFace token (default: from HF_TOKEN or ~/.cache/huggingface/token)")
+
+    # publish
+    p = sub.add_parser("publish", help="Publish EEM to HuggingFace (default org: EEM-Hub)")
+    p.add_argument("repo_id", help="EEM name (bare name defaults to EEM-Hub/name)")
+    p.add_argument("--token", help="HuggingFace token (default: from HF_TOKEN or ~/.cache/huggingface/token)")
+    p.add_argument("--private", action="store_true", help="Create a private repo")
+    p.add_argument("--domain", nargs="*", help="Domain tags (e.g. kubernetes devops)")
+    p.add_argument("--license", default="mit", help="License identifier (default: mit)")
+    p.add_argument("--base-network", help="Parent EEM this was derived from")
+    p.add_argument("--source-repos", nargs="*", help="Source repository identifiers")
 
     # import-api
     p = sub.add_parser("import-api", help="Import beliefs from agentic-mind-service")
@@ -2300,6 +2342,8 @@ def main():
         "import-beliefs": cmd_import_beliefs,
         "import-json": cmd_import_json,
         "import-hf": cmd_import_hf,
+        "pull": cmd_pull,
+        "publish": cmd_publish,
         "import-api": cmd_import_api,
         "export-api": cmd_export_api,
         "export": cmd_export,

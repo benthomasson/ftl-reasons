@@ -1353,6 +1353,73 @@ def import_hf(repo_id: str, init: bool = False, token: str | None = None,
     return result
 
 
+def publish_hf(
+    repo_id: str,
+    token: str | None = None,
+    private: bool = False,
+    visible_to: list[str] | None = None,
+    domain: list[str] | None = None,
+    license: str = "mit",
+    base_network: str | None = None,
+    source_repos: list[str] | None = None,
+    db_path: str = DEFAULT_DB,
+    pg_conninfo=None, project_id=None,
+) -> dict:
+    """Export and publish network to a HuggingFace repo.
+
+    Uploads network.json, beliefs.md, and README.md (EEM card).
+
+    Args:
+        repo_id: HuggingFace repo ID (bare name, user/repo, or URL)
+        token: HuggingFace auth token (falls back to HF_TOKEN env or cached)
+        private: Create a private repo
+        visible_to: Access tag filter for exported nodes
+
+    Returns: {"repo_id": str, "url": str, "files_uploaded": list}
+    """
+    from .hf import _resolve_token, create_repo, resolve_repo_id, upload_file
+
+    resolved_token = _resolve_token(token)
+    if not resolved_token:
+        raise RuntimeError(
+            "HuggingFace token required for publishing. "
+            "Run 'huggingface-cli login', set HF_TOKEN, or pass --token."
+        )
+
+    parsed_id = resolve_repo_id(repo_id)
+    create_repo(parsed_id, token=resolved_token, private=private)
+
+    backend = dict(db_path=db_path, pg_conninfo=pg_conninfo, project_id=project_id)
+    network_json = json.dumps(
+        export_network(visible_to=visible_to, **backend), indent=2
+    )
+
+    from .export_markdown import export_markdown as _export_md
+    with _with_network(db_path) as net:
+        beliefs_md = _export_md(net, repos=net.repos)
+
+    card_md = export_card(
+        visible_to=visible_to, domain=domain, license=license,
+        base_network=base_network, source_repos=source_repos,
+        **backend,
+    )
+
+    files = []
+    for filename, content in [
+        ("network.json", network_json),
+        ("beliefs.md", beliefs_md),
+        ("README.md", card_md),
+    ]:
+        upload_file(parsed_id, filename, content.encode("utf-8"), resolved_token)
+        files.append(filename)
+
+    return {
+        "repo_id": parsed_id,
+        "url": f"https://huggingface.co/{parsed_id}",
+        "files_uploaded": files,
+    }
+
+
 def import_api(url: str | None = None, agent_id: str | None = None,
                api_key: str | None = None, init: bool = False,
                db_path: str = DEFAULT_DB,
