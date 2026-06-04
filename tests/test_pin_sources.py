@@ -105,6 +105,12 @@ class TestPinSourceUrl:
         result = pin_source_url(url, sha)
         assert f"/blob/{sha}/src/main.py" in result
 
+    def test_rewrites_slashed_branch_with_source_path(self):
+        url = "https://github.com/owner/repo/blob/feature/fix/src/main.py"
+        sha = "b" * 40
+        result = pin_source_url(url, sha, source_path="src/main.py")
+        assert result == f"https://github.com/owner/repo/blob/{sha}/src/main.py"
+
 
 class TestPinSources:
     def test_pins_node_with_source(self, git_repo):

@@ -193,6 +193,7 @@ def get_file_commit_sha(filepath: Path) -> str | None:
         ["git", "log", "-1", "--format=%H", "--", str(filepath.name)],
         capture_output=True, text=True,
         cwd=str(filepath.parent),
+        timeout=30,
     )
     if result.returncode == 0 and result.stdout.strip():
         return result.stdout.strip()
@@ -204,33 +205,49 @@ def file_changed_since(filepath: Path, since_sha: str) -> bool:
 
     Returns True on git errors to force fallback to content hashing.
     """
-    # Check committed changes
-    result = subprocess.run(
-        ["git", "log", "--format=%H", f"{since_sha}..HEAD",
-         "--", str(filepath.name)],
-        capture_output=True, text=True,
-        cwd=str(filepath.parent),
-    )
-    if result.returncode != 0:
+    try:
+        # Check committed changes
+        result = subprocess.run(
+            ["git", "log", "--format=%H", f"{since_sha}..HEAD",
+             "--", str(filepath.name)],
+            capture_output=True, text=True,
+            cwd=str(filepath.parent),
+            timeout=30,
+        )
+        if result.returncode != 0:
+            return True
+        if result.stdout.strip():
+            return True
+        # Check uncommitted changes (staged + unstaged)
+        result = subprocess.run(
+            ["git", "diff", "--quiet", "HEAD", "--", str(filepath.name)],
+            capture_output=True, text=True,
+            cwd=str(filepath.parent),
+            timeout=30,
+        )
+        if result.returncode != 0:
+            return True
+        return False
+    except subprocess.TimeoutExpired:
         return True
-    if result.stdout.strip():
-        return True
-    # Check uncommitted changes (staged + unstaged)
-    result = subprocess.run(
-        ["git", "diff", "--quiet", "HEAD", "--", str(filepath.name)],
-        capture_output=True, text=True,
-        cwd=str(filepath.parent),
-    )
-    if result.returncode != 0:
-        return True
-    return False
 
 
-def pin_source_url(url: str, sha: str) -> str:
-    """Rewrite GitHub blob URL from branch ref to commit SHA."""
-    m = re.match(r'(https://github\.com/[^/]+/[^/]+/blob/)[^/]+/(.*)', url)
-    if m:
-        return f"{m.group(1)}{sha}/{m.group(2)}"
+def pin_source_url(url: str, sha: str, source_path: str = "") -> str:
+    """Rewrite GitHub blob URL from branch ref to commit SHA.
+
+    If source_path is provided, uses it to locate the file path portion
+    of the URL (handles branch names containing slashes).
+    """
+    m = re.match(r'(https://github\.com/[^/]+/[^/]+/blob/).+', url)
+    if not m:
+        return url
+    prefix = m.group(1)
+    if source_path and url.endswith(source_path):
+        return f"{prefix}{sha}/{source_path}"
+    rest = url[len(prefix):]
+    parts = rest.split("/", 1)
+    if len(parts) == 2:
+        return f"{prefix}{sha}/{parts[1]}"
     return url
 
 
@@ -279,7 +296,7 @@ def pin_sources(
             node.source_hash = hash_file(path)
 
         if pin_urls and node.source_url:
-            node.source_url = pin_source_url(node.source_url, sha)
+            node.source_url = pin_source_url(node.source_url, sha, node.source)
 
         results.append({
             "node_id": nid,

@@ -1631,11 +1631,12 @@ def check_stale(
     no commits touched the file since the pinned SHA.
 
     Returns: {"stale": list[dict], "checked": int, "stale_count": int,
-              "upgraded": int}
+              "upgraded": int, "sha_bumped": int}
     """
     if pg_conninfo:
         return _pg_dispatch(pg_conninfo, project_id, "check_stale",
-                            repos=repos, upgrade_hashes=upgrade_hashes)
+                            repos=repos, upgrade_hashes=upgrade_hashes,
+                            git_aware=git_aware)
     from pathlib import Path as P
     from .check_stale import check_stale as _check
 
