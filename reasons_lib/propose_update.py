@@ -231,13 +231,22 @@ def format_proposal_markdown(proposal, nodes=None, cascade=None):
         restored = cascade.get("restored", [])
         total = cascade.get("total_affected", 0)
         if total > 0:
-            lines.append(f"\n**Cascade impact:** {total} dependent(s) affected")
-            for item in retracted:
-                text = item.get("text", "")[:80]
-                lines.append(f"- {item['id']}: \"{text}\" — will go OUT")
-            for item in restored:
-                text = item.get("text", "")[:80]
-                lines.append(f"- {item['id']}: \"{text}\" — will go IN")
+            if action == "RETRACT":
+                lines.append(f"\n**Cascade impact:** {total} dependent(s) affected")
+                for item in retracted:
+                    text = item.get("text", "")[:80]
+                    lines.append(f"- {item['id']}: \"{text}\" — will go OUT")
+                for item in restored:
+                    text = item.get("text", "")[:80]
+                    lines.append(f"- {item['id']}: \"{text}\" — will go IN")
+            else:
+                lines.append(f"\n**Cascade impact:** {total} dependent(s) need re-review")
+                for item in retracted:
+                    text = item.get("text", "")[:80]
+                    lines.append(f"- {item['id']}: \"{text}\"")
+                for item in restored:
+                    text = item.get("text", "")[:80]
+                    lines.append(f"- {item['id']}: \"{text}\"")
         else:
             lines.append("\n**Cascade impact:** none")
     else:

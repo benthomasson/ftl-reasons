@@ -2540,7 +2540,7 @@ def review_beliefs(
 def propose_update(
     belief_ids: list[str] | None = None,
     model: str = "claude",
-    timeout: int = 300,
+    timeout: int = 600,
     stale_only: bool = False,
     namespace: str | None = None,
     sample: int | None = None,

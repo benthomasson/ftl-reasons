@@ -305,6 +305,27 @@ class TestFormatProposalMarkdown:
         assert "**Cascade impact:** 1 dependent(s) affected" in result
         assert 'derived-b: "Blue skies indicate clear weather." — will go OUT' in result
 
+    def test_update_cascade_says_re_review(self, sample_nodes):
+        proposal = {
+            "id": "premise-a",
+            "action": "update",
+            "proposed_text": "Updated sky claim.",
+            "failure_mode": "smuggled-premise",
+            "basis": "prior-knowledge",
+            "evidence": "",
+            "comment": "",
+        }
+        cascade = {
+            "retracted": [
+                {"id": "derived-b", "text": "Blue skies indicate clear weather.", "depth": 1, "dependents": 1},
+            ],
+            "restored": [],
+            "total_affected": 1,
+        }
+        result = format_proposal_markdown(proposal, nodes=sample_nodes, cascade=cascade)
+        assert "need re-review" in result
+        assert "will go OUT" not in result
+
     def test_no_cascade(self, sample_nodes):
         proposal = {
             "id": "premise-a",
