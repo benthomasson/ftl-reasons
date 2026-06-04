@@ -623,6 +623,7 @@ def cmd_publish(args):
             repo_id=args.repo_id,
             token=args.token,
             private=getattr(args, "private", False),
+            visible_to=_parse_visible_to(args),
             domain=getattr(args, "domain", None),
             license=getattr(args, "license", "mit"),
             base_network=getattr(args, "base_network", None),
@@ -2045,6 +2046,7 @@ def main():
     p.add_argument("--license", default="mit", help="License identifier (default: mit)")
     p.add_argument("--base-network", help="Parent EEM this was derived from")
     p.add_argument("--source-repos", nargs="*", help="Source repository identifiers")
+    p.add_argument("--visible-to", metavar="TAG,TAG", help="Only publish nodes whose access_tags are a subset of these tags")
 
     # import-api
     p = sub.add_parser("import-api", help="Import beliefs from agentic-mind-service")

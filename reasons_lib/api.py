@@ -1394,9 +1394,7 @@ def publish_hf(
         export_network(visible_to=visible_to, **backend), indent=2
     )
 
-    from .export_markdown import export_markdown as _export_md
-    with _with_network(db_path) as net:
-        beliefs_md = _export_md(net, repos=net.repos)
+    beliefs_md = export_markdown(visible_to=visible_to, **backend)
 
     card_md = export_card(
         visible_to=visible_to, domain=domain, license=license,
