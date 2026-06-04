@@ -106,10 +106,19 @@ def check_stale(
         if git_aware and pinned_sha:
             pinned_lines = node.metadata.get("pinned_lines") if node.metadata else None
             if pinned_lines:
-                parts = pinned_lines.split("-")
-                ls, le = int(parts[0]), int(parts[1])
-                if not file_lines_changed_since(path, pinned_sha, ls, le):
-                    continue
+                try:
+                    parts = pinned_lines.split("-")
+                    ls, le = int(parts[0]), int(parts[1])
+                except (ValueError, IndexError):
+                    pass  # malformed pinned_lines — fall through to content hash
+                else:
+                    if not file_lines_changed_since(path, pinned_sha, ls, le):
+                        new_sha = get_file_commit_sha(path)
+                        if new_sha and new_sha != pinned_sha:
+                            node.metadata["pinned_sha"] = new_sha
+                            node.metadata["verified_at"] = date.today().isoformat()
+                            sha_bumped += 1
+                        continue
             elif not file_changed_since(path, pinned_sha):
                 continue
 
@@ -258,24 +267,13 @@ def file_lines_changed_since(
 ) -> bool:
     """Check if specific lines were modified since since_sha.
 
-    Parses unified diff hunk headers from committed and uncommitted changes.
-    Uses the OLD side of the diff (stored lines reference the file at pinned_sha).
-    Returns True on git errors to force fallback to content hashing.
+    Diffs since_sha against the working tree (committed + uncommitted) in
+    a single call. Uses the OLD side of the diff (stored lines reference the
+    file at pinned_sha). Returns True on git errors to force content hash fallback.
     """
     try:
         result = subprocess.run(
-            ["git", "diff", "-U0", since_sha, "HEAD", "--", str(filepath.name)],
-            capture_output=True, text=True,
-            cwd=str(filepath.parent),
-            timeout=30,
-        )
-        if result.returncode != 0:
-            return True
-        for hunk_start, hunk_end in parse_diff_hunks(result.stdout):
-            if hunk_end >= line_start and hunk_start <= line_end:
-                return True
-        result = subprocess.run(
-            ["git", "diff", "-U0", "HEAD", "--", str(filepath.name)],
+            ["git", "diff", "-U0", since_sha, "--", str(filepath.name)],
             capture_output=True, text=True,
             cwd=str(filepath.parent),
             timeout=30,
@@ -449,6 +447,8 @@ def pin_lines(
     if repos is None and network.repos:
         repos = {k: Path(v) for k, v in network.repos.items()}
 
+    if not node.metadata:
+        node.metadata = {}
     node.metadata["pinned_lines"] = f"{line_start}-{line_end}"
 
     auto_pinned = False
@@ -461,8 +461,7 @@ def pin_lines(
                 node.metadata["pinned_sha"] = sha
                 node.metadata["verified_at"] = date.today().isoformat()
                 auto_pinned = True
-            if not node.source_hash:
-                node.source_hash = hash_file(path)
+            node.source_hash = hash_file(path)
 
     return {
         "node_id": node_id,
