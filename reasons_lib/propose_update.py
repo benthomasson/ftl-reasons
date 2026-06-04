@@ -185,6 +185,8 @@ def parse_update_proposals(response):
             if action not in ("update", "retract"):
                 action = "update"
             failure_mode = item.get("failure_mode", "")
+            if failure_mode not in FAILURE_MODES:
+                failure_mode = ""
             basis = item.get("basis", "prior-knowledge")
             if basis not in BASES:
                 basis = "prior-knowledge"

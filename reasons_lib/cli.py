@@ -1575,20 +1575,15 @@ def cmd_propose_update(args):
 
     print(f"\nReviewed {result['reviewed']} beliefs, {len(proposals)} update(s) proposed")
 
-    nodes = None
-    if output_format == "markdown" or args.output:
+    if output_format == "markdown":
         net_result = api.export_network(db_path=args.db)
         nodes = net_result.get("nodes", {})
-
-    output_file = args.output or "proposed-updates.md"
-    if output_format == "json":
-        output_file = args.output or "proposed-updates.json"
-
-    if output_format == "markdown":
+        output_file = args.output or "proposed-updates.md"
         content = format_proposals_file(proposals, nodes=nodes, cascades=cascades)
         Path(output_file).write_text(content)
         print(f"\nWrote proposals to {output_file}")
     else:
+        output_file = args.output or "proposed-updates.json"
         Path(output_file).write_text(_json.dumps({
             "timestamp": ts,
             "model": model,

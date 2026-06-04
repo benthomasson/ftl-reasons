@@ -2590,11 +2590,20 @@ def propose_update(
         candidates = {k: candidates[k] for k in sampled_keys}
 
     review_ids = sorted(candidates.keys())
+
+    # Enrich nodes with dependents (export_network doesn't include them)
+    with _with_network(db_path) as net:
+        for nid in nodes:
+            if nid in net.nodes:
+                nodes[nid]["dependents"] = sorted(net.nodes[nid].dependents)
+
     proposals = _propose(nodes, belief_ids=review_ids, model=model,
                          timeout=timeout, on_batch=on_batch)
 
     cascades = {}
     for p in proposals:
+        if p["id"] not in nodes:
+            continue
         try:
             cascades[p["id"]] = what_if_retract(p["id"], db_path=db_path)
         except KeyError:

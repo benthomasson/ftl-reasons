@@ -112,6 +112,31 @@ class TestFormatBeliefForUpdate:
         result = format_belief_for_update("derived-c", sample_nodes)
         assert "Dependents" not in result
 
+    def test_multiple_justifications(self):
+        nodes = {
+            "multi-just": {
+                "text": "Has two justifications.",
+                "truth_value": "IN",
+                "source": "",
+                "source_url": "",
+                "justifications": [
+                    {"antecedents": ["a"], "outlist": [], "label": "first"},
+                    {"antecedents": ["b"], "outlist": [], "label": "second"},
+                ],
+                "dependents": [],
+                "metadata": {},
+            },
+            "a": {"text": "Ant A.", "truth_value": "IN", "justifications": [],
+                   "source": "", "source_url": "", "dependents": [], "metadata": {}},
+            "b": {"text": "Ant B.", "truth_value": "IN", "justifications": [],
+                   "source": "", "source_url": "", "dependents": [], "metadata": {}},
+        }
+        result = format_belief_for_update("multi-just", nodes)
+        assert "Justification 1/2:" in result
+        assert "Justification 2/2:" in result
+        assert "Label: first" in result
+        assert "Label: second" in result
+
 
 class TestParseUpdateProposals:
     def test_valid_json(self):
@@ -183,6 +208,15 @@ class TestParseUpdateProposals:
         }])
         results = parse_update_proposals(response)
         assert results[0]["basis"] == "prior-knowledge"
+
+    def test_invalid_failure_mode_defaults(self):
+        response = json.dumps([{
+            "id": "x", "action": "update", "proposed_text": "new",
+            "failure_mode": "made-up-mode", "basis": "source-divergence",
+            "evidence": "", "comment": "",
+        }])
+        results = parse_update_proposals(response)
+        assert results[0]["failure_mode"] == ""
 
     def test_invalid_action_defaults(self):
         response = json.dumps([{
