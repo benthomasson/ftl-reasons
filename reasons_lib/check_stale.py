@@ -104,7 +104,13 @@ def check_stale(
 
         pinned_sha = node.metadata.get("pinned_sha") if node.metadata else None
         if git_aware and pinned_sha:
-            if not file_changed_since(path, pinned_sha):
+            pinned_lines = node.metadata.get("pinned_lines") if node.metadata else None
+            if pinned_lines:
+                parts = pinned_lines.split("-")
+                ls, le = int(parts[0]), int(parts[1])
+                if not file_lines_changed_since(path, pinned_sha, ls, le):
+                    continue
+            elif not file_changed_since(path, pinned_sha):
                 continue
 
         current_hash = hash_file(path)
@@ -227,6 +233,58 @@ def file_changed_since(filepath: Path, since_sha: str) -> bool:
         )
         if result.returncode != 0:
             return True
+        return False
+    except subprocess.TimeoutExpired:
+        return True
+
+
+def parse_diff_hunks(diff_output: str) -> list[tuple[int, int]]:
+    """Parse unified diff hunk headers, return OLD-side (start, end) ranges.
+
+    Skips hunks with count=0 (pure insertions that don't affect old lines).
+    """
+    hunks = []
+    for m in re.finditer(r'^@@ -(\d+)(?:,(\d+))? \+\d+(?:,\d+)? @@', diff_output, re.MULTILINE):
+        start = int(m.group(1))
+        count = int(m.group(2)) if m.group(2) is not None else 1
+        if count == 0:
+            continue
+        hunks.append((start, start + count - 1))
+    return hunks
+
+
+def file_lines_changed_since(
+    filepath: Path, since_sha: str, line_start: int, line_end: int,
+) -> bool:
+    """Check if specific lines were modified since since_sha.
+
+    Parses unified diff hunk headers from committed and uncommitted changes.
+    Uses the OLD side of the diff (stored lines reference the file at pinned_sha).
+    Returns True on git errors to force fallback to content hashing.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "diff", "-U0", since_sha, "HEAD", "--", str(filepath.name)],
+            capture_output=True, text=True,
+            cwd=str(filepath.parent),
+            timeout=30,
+        )
+        if result.returncode != 0:
+            return True
+        for hunk_start, hunk_end in parse_diff_hunks(result.stdout):
+            if hunk_end >= line_start and hunk_start <= line_end:
+                return True
+        result = subprocess.run(
+            ["git", "diff", "-U0", "HEAD", "--", str(filepath.name)],
+            capture_output=True, text=True,
+            cwd=str(filepath.parent),
+            timeout=30,
+        )
+        if result.returncode != 0:
+            return True
+        for hunk_start, hunk_end in parse_diff_hunks(result.stdout):
+            if hunk_end >= line_start and hunk_start <= line_end:
+                return True
         return False
     except subprocess.TimeoutExpired:
         return True
@@ -366,3 +424,49 @@ def pin_update(
         })
 
     return results
+
+
+def pin_lines(
+    network: Network,
+    node_id: str,
+    line_start: int,
+    line_end: int,
+    repos: dict[str, Path] | None = None,
+    db_dir: Path | None = None,
+) -> dict:
+    """Set pinned_lines on a node, auto-pinning SHA if not already set."""
+    if line_start < 1:
+        raise ValueError(f"line_start must be >= 1, got {line_start}")
+    if line_end < line_start:
+        raise ValueError(f"line_end ({line_end}) must be >= line_start ({line_start})")
+
+    node = network.nodes.get(node_id)
+    if node is None:
+        raise KeyError(f"node {node_id!r} not found")
+    if not node.source:
+        raise ValueError(f"node {node_id!r} has no source")
+
+    if repos is None and network.repos:
+        repos = {k: Path(v) for k, v in network.repos.items()}
+
+    node.metadata["pinned_lines"] = f"{line_start}-{line_end}"
+
+    auto_pinned = False
+    if not node.metadata.get("pinned_sha"):
+        agent = node.metadata.get("agent") if node.metadata else None
+        path = resolve_source_path(node.source, repos, db_dir, agent=agent)
+        if path is not None:
+            sha = get_file_commit_sha(path)
+            if sha:
+                node.metadata["pinned_sha"] = sha
+                node.metadata["verified_at"] = date.today().isoformat()
+                auto_pinned = True
+            if not node.source_hash:
+                node.source_hash = hash_file(path)
+
+    return {
+        "node_id": node_id,
+        "pinned_lines": node.metadata["pinned_lines"],
+        "pinned_sha": node.metadata.get("pinned_sha", ""),
+        "auto_pinned": auto_pinned,
+    }

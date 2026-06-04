@@ -1751,6 +1751,35 @@ def pin_update(
                 "errors": errors}
 
 
+def pin_lines(
+    node_id: str,
+    line_start: int,
+    line_end: int,
+    repos: dict[str, str] | None = None,
+    db_path: str = DEFAULT_DB,
+) -> dict:
+    """Set pinned_lines metadata on a node.
+
+    If the node doesn't have a pinned_sha yet, auto-pins it.
+
+    Returns: {"node_id", "pinned_lines", "pinned_sha", "auto_pinned"}
+    """
+    from pathlib import Path as P
+    from .check_stale import pin_lines as _pin_lines
+
+    db_dir = P(db_path).resolve().parent
+
+    with _with_network(db_path, write=True) as net:
+        repo_paths = repos
+        if repo_paths is None and net.repos:
+            repo_paths = net.repos
+        if repo_paths:
+            repo_paths = {k: P(v) for k, v in repo_paths.items()}
+
+        return _pin_lines(net, node_id, line_start, line_end,
+                          repos=repo_paths, db_dir=db_dir)
+
+
 def compact(budget: int = 500, truncate: bool = True, visible_to: list[str] | None = None, db_path: str = DEFAULT_DB,
             pg_conninfo=None, project_id=None) -> str:
     """Generate a token-budgeted belief state summary.

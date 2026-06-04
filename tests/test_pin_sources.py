@@ -11,7 +11,10 @@ from reasons_lib.check_stale import (
     check_stale,
     get_file_commit_sha,
     file_changed_since,
+    file_lines_changed_since,
     hash_file,
+    parse_diff_hunks,
+    pin_lines,
     pin_source_url,
     pin_sources,
     pin_update,
@@ -281,3 +284,205 @@ class TestCheckStaleGitAware:
         net.nodes["belief-1"].metadata["pinned_sha"] = sha
         results, upgraded, sha_bumped = check_stale(net, db_dir=git_repo, git_aware=False)
         assert len(results) == 0
+
+
+class TestParseDiffHunks:
+    def test_parses_single_hunk(self):
+        diff = "@@ -89,5 +89,7 @@ def some_function():\n"
+        assert parse_diff_hunks(diff) == [(89, 93)]
+
+    def test_parses_multiple_hunks(self):
+        diff = (
+            "@@ -10,3 +10,4 @@ ...\n"
+            " context\n"
+            "@@ -50,2 +51,2 @@ ...\n"
+        )
+        assert parse_diff_hunks(diff) == [(10, 12), (50, 51)]
+
+    def test_single_line_hunk_no_count(self):
+        diff = "@@ -42 +42,2 @@\n"
+        assert parse_diff_hunks(diff) == [(42, 42)]
+
+    def test_zero_count_hunk_excluded(self):
+        diff = "@@ -89,0 +90,3 @@\n"
+        assert parse_diff_hunks(diff) == []
+
+    def test_empty_diff(self):
+        assert parse_diff_hunks("") == []
+
+    def test_no_hunk_headers(self):
+        diff = "diff --git a/file.py b/file.py\nindex abc..def\n"
+        assert parse_diff_hunks(diff) == []
+
+
+class TestFileLinesChangedSince:
+    def _multiline_file(self, git_repo, lines=5):
+        content = "\n".join(f"line{i}" for i in range(1, lines + 1)) + "\n"
+        (git_repo / "source.md").write_text(content)
+        subprocess.run(["git", "add", "source.md"], cwd=git_repo,
+                       capture_output=True, check=True)
+        subprocess.run(["git", "commit", "-m", "multiline"], cwd=git_repo,
+                       capture_output=True, check=True)
+        return content
+
+    def test_no_change_returns_false(self, git_repo):
+        self._multiline_file(git_repo)
+        sha = _get_head_sha(git_repo)
+        assert not file_lines_changed_since(git_repo / "source.md", sha, 1, 5)
+
+    def test_detects_change_in_pinned_range(self, git_repo):
+        self._multiline_file(git_repo)
+        sha = _get_head_sha(git_repo)
+        lines = (git_repo / "source.md").read_text().split("\n")
+        lines[2] = "CHANGED"
+        (git_repo / "source.md").write_text("\n".join(lines))
+        subprocess.run(["git", "add", "source.md"], cwd=git_repo,
+                       capture_output=True, check=True)
+        subprocess.run(["git", "commit", "-m", "edit line 3"], cwd=git_repo,
+                       capture_output=True, check=True)
+        assert file_lines_changed_since(git_repo / "source.md", sha, 2, 4)
+
+    def test_ignores_change_outside_pinned_range(self, git_repo):
+        self._multiline_file(git_repo)
+        sha = _get_head_sha(git_repo)
+        lines = (git_repo / "source.md").read_text().split("\n")
+        lines[4] = "CHANGED"
+        (git_repo / "source.md").write_text("\n".join(lines))
+        subprocess.run(["git", "add", "source.md"], cwd=git_repo,
+                       capture_output=True, check=True)
+        subprocess.run(["git", "commit", "-m", "edit line 5"], cwd=git_repo,
+                       capture_output=True, check=True)
+        assert not file_lines_changed_since(git_repo / "source.md", sha, 1, 3)
+
+    def test_detects_uncommitted_change_in_range(self, git_repo):
+        self._multiline_file(git_repo)
+        sha = _get_head_sha(git_repo)
+        lines = (git_repo / "source.md").read_text().split("\n")
+        lines[1] = "CHANGED"
+        (git_repo / "source.md").write_text("\n".join(lines))
+        assert file_lines_changed_since(git_repo / "source.md", sha, 2, 2)
+
+    def test_fails_open_on_bad_sha(self, git_repo):
+        assert file_lines_changed_since(
+            git_repo / "source.md", "0" * 40, 1, 5
+        )
+
+
+class TestPinLines:
+    def test_sets_pinned_lines(self, git_repo):
+        net = Network()
+        h = hash_file(git_repo / "source.md")
+        net.add_node("belief-1", "Test belief", source="source.md", source_hash=h)
+        result = pin_lines(net, "belief-1", 89, 93, db_dir=git_repo)
+        assert result["pinned_lines"] == "89-93"
+        assert net.nodes["belief-1"].metadata["pinned_lines"] == "89-93"
+
+    def test_auto_pins_sha_if_missing(self, git_repo):
+        net = Network()
+        net.add_node("belief-1", "Test belief", source="source.md", source_hash="")
+        result = pin_lines(net, "belief-1", 1, 10, db_dir=git_repo)
+        assert result["auto_pinned"] is True
+        assert len(result["pinned_sha"]) == 40
+        assert net.nodes["belief-1"].metadata["pinned_sha"] == result["pinned_sha"]
+
+    def test_preserves_existing_sha(self, git_repo):
+        net = Network()
+        h = hash_file(git_repo / "source.md")
+        net.add_node("belief-1", "Test belief", source="source.md", source_hash=h)
+        net.nodes["belief-1"].metadata["pinned_sha"] = "a" * 40
+        result = pin_lines(net, "belief-1", 1, 10, db_dir=git_repo)
+        assert result["auto_pinned"] is False
+        assert result["pinned_sha"] == "a" * 40
+
+    def test_validates_line_range(self, git_repo):
+        net = Network()
+        net.add_node("belief-1", "Test belief", source="source.md")
+        with pytest.raises(ValueError):
+            pin_lines(net, "belief-1", 0, 10, db_dir=git_repo)
+        with pytest.raises(ValueError):
+            pin_lines(net, "belief-1", 10, 5, db_dir=git_repo)
+
+    def test_error_on_missing_node(self, git_repo):
+        net = Network()
+        with pytest.raises(KeyError):
+            pin_lines(net, "nonexistent", 1, 10, db_dir=git_repo)
+
+    def test_error_on_no_source(self, git_repo):
+        net = Network()
+        net.add_node("belief-1", "Test belief")
+        with pytest.raises(ValueError):
+            pin_lines(net, "belief-1", 1, 10, db_dir=git_repo)
+
+
+class TestCheckStaleLineRange:
+    def _setup_multiline(self, git_repo, lines=5):
+        content = "\n".join(f"line{i}" for i in range(1, lines + 1)) + "\n"
+        (git_repo / "source.md").write_text(content)
+        subprocess.run(["git", "add", "source.md"], cwd=git_repo,
+                       capture_output=True, check=True)
+        subprocess.run(["git", "commit", "-m", "multiline"], cwd=git_repo,
+                       capture_output=True, check=True)
+        return content
+
+    def test_fresh_when_change_outside_pinned_lines(self, git_repo):
+        content = self._setup_multiline(git_repo)
+        sha = _get_head_sha(git_repo)
+        h = hash_file(git_repo / "source.md")
+        net = Network()
+        net.add_node("belief-1", "Test belief", source="source.md", source_hash=h)
+        net.nodes["belief-1"].metadata["pinned_sha"] = sha
+        net.nodes["belief-1"].metadata["pinned_lines"] = "1-2"
+        # Change line 5 (outside pinned range)
+        lines = content.split("\n")
+        lines[4] = "CHANGED"
+        _commit_change(git_repo, "source.md", "\n".join(lines))
+        results, upgraded, sha_bumped = check_stale(net, db_dir=git_repo, git_aware=True)
+        assert len(results) == 0
+
+    def test_stale_when_change_inside_pinned_lines(self, git_repo):
+        content = self._setup_multiline(git_repo)
+        sha = _get_head_sha(git_repo)
+        h = hash_file(git_repo / "source.md")
+        net = Network()
+        net.add_node("belief-1", "Test belief", source="source.md", source_hash=h)
+        net.nodes["belief-1"].metadata["pinned_sha"] = sha
+        net.nodes["belief-1"].metadata["pinned_lines"] = "1-3"
+        # Change line 2 (inside pinned range)
+        lines = content.split("\n")
+        lines[1] = "CHANGED"
+        _commit_change(git_repo, "source.md", "\n".join(lines))
+        results, upgraded, sha_bumped = check_stale(net, db_dir=git_repo, git_aware=True)
+        assert len(results) == 1
+        assert results[0]["reason"] == "content_changed"
+
+    def test_falls_back_to_whole_file_without_pinned_lines(self, git_repo):
+        content = self._setup_multiline(git_repo)
+        sha = _get_head_sha(git_repo)
+        h = hash_file(git_repo / "source.md")
+        net = Network()
+        net.add_node("belief-1", "Test belief", source="source.md", source_hash=h)
+        net.nodes["belief-1"].metadata["pinned_sha"] = sha
+        # No pinned_lines — any change to file should trigger stale
+        lines = content.split("\n")
+        lines[4] = "CHANGED"
+        _commit_change(git_repo, "source.md", "\n".join(lines))
+        results, upgraded, sha_bumped = check_stale(net, db_dir=git_repo, git_aware=True)
+        assert len(results) == 1
+
+    def test_auto_bumps_sha_preserves_pinned_lines(self, git_repo):
+        content = self._setup_multiline(git_repo)
+        sha = _get_head_sha(git_repo)
+        h = hash_file(git_repo / "source.md")
+        net = Network()
+        net.add_node("belief-1", "Test belief", source="source.md", source_hash=h)
+        net.nodes["belief-1"].metadata["pinned_sha"] = sha
+        net.nodes["belief-1"].metadata["pinned_lines"] = "1-3"
+        # Change line 5 (outside range), then revert to original
+        lines = content.split("\n")
+        lines[4] = "CHANGED"
+        _commit_change(git_repo, "source.md", "\n".join(lines))
+        _commit_change(git_repo, "source.md", content)
+        new_head = _get_head_sha(git_repo)
+        results, upgraded, sha_bumped = check_stale(net, db_dir=git_repo, git_aware=True)
+        assert len(results) == 0
+        assert net.nodes["belief-1"].metadata["pinned_lines"] == "1-3"
