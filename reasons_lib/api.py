@@ -177,6 +177,7 @@ def add_node(
     access_tags: list[str] | None = None,
     example: str | None = None,
     source_type: str = "",
+    accepted_pr: str = "",
     db_path: str = DEFAULT_DB,
     pg_conninfo=None, project_id=None,
 ) -> dict:
@@ -268,6 +269,8 @@ def add_node(
             metadata["example"] = example
         if source_type:
             metadata["source_type"] = source_type
+        if accepted_pr:
+            metadata["accepted_pr"] = accepted_pr
 
         node = net.add_node(
             id=node_id,

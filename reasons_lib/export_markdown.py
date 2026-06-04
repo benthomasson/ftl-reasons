@@ -64,6 +64,8 @@ def export_markdown(network: Network, repos: dict[str, str] | None = None) -> st
 
         if node.source:
             lines.append(f"- Source: {node.source}")
+        if node.source_url:
+            lines.append(f"- Source URL: {node.source_url}")
         if node.metadata.get("source_type"):
             lines.append(f"- Source type: {node.metadata['source_type']}")
         if node.source_hash:
@@ -92,6 +94,8 @@ def export_markdown(network: Network, repos: dict[str, str] | None = None) -> st
             lines.append(f"- Stale reason: {retract_reason}")
         if node.metadata.get("superseded_by"):
             lines.append(f"- Superseded by: {node.metadata['superseded_by']}")
+        if node.metadata.get("accepted_pr"):
+            lines.append(f"- Accepted PR: {node.metadata['accepted_pr']}")
 
         lines.append("")
 
