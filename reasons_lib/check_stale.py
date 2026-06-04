@@ -117,6 +117,7 @@ def check_stale(
                         if new_sha and new_sha != pinned_sha:
                             node.metadata["pinned_sha"] = new_sha
                             node.metadata["verified_at"] = date.today().isoformat()
+                            node.source_hash = hash_file(path)
                             sha_bumped += 1
                         continue
             elif not file_changed_since(path, pinned_sha):

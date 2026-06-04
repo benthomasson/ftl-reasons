@@ -486,3 +486,21 @@ class TestCheckStaleLineRange:
         results, upgraded, sha_bumped = check_stale(net, db_dir=git_repo, git_aware=True)
         assert len(results) == 0
         assert net.nodes["belief-1"].metadata["pinned_lines"] == "1-3"
+
+    def test_auto_bump_updates_source_hash(self, git_repo):
+        content = self._setup_multiline(git_repo)
+        sha = _get_head_sha(git_repo)
+        h = hash_file(git_repo / "source.md")
+        net = Network()
+        net.add_node("belief-1", "Test belief", source="source.md", source_hash=h)
+        net.nodes["belief-1"].metadata["pinned_sha"] = sha
+        net.nodes["belief-1"].metadata["pinned_lines"] = "1-2"
+        # Change line 5 (outside pinned range) — content changes but lines don't
+        lines = content.split("\n")
+        lines[4] = "CHANGED"
+        new_content = "\n".join(lines)
+        _commit_change(git_repo, "source.md", new_content)
+        results, upgraded, sha_bumped = check_stale(net, db_dir=git_repo, git_aware=True)
+        assert len(results) == 0
+        assert sha_bumped == 1
+        assert net.nodes["belief-1"].source_hash == hash_file(git_repo / "source.md")
