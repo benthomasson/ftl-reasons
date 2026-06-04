@@ -82,6 +82,7 @@ def parse_beliefs(text: str) -> list[dict]:
                 "type": m.group(3).strip(),
                 "text": "",
                 "source": "",
+                "source_type": "",
                 "source_hash": "",
                 "date": "",
                 "depends_on": [],
@@ -106,6 +107,8 @@ def parse_beliefs(text: str) -> list[dict]:
         elif line.startswith("- Unless: "):
             unless = line[len("- Unless: "):].strip()
             current["unless"] = [u.strip() for u in unless.split(",") if u.strip()]
+        elif line.startswith("- Source type: "):
+            current["source_type"] = line[len("- Source type: "):].strip()
         elif line.lower().startswith("- stale reason: "):
             current["stale_reason"] = line[line.index(": ") + 2:].strip()
         elif line.lower().startswith("- superseded by: "):
@@ -237,6 +240,8 @@ def import_into_network(
         metadata = {}
         if claim["type"]:
             metadata["beliefs_type"] = claim["type"]
+        if claim.get("source_type"):
+            metadata["source_type"] = claim["source_type"]
         if claim["stale_reason"]:
             metadata["stale_reason"] = claim["stale_reason"]
         if claim["superseded_by"]:

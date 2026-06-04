@@ -636,6 +636,7 @@ def apply_proposals(valid, db_path="reasons.db"):
                 sl=sl,
                 unless=unless,
                 label=p["label"],
+                source_type="derived",
                 db_path=db_path,
             )
             results.append((p, result))

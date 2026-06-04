@@ -64,6 +64,8 @@ def export_markdown(network: Network, repos: dict[str, str] | None = None) -> st
 
         if node.source:
             lines.append(f"- Source: {node.source}")
+        if node.metadata.get("source_type"):
+            lines.append(f"- Source type: {node.metadata['source_type']}")
         if node.source_hash:
             lines.append(f"- Source hash: {node.source_hash}")
         if node.date:

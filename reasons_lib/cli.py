@@ -57,6 +57,7 @@ def cmd_add(args):
             any_mode=getattr(args, "any", False),
             access_tags=access_tags,
             example=getattr(args, "example", None),
+            source_type=getattr(args, "source_type", None) or "",
             **_backend_kwargs(args),
         )
         print(f"Added {result['node_id']} [{result['truth_value']}] ({result['type']})")
@@ -262,6 +263,8 @@ def cmd_show(args):
         print(f"URL:    {node['source_url']}")
     if node["source_hash"]:
         print(f"Hash:   {node['source_hash']}")
+    if node["metadata"].get("source_type"):
+        print(f"Source type: {node['metadata']['source_type']}")
     if node["metadata"].get("pinned_sha"):
         sha = node["metadata"]["pinned_sha"][:12]
         lines = node["metadata"].get("pinned_lines", "")
@@ -1329,13 +1332,14 @@ def cmd_list(args):
         marker = "+" if node["truth_value"] == "IN" else "-"
         jinfo = f"  ({node['justification_count']} justification{'s' if node['justification_count'] != 1 else ''})" if node["justification_count"] else "  (premise)"
         deps = f"  [{node['dependent_count']} dependents]" if node["dependent_count"] else ""
+        stype = f"  <{node['source_type']}>" if node.get("source_type") else ""
         review_info = ""
         if show_review:
             if node.get("last_reviewed"):
                 review_info = f"  (reviewed: {node['last_reviewed']}, {node.get('review_result', '?')})"
             elif node.get("justification_count", 0) > 0:
                 review_info = "  (never reviewed)"
-        print(f"  [{marker}] {node['id']}{jinfo}{deps}{review_info}")
+        print(f"  [{marker}] {node['id']}{jinfo}{deps}{stype}{review_info}")
 
     print(f"\n{result['count']} node{'s' if result['count'] != 1 else ''}")
 
@@ -1799,6 +1803,8 @@ def main():
     p.add_argument("-n", "--namespace", help="Namespace prefix (auto-creates ns:active premise)")
     p.add_argument("--access-tags", metavar="TAG,TAG", help="Data source provenance tags (comma-separated)")
     p.add_argument("--example", default=None, help="Code example demonstrating the belief")
+    p.add_argument("--source-type", choices=["code", "document", "self-description", "derived"],
+                   help="Epistemic source type (code, document, self-description, derived)")
 
     # add-justification
     p = sub.add_parser("add-justification", help="Add a justification to an existing node")
