@@ -224,7 +224,7 @@ class TestCheckStaleGitAware:
         net.add_node("belief-1", "Test belief",
                       source="source.md", source_hash=content_hash)
         net.nodes["belief-1"].metadata["pinned_sha"] = sha
-        results, upgraded = check_stale(net, db_dir=git_repo, git_aware=True)
+        results, upgraded, sha_bumped = check_stale(net, db_dir=git_repo, git_aware=True)
         assert len(results) == 0
 
     def test_stale_when_content_changed(self, git_repo):
@@ -235,7 +235,7 @@ class TestCheckStaleGitAware:
                       source="source.md", source_hash=content_hash)
         net.nodes["belief-1"].metadata["pinned_sha"] = sha
         _commit_change(git_repo, "source.md", "changed content")
-        results, upgraded = check_stale(net, db_dir=git_repo, git_aware=True)
+        results, upgraded, sha_bumped = check_stale(net, db_dir=git_repo, git_aware=True)
         assert len(results) == 1
         assert results[0]["reason"] == "content_changed"
 
@@ -250,9 +250,10 @@ class TestCheckStaleGitAware:
         _commit_change(git_repo, "source.md", "temporary change")
         _commit_change(git_repo, "source.md", "initial content")
         new_head = _get_head_sha(git_repo)
-        results, upgraded = check_stale(net, db_dir=git_repo, git_aware=True)
+        results, upgraded, sha_bumped = check_stale(net, db_dir=git_repo, git_aware=True)
         assert len(results) == 0
-        assert upgraded == 1
+        assert upgraded == 0
+        assert sha_bumped == 1
         assert net.nodes["belief-1"].metadata["pinned_sha"] == new_head
 
     def test_falls_back_to_hash_without_pinned_sha(self, git_repo):
@@ -261,7 +262,7 @@ class TestCheckStaleGitAware:
         net.add_node("belief-1", "Test belief",
                       source="source.md", source_hash=content_hash)
         _commit_change(git_repo, "source.md", "changed content")
-        results, upgraded = check_stale(net, db_dir=git_repo, git_aware=True)
+        results, upgraded, sha_bumped = check_stale(net, db_dir=git_repo, git_aware=True)
         assert len(results) == 1
         assert results[0]["reason"] == "content_changed"
 
@@ -272,5 +273,5 @@ class TestCheckStaleGitAware:
         net.add_node("belief-1", "Test belief",
                       source="source.md", source_hash=content_hash)
         net.nodes["belief-1"].metadata["pinned_sha"] = sha
-        results, upgraded = check_stale(net, db_dir=git_repo, git_aware=False)
+        results, upgraded, sha_bumped = check_stale(net, db_dir=git_repo, git_aware=False)
         assert len(results) == 0

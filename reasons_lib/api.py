@@ -1653,14 +1653,15 @@ def check_stale(
             1 for n in net.nodes.values()
             if n.truth_value == "IN" and n.source and n.source_hash
         )
-        results, upgraded = _check(net, repo_paths, db_dir=db_dir,
-                                   upgrade_hashes=upgrade_hashes,
-                                   git_aware=git_aware)
+        results, upgraded, sha_bumped = _check(net, repo_paths, db_dir=db_dir,
+                                               upgrade_hashes=upgrade_hashes,
+                                               git_aware=git_aware)
         return {
             "stale": results,
             "checked": in_with_source,
             "stale_count": len(results),
             "upgraded": upgraded,
+            "sha_bumped": sha_bumped,
         }
 
 

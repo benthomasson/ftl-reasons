@@ -24,7 +24,7 @@ class TestSourceDeletedResult:
         net = Network()
         net.add_node("a", "Belief A", source="r/gone.md", source_hash="abc123")
 
-        results, _ = check_stale(net, repos={"r": tmp_path})
+        results, *_ = check_stale(net, repos={"r": tmp_path})
 
         assert len(results) == 1
         r = results[0]
@@ -39,7 +39,7 @@ class TestSourceDeletedResult:
         net = Network()
         net.add_node("a", "Belief A", source="r/gone.md", source_hash="xyz")
 
-        results, _ = check_stale(net, repos={"r": tmp_path})
+        results, *_ = check_stale(net, repos={"r": tmp_path})
 
         required_keys = {"node_id", "old_hash", "new_hash", "source", "source_path", "reason"}
         assert set(results[0].keys()) == required_keys
@@ -55,7 +55,7 @@ class TestSourceDeletedResult:
 
         f.write_text("changed")
 
-        results, _ = check_stale(net, repos={"r": tmp_path})
+        results, *_ = check_stale(net, repos={"r": tmp_path})
 
         assert len(results) == 2
         changed = next(r for r in results if r["reason"] == "content_changed")
@@ -82,7 +82,7 @@ class TestMixedResults:
 
         changing.write_text("new content")
 
-        results, _ = check_stale(net, repos={"r": tmp_path})
+        results, *_ = check_stale(net, repos={"r": tmp_path})
 
         reasons = {r["node_id"]: r["reason"] for r in results}
         assert reasons["changed"] == "content_changed"
@@ -94,7 +94,7 @@ class TestMixedResults:
         net.add_node("a", "Belief A", source="r/shared.md", source_hash="h1")
         net.add_node("b", "Belief B", source="r/shared.md", source_hash="h2")
 
-        results, _ = check_stale(net, repos={"r": tmp_path})
+        results, *_ = check_stale(net, repos={"r": tmp_path})
 
         assert len(results) == 2
         assert all(r["reason"] == "source_deleted" for r in results)
@@ -110,28 +110,28 @@ class TestSkipBehavior:
         net.add_node("a", "Belief A", source="r/gone.md", source_hash="abc")
         net.retract("a")
 
-        results, _ = check_stale(net, repos={"r": tmp_path})
+        results, *_ = check_stale(net, repos={"r": tmp_path})
         assert results == []
 
     def test_skips_nodes_without_source(self, tmp_path):
         net = Network()
         net.add_node("a", "Premise with no source")
 
-        results, _ = check_stale(net, repos={"r": tmp_path})
+        results, *_ = check_stale(net, repos={"r": tmp_path})
         assert results == []
 
     def test_skips_nodes_without_hash(self, tmp_path):
         net = Network()
         net.add_node("a", "Has source but no hash", source="r/file.md")
 
-        results, _ = check_stale(net, repos={"r": tmp_path})
+        results, *_ = check_stale(net, repos={"r": tmp_path})
         assert results == []
 
     def test_skips_nodes_with_empty_source_string(self, tmp_path):
         net = Network()
         net.add_node("a", "Empty source", source="", source_hash="abc")
 
-        results, _ = check_stale(net, repos={"r": tmp_path})
+        results, *_ = check_stale(net, repos={"r": tmp_path})
         assert results == []
 
 
@@ -146,7 +146,7 @@ class TestEdgeCases:
         net = Network()
         net.add_node("a", "From empty file", source="r/empty.md", source_hash=empty_hash)
 
-        results, _ = check_stale(net, repos={"r": tmp_path})
+        results, *_ = check_stale(net, repos={"r": tmp_path})
         assert results == []
 
     def test_empty_file_with_wrong_hash_is_content_changed(self, tmp_path):
@@ -156,7 +156,7 @@ class TestEdgeCases:
         net = Network()
         net.add_node("a", "From empty file", source="r/empty.md", source_hash="wronghash")
 
-        results, _ = check_stale(net, repos={"r": tmp_path})
+        results, *_ = check_stale(net, repos={"r": tmp_path})
         assert len(results) == 1
         assert results[0]["reason"] == "content_changed"
         assert results[0]["new_hash"] == _hash("")
@@ -165,7 +165,7 @@ class TestEdgeCases:
         net = Network()
         net.add_node("a", "Belief", source="nonexistent-repo/file.md", source_hash="abc")
 
-        results, _ = check_stale(net, repos=None)
+        results, *_ = check_stale(net, repos=None)
         assert len(results) == 1
         assert results[0]["reason"] == "source_deleted"
 
@@ -177,7 +177,7 @@ class TestEdgeCases:
         net = Network()
         net.add_node("a", "Belief A", source="r/src.md", source_hash=h)
 
-        results, _ = check_stale(net, repos={"r": tmp_path})
+        results, *_ = check_stale(net, repos={"r": tmp_path})
         assert results == []
 
     def test_results_sorted_by_node_id(self, tmp_path):
@@ -186,7 +186,7 @@ class TestEdgeCases:
         net.add_node("a-node", "A", source="r/a.md", source_hash="h")
         net.add_node("m-node", "M", source="r/m.md", source_hash="h")
 
-        results, _ = check_stale(net, repos={"r": tmp_path})
+        results, *_ = check_stale(net, repos={"r": tmp_path})
         ids = [r["node_id"] for r in results]
         assert ids == sorted(ids)
 
@@ -199,6 +199,6 @@ class TestEdgeCases:
         net.add_node("a", "Belief", source="r/src.md", source_hash=h)
         f.write_text("new")
 
-        results, _ = check_stale(net, repos={"r": tmp_path})
+        results, *_ = check_stale(net, repos={"r": tmp_path})
         assert results[0]["source_path"] == str(f)
         assert results[0]["reason"] == "content_changed"

@@ -702,6 +702,8 @@ def cmd_check_stale(args):
 
     if result.get("upgraded"):
         print(f"Upgraded {result['upgraded']} truncated hash(es) to full length.")
+    if result.get("sha_bumped"):
+        print(f"Auto-bumped {result['sha_bumped']} pinned SHA(s) (content unchanged).")
 
     if not result["stale"]:
         print(f"All {result['checked']} nodes with sources are fresh.")

@@ -65,7 +65,7 @@ def check_stale(
     db_dir: Path | None = None,
     upgrade_hashes: bool = False,
     git_aware: bool = False,
-) -> tuple[list[dict], int]:
+) -> tuple[list[dict], int, int]:
     """Check all IN nodes for source staleness.
 
     If upgrade_hashes=True, truncated hashes that are a prefix of the
@@ -74,13 +74,14 @@ def check_stale(
     If git_aware=True, nodes with pinned_sha in metadata skip content
     hashing when no commits touched the file since the pinned SHA.
 
-    Returns (stale_results, upgraded_count).
+    Returns (stale_results, upgraded_count, sha_bumped_count).
     """
     if repos is None and network.repos:
         repos = {k: Path(v) for k, v in network.repos.items()}
 
     results = []
     upgraded = 0
+    sha_bumped = 0
 
     for nid, node in sorted(network.nodes.items()):
         if node.truth_value != "IN":
@@ -131,14 +132,13 @@ def check_stale(
                 "reason": "content_changed",
             })
         elif git_aware and pinned_sha:
-            # Content hash unchanged despite commits — auto-bump pinned_sha
             new_sha = get_file_commit_sha(path)
             if new_sha and new_sha != pinned_sha:
                 node.metadata["pinned_sha"] = new_sha
                 node.metadata["verified_at"] = date.today().isoformat()
-                upgraded += 1
+                sha_bumped += 1
 
-    return results, upgraded
+    return results, upgraded, sha_bumped
 
 
 def hash_sources(
@@ -200,14 +200,30 @@ def get_file_commit_sha(filepath: Path) -> str | None:
 
 
 def file_changed_since(filepath: Path, since_sha: str) -> bool:
-    """Check if file was modified in any commit after since_sha."""
+    """Check if file was modified since since_sha (committed or uncommitted).
+
+    Returns True on git errors to force fallback to content hashing.
+    """
+    # Check committed changes
     result = subprocess.run(
         ["git", "log", "--format=%H", f"{since_sha}..HEAD",
          "--", str(filepath.name)],
         capture_output=True, text=True,
         cwd=str(filepath.parent),
     )
-    return bool(result.returncode == 0 and result.stdout.strip())
+    if result.returncode != 0:
+        return True
+    if result.stdout.strip():
+        return True
+    # Check uncommitted changes (staged + unstaged)
+    result = subprocess.run(
+        ["git", "diff", "--quiet", "HEAD", "--", str(filepath.name)],
+        capture_output=True, text=True,
+        cwd=str(filepath.parent),
+    )
+    if result.returncode != 0:
+        return True
+    return False
 
 
 def pin_source_url(url: str, sha: str) -> str:
