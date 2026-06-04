@@ -2537,6 +2537,87 @@ def review_beliefs(
     }
 
 
+def propose_update(
+    belief_ids: list[str] | None = None,
+    model: str = "claude",
+    timeout: int = 600,
+    stale_only: bool = False,
+    namespace: str | None = None,
+    sample: int | None = None,
+    on_batch: Callable | None = None,
+    db_path: str = DEFAULT_DB,
+) -> dict:
+    """Propose structured updates or retractions for beliefs.
+
+    Sends beliefs to an LLM for evaluation, classifying each by failure
+    mode and update basis. Computes cascade impact for retract proposals.
+
+    Returns: {"proposals": [...], "reviewed": int, "timestamp": str}
+    """
+    from datetime import datetime
+
+    from .propose_update import propose_updates as _propose
+
+    result = export_network(db_path=db_path)
+    nodes = result.get("nodes", {})
+
+    candidates = {
+        k: v for k, v in nodes.items()
+        if v.get("truth_value") == "IN"
+    }
+
+    if belief_ids:
+        candidates = {k: v for k, v in candidates.items() if k in belief_ids}
+
+    if stale_only:
+        candidates = {
+            k: v for k, v in candidates.items()
+            if (v.get("metadata") or {}).get("stale_reason")
+        }
+
+    if namespace is not None:
+        if namespace == "":
+            candidates = {k: v for k, v in candidates.items() if ":" not in k}
+        else:
+            candidates = {
+                k: v for k, v in candidates.items()
+                if k.startswith(f"{namespace}:")
+            }
+
+    if sample is not None and len(candidates) > sample:
+        import random
+        sampled_keys = random.sample(sorted(candidates.keys()), sample)
+        candidates = {k: candidates[k] for k in sampled_keys}
+
+    review_ids = sorted(candidates.keys())
+
+    # Enrich nodes with dependents (export_network doesn't include them)
+    with _with_network(db_path) as net:
+        for nid in nodes:
+            if nid in net.nodes:
+                nodes[nid]["dependents"] = sorted(net.nodes[nid].dependents)
+
+    proposals = _propose(nodes, belief_ids=review_ids, model=model,
+                         timeout=timeout, on_batch=on_batch)
+
+    cascades = {}
+    for p in proposals:
+        if p["id"] not in nodes:
+            continue
+        try:
+            cascades[p["id"]] = what_if_retract(p["id"], db_path=db_path)
+        except KeyError:
+            pass
+
+    now = datetime.now().isoformat(timespec="seconds")
+    return {
+        "proposals": proposals,
+        "cascades": cascades,
+        "reviewed": len(review_ids),
+        "timestamp": now,
+    }
+
+
 def repair_smuggled(
     review_file: str | None = None,
     belief_ids: list[str] | None = None,

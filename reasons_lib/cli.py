@@ -1520,6 +1520,90 @@ def cmd_review_beliefs(args):
                 print(f"  ERROR retracting {r['id']}: {e}", file=sys.stderr)
 
 
+def cmd_propose_update(args):
+    _require_sqlite(args, "propose-update")
+    import json as _json
+    from datetime import datetime
+
+    from .propose_update import format_proposals_file
+
+    model = getattr(args, "model", None) or "claude"
+    ts = datetime.now().isoformat(timespec="seconds")
+    write_report = not args.no_report
+    output_format = getattr(args, "format", "markdown") or "markdown"
+
+    report_path = None
+    if write_report:
+        report_dir = Path(args.report_dir)
+        report_dir.mkdir(parents=True, exist_ok=True)
+        report_path = report_dir / f"propose-update-{ts.replace(':', '')}.json"
+
+    def on_batch(results):
+        if report_path is not None:
+            report_path.write_text(_json.dumps({
+                "timestamp": ts,
+                "status": "partial",
+                "model": model,
+                "proposals": results,
+            }, indent=2))
+
+    result = api.propose_update(
+        belief_ids=args.ids or None,
+        model=model,
+        timeout=args.timeout,
+        stale_only=args.stale_only,
+        namespace=args.namespace,
+        sample=args.sample,
+        on_batch=on_batch,
+        db_path=args.db,
+    )
+
+    proposals = result["proposals"]
+    cascades = result.get("cascades", {})
+
+    if not proposals:
+        print("No updates proposed.")
+        return
+
+    for p in proposals:
+        action = p["action"].upper()
+        basis = p.get("basis", "")
+        fm = p.get("failure_mode", "")
+        print(f"  [{action}] {p['id']}  ({fm}, {basis})")
+        if p.get("comment"):
+            print(f"    {p['comment']}")
+
+    print(f"\nReviewed {result['reviewed']} beliefs, {len(proposals)} update(s) proposed")
+
+    if output_format == "markdown":
+        net_result = api.export_network(db_path=args.db)
+        nodes = net_result.get("nodes", {})
+        output_file = args.output or "proposed-updates.md"
+        content = format_proposals_file(proposals, nodes=nodes, cascades=cascades)
+        Path(output_file).write_text(content)
+        print(f"\nWrote proposals to {output_file}")
+    else:
+        output_file = args.output or "proposed-updates.json"
+        Path(output_file).write_text(_json.dumps({
+            "timestamp": ts,
+            "model": model,
+            "reviewed": result["reviewed"],
+            "proposals": proposals,
+            "cascades": {k: v for k, v in cascades.items()},
+        }, indent=2))
+        print(f"\nWrote proposals to {output_file}")
+
+    if write_report and report_path is not None:
+        report_path.write_text(_json.dumps({
+            "timestamp": ts,
+            "status": "complete",
+            "model": model,
+            "reviewed": result["reviewed"],
+            "proposals": proposals,
+        }, indent=2))
+        print(f"  Report: {report_path}")
+
+
 def cmd_repair_smuggled(args):
     _require_sqlite(args, "repair-smuggled")
 
@@ -2088,6 +2172,29 @@ def main():
     p.add_argument("--no-report", action="store_true",
                    help="Skip JSON report generation")
 
+    # propose-update
+    p = sub.add_parser("propose-update",
+        help="Propose structured updates or retractions for beliefs (LLM-driven)")
+    p.add_argument("ids", nargs="*", help="Specific belief IDs to evaluate (default: all IN)")
+    p.add_argument("-m", "--model", default=None,
+                   help="Model to use (default: claude). Prefixes: ollama:<model>, api:<model>, vertex:<model>")
+    p.add_argument("--timeout", type=int, default=600,
+                   help="LLM timeout in seconds (default: 600)")
+    p.add_argument("--stale-only", action="store_true",
+                   help="Only evaluate beliefs flagged as stale")
+    p.add_argument("-n", "--namespace", default=None,
+                   help="Filter by agent namespace (use empty string '' for local beliefs only)")
+    p.add_argument("--sample", type=int, default=None,
+                   help="Randomly sample N beliefs to evaluate")
+    p.add_argument("-o", "--output", default=None,
+                   help="Output file path (default: proposed-updates.md or .json)")
+    p.add_argument("--format", choices=["markdown", "json"], default="markdown",
+                   help="Output format (default: markdown)")
+    p.add_argument("--report-dir", default="reviews",
+                   help="Directory for JSON reports (default: reviews/)")
+    p.add_argument("--no-report", action="store_true",
+                   help="Skip JSON report generation")
+
     # repair-smuggled
     p = sub.add_parser("repair-smuggled",
         help="Repair smuggled premises by finding and linking existing premises")
@@ -2211,6 +2318,7 @@ def main():
         "list-negative": cmd_list_negative,
         "topics": cmd_topics,
         "review-beliefs": cmd_review_beliefs,
+        "propose-update": cmd_propose_update,
         "repair-smuggled": cmd_repair_smuggled,
         "research": cmd_research,
         "contradictions": cmd_contradictions,
