@@ -818,7 +818,7 @@ class PgApi:
 
         return {"hashed": results, "count": len(results)}
 
-    def check_stale(self, repos=None, upgrade_hashes=False):
+    def check_stale(self, repos=None, upgrade_hashes=False, git_aware=False):
         """Check all IN nodes for source file staleness."""
         from pathlib import Path
         from .check_stale import hash_file, resolve_source_path
@@ -900,6 +900,7 @@ class PgApi:
             "checked": len(rows),
             "stale_count": len(results),
             "upgraded": upgraded,
+            "sha_bumped": 0,
         }
 
     def lookup(self, query, visible_to=None):

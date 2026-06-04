@@ -6,6 +6,9 @@ source_hash against the current SHA-256 hash of the source file.
 """
 
 import hashlib
+import re
+import subprocess
+from datetime import date
 from pathlib import Path
 
 from .network import Network
@@ -61,19 +64,24 @@ def check_stale(
     repos: dict[str, Path] | None = None,
     db_dir: Path | None = None,
     upgrade_hashes: bool = False,
-) -> tuple[list[dict], int]:
+    git_aware: bool = False,
+) -> tuple[list[dict], int, int]:
     """Check all IN nodes for source staleness.
 
     If upgrade_hashes=True, truncated hashes that are a prefix of the
     current full hash are upgraded in place (caller must save the network).
 
-    Returns (stale_results, upgraded_count).
+    If git_aware=True, nodes with pinned_sha in metadata skip content
+    hashing when no commits touched the file since the pinned SHA.
+
+    Returns (stale_results, upgraded_count, sha_bumped_count).
     """
     if repos is None and network.repos:
         repos = {k: Path(v) for k, v in network.repos.items()}
 
     results = []
     upgraded = 0
+    sha_bumped = 0
 
     for nid, node in sorted(network.nodes.items()):
         if node.truth_value != "IN":
@@ -93,6 +101,11 @@ def check_stale(
                 "reason": "source_deleted",
             })
             continue
+
+        pinned_sha = node.metadata.get("pinned_sha") if node.metadata else None
+        if git_aware and pinned_sha:
+            if not file_changed_since(path, pinned_sha):
+                continue
 
         current_hash = hash_file(path)
         if current_hash != node.source_hash:
@@ -118,8 +131,14 @@ def check_stale(
                 "source_path": str(path),
                 "reason": "content_changed",
             })
+        elif git_aware and pinned_sha:
+            new_sha = get_file_commit_sha(path)
+            if new_sha and new_sha != pinned_sha:
+                node.metadata["pinned_sha"] = new_sha
+                node.metadata["verified_at"] = date.today().isoformat()
+                sha_bumped += 1
 
-    return results, upgraded
+    return results, upgraded, sha_bumped
 
 
 def hash_sources(
@@ -160,6 +179,190 @@ def hash_sources(
             "source": node.source,
             "hash": new_hash,
             "was_empty": was_empty,
+        })
+
+    return results
+
+
+# --- Git-aware pinning ---
+
+
+def get_file_commit_sha(filepath: Path) -> str | None:
+    """Get the last commit SHA that touched this file."""
+    result = subprocess.run(
+        ["git", "log", "-1", "--format=%H", "--", str(filepath.name)],
+        capture_output=True, text=True,
+        cwd=str(filepath.parent),
+        timeout=30,
+    )
+    if result.returncode == 0 and result.stdout.strip():
+        return result.stdout.strip()
+    return None
+
+
+def file_changed_since(filepath: Path, since_sha: str) -> bool:
+    """Check if file was modified since since_sha (committed or uncommitted).
+
+    Returns True on git errors to force fallback to content hashing.
+    """
+    try:
+        # Check committed changes
+        result = subprocess.run(
+            ["git", "log", "--format=%H", f"{since_sha}..HEAD",
+             "--", str(filepath.name)],
+            capture_output=True, text=True,
+            cwd=str(filepath.parent),
+            timeout=30,
+        )
+        if result.returncode != 0:
+            return True
+        if result.stdout.strip():
+            return True
+        # Check uncommitted changes (staged + unstaged)
+        result = subprocess.run(
+            ["git", "diff", "--quiet", "HEAD", "--", str(filepath.name)],
+            capture_output=True, text=True,
+            cwd=str(filepath.parent),
+            timeout=30,
+        )
+        if result.returncode != 0:
+            return True
+        return False
+    except subprocess.TimeoutExpired:
+        return True
+
+
+def pin_source_url(url: str, sha: str, source_path: str = "") -> str:
+    """Rewrite GitHub blob URL from branch ref to commit SHA.
+
+    If source_path is provided, uses it to locate the file path portion
+    of the URL (handles branch names containing slashes).
+    """
+    m = re.match(r'(https://github\.com/[^/]+/[^/]+/blob/).+', url)
+    if not m:
+        return url
+    prefix = m.group(1)
+    if source_path and url.endswith(source_path):
+        return f"{prefix}{sha}/{source_path}"
+    rest = url[len(prefix):]
+    parts = rest.split("/", 1)
+    if len(parts) == 2:
+        return f"{prefix}{sha}/{parts[1]}"
+    return url
+
+
+def pin_sources(
+    network: Network,
+    repos: dict[str, Path] | None = None,
+    db_dir: Path | None = None,
+    force: bool = False,
+    pin_urls: bool = False,
+) -> list[dict]:
+    """Pin IN nodes to their current git commit SHA.
+
+    Stores pinned_sha and verified_at in node metadata. Also backfills
+    source_hash if missing.
+
+    Returns list of dicts: {"node_id", "source", "pinned_sha", "was_empty"}
+    """
+    if repos is None and network.repos:
+        repos = {k: Path(v) for k, v in network.repos.items()}
+
+    today = date.today().isoformat()
+    results = []
+
+    for nid, node in sorted(network.nodes.items()):
+        if node.truth_value != "IN":
+            continue
+        if not node.source:
+            continue
+        if not force and node.metadata.get("pinned_sha"):
+            continue
+
+        agent = node.metadata.get("agent") if node.metadata else None
+        path = resolve_source_path(node.source, repos, db_dir, agent=agent)
+        if path is None:
+            continue
+
+        sha = get_file_commit_sha(path)
+        if sha is None:
+            continue
+
+        was_empty = not node.metadata.get("pinned_sha")
+        node.metadata["pinned_sha"] = sha
+        node.metadata["verified_at"] = today
+
+        if not node.source_hash:
+            node.source_hash = hash_file(path)
+
+        if pin_urls and node.source_url:
+            node.source_url = pin_source_url(node.source_url, sha, node.source)
+
+        results.append({
+            "node_id": nid,
+            "source": node.source,
+            "pinned_sha": sha,
+            "was_empty": was_empty,
+        })
+
+    return results
+
+
+def pin_update(
+    network: Network,
+    node_ids: list[str],
+    repos: dict[str, Path] | None = None,
+    db_dir: Path | None = None,
+) -> list[dict]:
+    """Bump pinned_sha to current HEAD for specified nodes.
+
+    Returns list of dicts: {"node_id", "old_sha", "new_sha", "source"}
+    """
+    if repos is None and network.repos:
+        repos = {k: Path(v) for k, v in network.repos.items()}
+
+    today = date.today().isoformat()
+    results = []
+
+    for nid in node_ids:
+        node = network.nodes.get(nid)
+        if node is None:
+            results.append({
+                "node_id": nid, "error": "not found",
+            })
+            continue
+
+        if not node.source:
+            results.append({
+                "node_id": nid, "error": "no source",
+            })
+            continue
+
+        agent = node.metadata.get("agent") if node.metadata else None
+        path = resolve_source_path(node.source, repos, db_dir, agent=agent)
+        if path is None:
+            results.append({
+                "node_id": nid, "error": "source not found",
+            })
+            continue
+
+        sha = get_file_commit_sha(path)
+        if sha is None:
+            results.append({
+                "node_id": nid, "error": "not in git repo",
+            })
+            continue
+
+        old_sha = node.metadata.get("pinned_sha", "")
+        node.metadata["pinned_sha"] = sha
+        node.metadata["verified_at"] = today
+        node.source_hash = hash_file(path)
+
+        results.append({
+            "node_id": nid,
+            "old_sha": old_sha,
+            "new_sha": sha,
+            "source": node.source,
         })
 
     return results

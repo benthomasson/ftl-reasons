@@ -1618,6 +1618,7 @@ def export_card(visible_to: list[str] | None = None, db_path: str = DEFAULT_DB,
 def check_stale(
     repos: dict[str, str] | None = None,
     upgrade_hashes: bool = False,
+    git_aware: bool = False,
     db_path: str = DEFAULT_DB,
     pg_conninfo=None, project_id=None,
 ) -> dict:
@@ -1626,18 +1627,23 @@ def check_stale(
     If upgrade_hashes=True, truncated hashes that prefix-match the current
     full hash are upgraded in place and saved to the database.
 
+    If git_aware=True, nodes with pinned_sha skip content hashing when
+    no commits touched the file since the pinned SHA.
+
     Returns: {"stale": list[dict], "checked": int, "stale_count": int,
-              "upgraded": int}
+              "upgraded": int, "sha_bumped": int}
     """
     if pg_conninfo:
         return _pg_dispatch(pg_conninfo, project_id, "check_stale",
-                            repos=repos, upgrade_hashes=upgrade_hashes)
+                            repos=repos, upgrade_hashes=upgrade_hashes,
+                            git_aware=git_aware)
     from pathlib import Path as P
     from .check_stale import check_stale as _check
 
     db_dir = P(db_path).resolve().parent
 
-    with _with_network(db_path, write=upgrade_hashes) as net:
+    needs_write = upgrade_hashes or git_aware
+    with _with_network(db_path, write=needs_write) as net:
         repo_paths = repos
         if repo_paths is None and net.repos:
             repo_paths = net.repos
@@ -1648,13 +1654,15 @@ def check_stale(
             1 for n in net.nodes.values()
             if n.truth_value == "IN" and n.source and n.source_hash
         )
-        results, upgraded = _check(net, repo_paths, db_dir=db_dir,
-                                   upgrade_hashes=upgrade_hashes)
+        results, upgraded, sha_bumped = _check(net, repo_paths, db_dir=db_dir,
+                                               upgrade_hashes=upgrade_hashes,
+                                               git_aware=git_aware)
         return {
             "stale": results,
             "checked": in_with_source,
             "stale_count": len(results),
             "upgraded": upgraded,
+            "sha_bumped": sha_bumped,
         }
 
 
@@ -1685,6 +1693,62 @@ def hash_sources(
 
         results = _hash(net, repo_paths, force=force, db_dir=db_dir)
         return {"hashed": results, "count": len(results)}
+
+
+def pin_sources(
+    force: bool = False,
+    pin_urls: bool = False,
+    repos: dict[str, str] | None = None,
+    db_path: str = DEFAULT_DB,
+) -> dict:
+    """Pin IN nodes to their current git commit SHA.
+
+    Stores pinned_sha and verified_at in node metadata.
+
+    Returns: {"pinned": list[dict], "count": int}
+    """
+    from pathlib import Path as P
+    from .check_stale import pin_sources as _pin
+
+    db_dir = P(db_path).resolve().parent
+
+    with _with_network(db_path, write=True) as net:
+        repo_paths = repos
+        if repo_paths is None and net.repos:
+            repo_paths = net.repos
+        if repo_paths:
+            repo_paths = {k: P(v) for k, v in repo_paths.items()}
+
+        results = _pin(net, repo_paths, db_dir=db_dir,
+                        force=force, pin_urls=pin_urls)
+        return {"pinned": results, "count": len(results)}
+
+
+def pin_update(
+    node_ids: list[str],
+    repos: dict[str, str] | None = None,
+    db_path: str = DEFAULT_DB,
+) -> dict:
+    """Bump pinned_sha to current HEAD for specified nodes.
+
+    Returns: {"updated": list[dict], "count": int, "errors": int}
+    """
+    from pathlib import Path as P
+    from .check_stale import pin_update as _update
+
+    db_dir = P(db_path).resolve().parent
+
+    with _with_network(db_path, write=True) as net:
+        repo_paths = repos
+        if repo_paths is None and net.repos:
+            repo_paths = net.repos
+        if repo_paths:
+            repo_paths = {k: P(v) for k, v in repo_paths.items()}
+
+        results = _update(net, node_ids, repo_paths, db_dir=db_dir)
+        errors = sum(1 for r in results if "error" in r)
+        return {"updated": results, "count": len(results) - errors,
+                "errors": errors}
 
 
 def compact(budget: int = 500, truncate: bool = True, visible_to: list[str] | None = None, db_path: str = DEFAULT_DB,

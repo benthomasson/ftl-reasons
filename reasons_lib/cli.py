@@ -696,10 +696,14 @@ def cmd_hash_sources(args):
 
 
 def cmd_check_stale(args):
-    result = api.check_stale(upgrade_hashes=args.upgrade_hashes, **_backend_kwargs(args))
+    result = api.check_stale(upgrade_hashes=args.upgrade_hashes,
+                             git_aware=getattr(args, "git", False),
+                             **_backend_kwargs(args))
 
     if result.get("upgraded"):
         print(f"Upgraded {result['upgraded']} truncated hash(es) to full length.")
+    if result.get("sha_bumped"):
+        print(f"Auto-bumped {result['sha_bumped']} pinned SHA(s) (content unchanged).")
 
     if not result["stale"]:
         print(f"All {result['checked']} nodes with sources are fresh.")
@@ -726,6 +730,51 @@ def cmd_check_stale(args):
     print(f"{fresh} fresh, {len(stale)} stale (of {result['checked']} checked)")
     if stale:
         sys.exit(1)
+
+
+def cmd_pin_sources(args):
+    _require_sqlite(args, "pin-sources")
+    result = api.pin_sources(
+        force=args.force,
+        pin_urls=getattr(args, "pin_urls", False),
+        db_path=args.db,
+    )
+
+    if not result["pinned"]:
+        print("No nodes to pin (all sources already pinned, or source files not in git).")
+        if not args.force:
+            print("Use --force to re-pin nodes that already have a pinned_sha.")
+        return
+
+    for item in result["pinned"]:
+        action = "pinned" if item["was_empty"] else "re-pinned"
+        print(f"  {action}  {item['node_id']}  {item['pinned_sha'][:12]}  ({item['source']})")
+
+    new = sum(1 for p in result["pinned"] if p["was_empty"])
+    re = result["count"] - new
+    parts = []
+    if new:
+        parts.append(f"{new} pinned")
+    if re:
+        parts.append(f"{re} re-pinned")
+    print(f"\n{', '.join(parts)}")
+
+
+def cmd_pin_update(args):
+    _require_sqlite(args, "pin-update")
+    result = api.pin_update(node_ids=args.node_ids, db_path=args.db)
+
+    for item in result["updated"]:
+        if "error" in item:
+            print(f"  ERROR  {item['node_id']}: {item['error']}")
+        else:
+            old = item['old_sha'][:12] if item['old_sha'] else "(none)"
+            print(f"  UPDATED  {item['node_id']}  {old} -> {item['new_sha'][:12]}")
+
+    if result["errors"]:
+        print(f"\n{result['count']} updated, {result['errors']} errors")
+    else:
+        print(f"\n{result['count']} updated")
 
 
 def cmd_compact(args):
@@ -1880,6 +1929,19 @@ def main():
     p = sub.add_parser("check-stale", help="Check IN nodes for source file staleness")
     p.add_argument("--upgrade-hashes", action="store_true",
                    help="Upgrade truncated hashes to full length in place")
+    p.add_argument("--git", action="store_true",
+                   help="Use git commit SHA for faster staleness detection")
+
+    # pin-sources
+    p = sub.add_parser("pin-sources", help="Pin source links to git commit SHA")
+    p.add_argument("--force", action="store_true",
+                   help="Re-pin even nodes that already have a pinned_sha")
+    p.add_argument("--pin-urls", action="store_true",
+                   help="Rewrite source_url from branch URLs to SHA-pinned URLs")
+
+    # pin-update
+    p = sub.add_parser("pin-update", help="Bump pinned_sha to current HEAD for beliefs")
+    p.add_argument("node_ids", nargs="+", help="Belief IDs to update")
 
     # compact
     p = sub.add_parser("compact", help="Token-budgeted belief state summary")
@@ -2097,6 +2159,8 @@ def main():
         "export-card": cmd_export_card,
         "hash-sources": cmd_hash_sources,
         "check-stale": cmd_check_stale,
+        "pin-sources": cmd_pin_sources,
+        "pin-update": cmd_pin_update,
         "compact": cmd_compact,
         "convert-to-premise": cmd_convert_to_premise,
         "summarize": cmd_summarize,
