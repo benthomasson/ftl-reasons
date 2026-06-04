@@ -160,6 +160,9 @@ def list_namespaces(db_path: str = DEFAULT_DB,
         return {"namespaces": namespaces}
 
 
+SOURCE_TYPES = {"code", "document", "self-description", "derived"}
+
+
 def add_node(
     node_id: str,
     text: str,
@@ -173,6 +176,7 @@ def add_node(
     any_mode: bool = False,
     access_tags: list[str] | None = None,
     example: str | None = None,
+    source_type: str = "",
     db_path: str = DEFAULT_DB,
     pg_conninfo=None, project_id=None,
 ) -> dict:
@@ -251,11 +255,19 @@ def add_node(
                 j.antecedents = [_resolve_namespace(a, namespace) for a in j.antecedents]
                 j.outlist = [_resolve_namespace(o, namespace) for o in j.outlist]
 
+        if source_type and source_type not in SOURCE_TYPES:
+            raise ValueError(
+                f"Invalid source_type '{source_type}'. "
+                f"Must be one of: {', '.join(sorted(SOURCE_TYPES))}"
+            )
+
         metadata = {}
         if access_tags:
             metadata["access_tags"] = sorted(set(access_tags))
         if example is not None:
             metadata["example"] = example
+        if source_type:
+            metadata["source_type"] = source_type
 
         node = net.add_node(
             id=node_id,
@@ -2218,6 +2230,7 @@ def list_nodes(
                 "challenges": node.metadata.get("challenges", []),
                 "last_reviewed": node.metadata.get("last_reviewed"),
                 "review_result": node.metadata.get("review_result"),
+                "source_type": node.metadata.get("source_type", ""),
             })
         if by_impact:
             nodes.sort(key=lambda n: -n["dependent_count"])
