@@ -82,6 +82,7 @@ def parse_beliefs(text: str) -> list[dict]:
                 "type": m.group(3).strip(),
                 "text": "",
                 "source": "",
+                "source_url": "",
                 "source_type": "",
                 "source_hash": "",
                 "date": "",
@@ -89,6 +90,7 @@ def parse_beliefs(text: str) -> list[dict]:
                 "unless": [],
                 "stale_reason": "",
                 "superseded_by": "",
+                "accepted_pr": "",
             }
             continue
 
@@ -97,6 +99,8 @@ def parse_beliefs(text: str) -> list[dict]:
 
         if line.startswith("- Source: "):
             current["source"] = line[len("- Source: "):].strip()
+        elif line.startswith("- Source URL: "):
+            current["source_url"] = line[len("- Source URL: "):].strip()
         elif line.startswith("- Source hash: "):
             current["source_hash"] = line[len("- Source hash: "):].strip()
         elif line.startswith("- Date: "):
@@ -113,6 +117,8 @@ def parse_beliefs(text: str) -> list[dict]:
             current["stale_reason"] = line[line.index(": ") + 2:].strip()
         elif line.lower().startswith("- superseded by: "):
             current["superseded_by"] = line[line.index(": ") + 2:].strip()
+        elif line.startswith("- Accepted PR: "):
+            current["accepted_pr"] = line[len("- Accepted PR: "):].strip()
         elif line.startswith("- "):
             pass  # other metadata lines — skip
         elif line.startswith("### "):
@@ -246,12 +252,15 @@ def import_into_network(
             metadata["stale_reason"] = claim["stale_reason"]
         if claim["superseded_by"]:
             metadata["superseded_by"] = claim["superseded_by"]
+        if claim.get("accepted_pr"):
+            metadata["accepted_pr"] = claim["accepted_pr"]
 
         network.add_node(
             id=claim["id"],
             text=claim["text"],
             justifications=justifications,
             source=claim["source"],
+            source_url=claim.get("source_url", ""),
             source_hash=claim["source_hash"],
             date=claim["date"],
             metadata=metadata,

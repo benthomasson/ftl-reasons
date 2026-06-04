@@ -58,6 +58,7 @@ def cmd_add(args):
             access_tags=access_tags,
             example=getattr(args, "example", None),
             source_type=getattr(args, "source_type", None) or "",
+            accepted_pr=getattr(args, "accepted_pr", None) or "",
             **_backend_kwargs(args),
         )
         print(f"Added {result['node_id']} [{result['truth_value']}] ({result['type']})")
@@ -265,6 +266,8 @@ def cmd_show(args):
         print(f"Hash:   {node['source_hash']}")
     if node["metadata"].get("source_type"):
         print(f"Source type: {node['metadata']['source_type']}")
+    if node["metadata"].get("accepted_pr"):
+        print(f"Accepted PR: {node['metadata']['accepted_pr']}")
     if node["metadata"].get("pinned_sha"):
         sha = node["metadata"]["pinned_sha"][:12]
         lines = node["metadata"].get("pinned_lines", "")
@@ -1805,6 +1808,8 @@ def main():
     p.add_argument("--example", default=None, help="Code example demonstrating the belief")
     p.add_argument("--source-type", choices=["code", "document", "self-description", "derived"],
                    help="Epistemic source type (code, document, self-description, derived)")
+    p.add_argument("--accepted-pr", default=None,
+                   help="URL of the PR that accepted this belief")
 
     # add-justification
     p = sub.add_parser("add-justification", help="Add a justification to an existing node")
