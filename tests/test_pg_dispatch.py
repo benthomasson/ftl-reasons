@@ -398,7 +398,7 @@ class TestCheckStaleDispatch:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = check_stale(pg_conninfo="postgresql://...", project_id="test")
-        mock_pg.check_stale.assert_called_once_with(repos=None, upgrade_hashes=False)
+        mock_pg.check_stale.assert_called_once_with(repos=None, upgrade_hashes=False, git_aware=False)
         assert result["checked"] == 5
 
     def test_passes_upgrade_hashes(self):
@@ -411,7 +411,7 @@ class TestCheckStaleDispatch:
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = check_stale(upgrade_hashes=True,
                                  pg_conninfo="postgresql://...", project_id="test")
-        mock_pg.check_stale.assert_called_once_with(repos=None, upgrade_hashes=True)
+        mock_pg.check_stale.assert_called_once_with(repos=None, upgrade_hashes=True, git_aware=False)
         assert result["upgraded"] == 2
 
 
