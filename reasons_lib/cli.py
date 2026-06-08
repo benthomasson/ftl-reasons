@@ -1191,6 +1191,8 @@ def _write_derive_report(report_state, status):
 def cmd_derive(args):
     _require_sqlite(args, "derive")
     from datetime import datetime
+    from .llm import reset_cost_tracker, format_cost_summary
+    reset_cost_tracker()
 
     prompt_template = None
     if args.prompt_file:
@@ -1287,6 +1289,10 @@ def cmd_derive(args):
     if report_state is not None:
         _write_derive_report(report_state, "complete")
         print(f"  Report: {report_state['report_path']}")
+
+    cost = format_cost_summary()
+    if cost:
+        print(f"  {cost}", file=sys.stderr)
 
 
 def cmd_accept(args):
@@ -1431,6 +1437,8 @@ def cmd_review_beliefs(args):
     _require_sqlite(args, "review-beliefs")
     import json
     from datetime import datetime
+    from .llm import reset_cost_tracker, format_cost_summary
+    reset_cost_tracker()
 
     model = getattr(args, "model", None) or "claude"
     ts = datetime.now().isoformat(timespec="seconds")
@@ -1552,11 +1560,17 @@ def cmd_review_beliefs(args):
             except Exception as e:
                 print(f"  ERROR retracting {r['id']}: {e}", file=sys.stderr)
 
+    cost = format_cost_summary()
+    if cost:
+        print(f"  {cost}", file=sys.stderr)
+
 
 def cmd_propose_update(args):
     _require_sqlite(args, "propose-update")
     import json as _json
     from datetime import datetime
+    from .llm import reset_cost_tracker, format_cost_summary
+    reset_cost_tracker()
 
     from .propose_update import format_proposals_file
 
@@ -1636,6 +1650,10 @@ def cmd_propose_update(args):
         }, indent=2))
         print(f"  Report: {report_path}")
 
+    cost = format_cost_summary()
+    if cost:
+        print(f"  {cost}", file=sys.stderr)
+
 
 def cmd_repair_smuggled(args):
     _require_sqlite(args, "repair-smuggled")
@@ -1681,6 +1699,8 @@ def cmd_repair_smuggled(args):
 
 def cmd_research(args):
     _require_sqlite(args, "research")
+    from .llm import reset_cost_tracker, format_cost_summary
+    reset_cost_tracker()
 
     model = getattr(args, "model", None) or "claude"
     review_file = getattr(args, "review_file", None)
@@ -1722,6 +1742,10 @@ def cmd_research(args):
     if args.dry_run:
         print("\n  (dry run -- no changes applied)")
 
+    cost = format_cost_summary()
+    if cost:
+        print(f"  {cost}", file=sys.stderr)
+
 
 def cmd_contradictions(args):
     _require_sqlite(args, "detect-contradictions")
@@ -1747,6 +1771,9 @@ def cmd_contradictions(args):
         else:
             print("No nogoods to apply.")
         return
+
+    from .llm import reset_cost_tracker, format_cost_summary
+    reset_cost_tracker()
 
     model = getattr(args, "model", None) or "claude"
     output = args.output
@@ -1787,6 +1814,10 @@ def cmd_contradictions(args):
     elif not args.auto_apply:
         print(f"\nWrote {output} — review, then run:")
         print(f"  reasons contradictions --accept {output}")
+
+    cost = format_cost_summary()
+    if cost:
+        print(f"  {cost}", file=sys.stderr)
 
 
 def cmd_namespaces(args):

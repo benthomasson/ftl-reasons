@@ -1,5 +1,6 @@
 """Tests for the shared LLM invocation module."""
 
+import json
 import os
 import subprocess
 from unittest.mock import MagicMock, patch
@@ -10,7 +11,12 @@ import reasons_lib.llm as llm_module
 from reasons_lib.llm import (
     _get_langfuse_handler,
     _invoke_api,
+    _parse_cli_json,
+    _record_cost,
+    format_cost_summary,
+    get_cost_summary,
     invoke_model,
+    reset_cost_tracker,
     resolve_model_cmd,
 )
 
@@ -18,19 +24,19 @@ from reasons_lib.llm import (
 class TestResolveModelCmd:
 
     def test_resolve_claude(self):
-        assert resolve_model_cmd("claude") == ["claude", "-p"]
+        assert resolve_model_cmd("claude") == ["claude", "-p", "--output-format", "json"]
 
     def test_resolve_gemini(self):
-        assert resolve_model_cmd("gemini") == ["gemini", "--skip-trust", "-p", ""]
+        assert resolve_model_cmd("gemini") == ["gemini", "--skip-trust", "-o", "json", "-p", ""]
 
     def test_resolve_gemini_submodel(self):
         assert resolve_model_cmd("gemini:gemini-2.5-flash") == [
-            "gemini", "--skip-trust", "-m", "gemini-2.5-flash", "-p", ""
+            "gemini", "--skip-trust", "-m", "gemini-2.5-flash", "-o", "json", "-p", ""
         ]
 
     def test_resolve_gemini_submodel_short(self):
         assert resolve_model_cmd("gemini:flash") == [
-            "gemini", "--skip-trust", "-m", "flash", "-p", ""
+            "gemini", "--skip-trust", "-m", "flash", "-o", "json", "-p", ""
         ]
 
     def test_resolve_ollama_model(self):
@@ -40,10 +46,10 @@ class TestResolveModelCmd:
         assert resolve_model_cmd("ollama:qwen3.5:27b") == ["ollama", "run", "qwen3.5:27b"]
 
     def test_resolve_claude_submodel(self):
-        assert resolve_model_cmd("claude:sonnet") == ["claude", "-p", "--model", "sonnet"]
+        assert resolve_model_cmd("claude:sonnet") == ["claude", "-p", "--model", "sonnet", "--output-format", "json"]
 
     def test_resolve_claude_submodel_full_name(self):
-        assert resolve_model_cmd("claude:claude-sonnet-4-6") == ["claude", "-p", "--model", "claude-sonnet-4-6"]
+        assert resolve_model_cmd("claude:claude-sonnet-4-6") == ["claude", "-p", "--model", "claude-sonnet-4-6", "--output-format", "json"]
 
     def test_resolve_unknown_raises(self):
         with pytest.raises(ValueError, match="Unknown model"):
@@ -58,14 +64,15 @@ class TestInvokeModel:
                 invoke_model("hello", model="claude")
 
     def test_invokes_subprocess(self):
-        mock_result = type("Result", (), {"returncode": 0, "stdout": "response", "stderr": ""})()
+        json_out = json.dumps({"result": "response", "usage": {}, "total_cost_usd": 0.0})
+        mock_result = type("Result", (), {"returncode": 0, "stdout": json_out, "stderr": ""})()
         with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
              patch("reasons_lib.llm.subprocess.run", return_value=mock_result) as mock_run:
             result = invoke_model("hello", model="claude", timeout=60)
             assert result == "response"
             mock_run.assert_called_once()
             args = mock_run.call_args
-            assert args[0][0] == ["claude", "-p"]
+            assert args[0][0] == ["claude", "-p", "--output-format", "json"]
             assert args[1]["input"] == "hello"
             assert args[1]["timeout"] == 60
 
@@ -111,14 +118,16 @@ class TestInvokeModel:
 
     def test_claude_does_not_strip_thinking(self):
         output = "Thinking...\nsome reasoning\n...done thinking.\nAnswer."
-        mock_result = type("Result", (), {"returncode": 0, "stdout": output, "stderr": ""})()
+        json_out = json.dumps({"result": output, "usage": {}, "total_cost_usd": 0.0})
+        mock_result = type("Result", (), {"returncode": 0, "stdout": json_out, "stderr": ""})()
         with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
              patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
             result = invoke_model("hello", model="claude")
             assert result == output
 
     def test_strips_claudecode_env(self):
-        mock_result = type("Result", (), {"returncode": 0, "stdout": "ok", "stderr": ""})()
+        json_out = json.dumps({"result": "ok", "usage": {}, "total_cost_usd": 0.0})
+        mock_result = type("Result", (), {"returncode": 0, "stdout": json_out, "stderr": ""})()
         with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
              patch("reasons_lib.llm.subprocess.run", return_value=mock_result) as mock_run, \
              patch.dict("os.environ", {"CLAUDECODE": "1", "HOME": "/home/test"}):
@@ -160,7 +169,8 @@ class TestInvokeModelApiDispatch:
             mock.assert_called_once_with("hello", "vertex:claude-sonnet-4-20250514", 60)
 
     def test_claude_still_uses_subprocess(self):
-        mock_result = type("Result", (), {"returncode": 0, "stdout": "cli response", "stderr": ""})()
+        json_out = json.dumps({"result": "cli response", "usage": {}, "total_cost_usd": 0.0})
+        mock_result = type("Result", (), {"returncode": 0, "stdout": json_out, "stderr": ""})()
         with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
              patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
             result = invoke_model("hello", model="claude")
@@ -322,3 +332,138 @@ class TestLangfuseHandler:
         assert result == "traced response"
         call_config = mock_model.invoke.call_args[1]["config"]
         assert call_config["callbacks"] == [mock_handler]
+
+
+class TestParseCliJson:
+
+    def test_claude_json(self):
+        data = {
+            "result": "The answer is 42.",
+            "usage": {"input_tokens": 100, "output_tokens": 50},
+            "total_cost_usd": 0.0021,
+        }
+        reset_cost_tracker()
+        text = _parse_cli_json(json.dumps(data), "claude")
+        assert text == "The answer is 42."
+        s = get_cost_summary()
+        assert s["input_tokens"] == 100
+        assert s["output_tokens"] == 50
+        assert s["total_cost_usd"] == pytest.approx(0.0021)
+        assert s["calls"] == 1
+
+    def test_claude_json_with_cache_tokens(self):
+        data = {
+            "result": "cached",
+            "usage": {
+                "input_tokens": 50,
+                "output_tokens": 30,
+                "cache_creation_input_tokens": 200,
+                "cache_read_input_tokens": 100,
+            },
+            "total_cost_usd": 0.01,
+        }
+        reset_cost_tracker()
+        text = _parse_cli_json(json.dumps(data), "claude:sonnet")
+        assert text == "cached"
+        s = get_cost_summary()
+        assert s["input_tokens"] == 350  # 50 + 200 + 100
+
+    def test_gemini_json(self):
+        data = {
+            "response": "Gemini says hi.",
+            "stats": {
+                "models": {
+                    "gemini-2.5-flash": {
+                        "tokens": {"input": 80, "candidates": 40}
+                    }
+                }
+            },
+        }
+        reset_cost_tracker()
+        text = _parse_cli_json(json.dumps(data), "gemini")
+        assert text == "Gemini says hi."
+        s = get_cost_summary()
+        assert s["input_tokens"] == 80
+        assert s["output_tokens"] == 40
+        assert s["total_cost_usd"] == 0.0
+
+    def test_gemini_submodel_json(self):
+        data = {
+            "response": "Flash response.",
+            "stats": {"models": {"flash": {"tokens": {"input": 10, "candidates": 5}}}},
+        }
+        reset_cost_tracker()
+        text = _parse_cli_json(json.dumps(data), "gemini:flash")
+        assert text == "Flash response."
+        s = get_cost_summary()
+        assert s["input_tokens"] == 10
+        assert s["output_tokens"] == 5
+
+    def test_invalid_json_returns_raw(self):
+        reset_cost_tracker()
+        text = _parse_cli_json("not json at all", "claude")
+        assert text == "not json at all"
+        assert get_cost_summary()["calls"] == 0
+
+    def test_json_missing_result_returns_raw(self):
+        reset_cost_tracker()
+        text = _parse_cli_json(json.dumps({"other": "data"}), "claude")
+        assert text == json.dumps({"other": "data"})
+
+    def test_json_array_returns_raw(self):
+        raw = json.dumps([{"id": "a", "valid": True}])
+        reset_cost_tracker()
+        text = _parse_cli_json(raw, "claude")
+        assert text == raw
+        assert get_cost_summary()["calls"] == 0
+
+
+class TestCostTracker:
+
+    def setup_method(self):
+        reset_cost_tracker()
+
+    def test_reset(self):
+        _record_cost("claude", 100, 50, 0.01)
+        reset_cost_tracker()
+        s = get_cost_summary()
+        assert s["calls"] == 0
+        assert s["input_tokens"] == 0
+        assert s["output_tokens"] == 0
+        assert s["total_cost_usd"] == 0.0
+        assert s["by_model"] == {}
+
+    def test_record_accumulates(self):
+        _record_cost("claude", 100, 50, 0.01)
+        _record_cost("claude", 200, 100, 0.02)
+        s = get_cost_summary()
+        assert s["calls"] == 2
+        assert s["input_tokens"] == 300
+        assert s["output_tokens"] == 150
+        assert s["total_cost_usd"] == pytest.approx(0.03)
+
+    def test_by_model_tracking(self):
+        _record_cost("claude", 100, 50, 0.01)
+        _record_cost("gemini", 80, 40, 0.0)
+        s = get_cost_summary()
+        assert "claude" in s["by_model"]
+        assert "gemini" in s["by_model"]
+        assert s["by_model"]["claude"]["calls"] == 1
+        assert s["by_model"]["gemini"]["input_tokens"] == 80
+
+    def test_format_empty(self):
+        assert format_cost_summary() == ""
+
+    def test_format_with_cost(self):
+        _record_cost("claude", 1000, 500, 0.0123)
+        result = format_cost_summary()
+        assert "$0.0123" in result
+        assert "1,000 input" in result
+        assert "500 output" in result
+        assert "1 call(s)" in result
+
+    def test_format_without_cost(self):
+        _record_cost("gemini", 100, 50, 0.0)
+        result = format_cost_summary()
+        assert "$" not in result
+        assert "100 input" in result
