@@ -259,6 +259,38 @@ def _search_source_chunks(question, sources_db, top_k=10):
     return "\n\n---\n\n".join(parts)
 
 
+def search_source_chunks(query, sources_db, top_k=10):
+    """Search FTS5 index and return structured results.
+
+    Returns list of dicts with keys: filename, section, text.
+    """
+    from .api import _STOP_WORDS
+
+    raw_words = re.findall(r'\w+', query)
+    words = [w for w in raw_words if w.lower() not in _STOP_WORDS and len(w) > 1]
+    if not words:
+        words = [w for w in raw_words if len(w) > 1]
+    if not words:
+        return []
+    fts_query = " OR ".join(f'"{w}"' for w in words)
+
+    conn = sqlite3.connect(sources_db)
+    try:
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT c.text, c.cluster, c.filename, c.section
+            FROM chunks_fts
+            JOIN chunks c ON c.id = chunks_fts.rowid
+            WHERE chunks_fts MATCH ?
+            ORDER BY chunks_fts.rank
+            LIMIT ?
+        """, (fts_query, top_k))
+        return [dict(row) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
 FTS_RAG_PROMPT = """\
 You are answering questions using retrieved document excerpts.
 
