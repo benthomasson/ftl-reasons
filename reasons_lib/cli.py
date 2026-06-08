@@ -879,6 +879,26 @@ def cmd_lookup(args):
     print(result)
 
 
+def cmd_search_sources(args):
+    from .ask import search_source_chunks
+    results = search_source_chunks(args.query, args.db, top_k=args.top_k)
+    if not results:
+        print("No matching chunks found.")
+        return
+    fmt = getattr(args, "format", "text")
+    if fmt == "json":
+        print(json.dumps(results, indent=2))
+        return
+    for i, row in enumerate(results, 1):
+        header = f"[{i}] {row['filename']}"
+        if row.get("section"):
+            header += f" > {row['section']}"
+        print(f"### {header}\n")
+        print(row["text"])
+        if i < len(results):
+            print("\n---\n")
+
+
 def cmd_ask(args):
     _require_sqlite(args, "ask")
     from .ask import ask
@@ -2184,6 +2204,16 @@ def main():
     p.add_argument("--mcp", action="append", default=None,
                    help="MCP server command as data source (repeatable, e.g. --mcp snowflake-mcp)")
 
+    # search-sources
+    p = sub.add_parser("search-sources", help="Search source document chunks from an FTS5 index (no LLM)")
+    p.add_argument("query", help="Search query")
+    p.add_argument("--db", required=True, metavar="FTS_DB",
+                   help="Path to FTS5 chunks database (e.g. rag_fts.db)")
+    p.add_argument("--top-k", type=int, default=10,
+                   help="Number of results to return (default: 10)")
+    p.add_argument("--format", choices=["text", "json"], default="text",
+                   help="Output format (default: text)")
+
     # deduplicate
     p = sub.add_parser("deduplicate", help="Find and optionally retract duplicate IN beliefs")
     p.add_argument("--threshold", type=float, default=0.5,
@@ -2399,6 +2429,7 @@ def main():
         "search": cmd_search,
         "lookup": cmd_lookup,
         "ask": cmd_ask,
+        "search-sources": cmd_search_sources,
         "deduplicate": cmd_deduplicate,
         "cluster-list": cmd_cluster_list,
         "list": cmd_list,
