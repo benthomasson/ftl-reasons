@@ -6,8 +6,12 @@ and API-based providers via 'api:<model>' and 'vertex:<model>'.
 
 CLI-based models pipe prompts to stdin and read responses from stdout.
 API-based models use LangChain adapters with optional Langfuse tracing.
+
+Cost tracking: CLI models use --output-format json to capture token
+counts and costs. Use get_cost_summary() to retrieve accumulated stats.
 """
 
+import json
 import os
 import shutil
 import subprocess
@@ -35,12 +39,99 @@ except ImportError:
 
 
 MODEL_COMMANDS = {
-    "claude": ["claude", "-p"],
-    "gemini": ["gemini", "--skip-trust", "-p", ""],
+    "claude": ["claude", "-p", "--output-format", "json"],
+    "gemini": ["gemini", "--skip-trust", "-o", "json", "-p", ""],
 }
 
 _langfuse_handler = None
 _langfuse_checked = False
+
+_cost_tracker = {
+    "calls": 0,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "total_cost_usd": 0.0,
+    "by_model": {},
+}
+
+
+def reset_cost_tracker():
+    """Reset accumulated cost/token stats."""
+    _cost_tracker["calls"] = 0
+    _cost_tracker["input_tokens"] = 0
+    _cost_tracker["output_tokens"] = 0
+    _cost_tracker["total_cost_usd"] = 0.0
+    _cost_tracker["by_model"] = {}
+
+
+def get_cost_summary() -> dict:
+    """Return accumulated cost/token stats across all LLM calls."""
+    return dict(_cost_tracker)
+
+
+def format_cost_summary() -> str:
+    """Format cost summary as a human-readable string."""
+    s = _cost_tracker
+    if s["calls"] == 0:
+        return ""
+    parts = []
+    if s["total_cost_usd"] > 0:
+        parts.append(f"${s['total_cost_usd']:.4f}")
+    parts.append(f"{s['input_tokens']:,} input + {s['output_tokens']:,} output tokens")
+    parts.append(f"{s['calls']} call(s)")
+    return "Cost: " + " | ".join(parts)
+
+
+def _record_cost(model: str, input_tokens: int, output_tokens: int, cost_usd: float):
+    """Record token/cost stats from one LLM call."""
+    _cost_tracker["calls"] += 1
+    _cost_tracker["input_tokens"] += input_tokens
+    _cost_tracker["output_tokens"] += output_tokens
+    _cost_tracker["total_cost_usd"] += cost_usd
+
+    if model not in _cost_tracker["by_model"]:
+        _cost_tracker["by_model"][model] = {
+            "calls": 0, "input_tokens": 0, "output_tokens": 0, "total_cost_usd": 0.0,
+        }
+    m = _cost_tracker["by_model"][model]
+    m["calls"] += 1
+    m["input_tokens"] += input_tokens
+    m["output_tokens"] += output_tokens
+    m["total_cost_usd"] += cost_usd
+
+
+def _parse_cli_json(output: str, model: str) -> str:
+    """Parse JSON output from CLI, extract response text and record costs.
+
+    Falls back to returning raw output if JSON parsing fails.
+    """
+    try:
+        data = json.loads(output)
+    except (json.JSONDecodeError, ValueError):
+        return output
+
+    if not isinstance(data, dict):
+        return output
+
+    if model.startswith("gemini") or model.startswith("gemini:"):
+        text = data.get("response", output)
+        stats = data.get("stats", {})
+        input_tokens = 0
+        output_tokens = 0
+        for model_stats in stats.get("models", {}).values():
+            tokens = model_stats.get("tokens", {})
+            input_tokens += tokens.get("input", 0)
+            output_tokens += tokens.get("candidates", 0)
+        _record_cost(model, input_tokens, output_tokens, 0.0)
+        return text
+
+    text = data.get("result", output)
+    usage = data.get("usage", {})
+    input_tokens = usage.get("input_tokens", 0) + usage.get("cache_creation_input_tokens", 0) + usage.get("cache_read_input_tokens", 0)
+    output_tokens = usage.get("output_tokens", 0)
+    cost_usd = data.get("total_cost_usd", 0.0)
+    _record_cost(model, input_tokens, output_tokens, cost_usd)
+    return text
 
 
 def _get_langfuse_handler():
@@ -71,10 +162,10 @@ def resolve_model_cmd(model: str) -> list[str]:
         return MODEL_COMMANDS[model]
     if model.startswith("claude:"):
         submodel = model.split(":", 1)[1]
-        return ["claude", "-p", "--model", submodel]
+        return ["claude", "-p", "--model", submodel, "--output-format", "json"]
     if model.startswith("gemini:"):
         submodel = model.split(":", 1)[1]
-        return ["gemini", "--skip-trust", "-m", submodel, "-p", ""]
+        return ["gemini", "--skip-trust", "-m", submodel, "-o", "json", "-p", ""]
     if model.startswith("ollama:"):
         ollama_model = model.split(":", 1)[1]
         return ["ollama", "run", ollama_model]
@@ -136,6 +227,9 @@ def _invoke_api(prompt: str, model: str, timeout: int = 300) -> str:
 def invoke_model(prompt: str, model: str = "claude", timeout: int = 300) -> str:
     """Invoke an LLM via CLI subprocess or API. Returns response text.
 
+    For CLI models, uses --output-format json to capture token/cost data.
+    Accumulated stats available via get_cost_summary().
+
     Raises FileNotFoundError if the model binary is not in PATH (CLI models).
     Raises ImportError if API dependencies are not installed (API models).
     Raises RuntimeError if the model exits non-zero or API call fails.
@@ -167,4 +261,6 @@ def invoke_model(prompt: str, model: str = "claude", timeout: int = 300) -> str:
         parts = output.split("...done thinking.\n", 1)
         if len(parts) == 2:
             output = parts[1]
-    return output
+    if model.startswith("ollama:"):
+        return output
+    return _parse_cli_json(output, model)
