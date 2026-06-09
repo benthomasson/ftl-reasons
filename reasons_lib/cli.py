@@ -1915,8 +1915,8 @@ def cmd_repair_smuggled(args):
         print("\n  (dry run -- no changes applied)")
 
 
-def cmd_research(args):
-    _require_sqlite(args, "research")
+def cmd_repair(args):
+    _require_sqlite(args, "repair")
     from .llm import reset_cost_tracker, format_cost_summary
     reset_cost_tracker()
 
@@ -1928,7 +1928,7 @@ def cmd_research(args):
         print("Error: provide either --review-file or belief IDs", file=sys.stderr)
         sys.exit(1)
 
-    result = api.research(
+    result = api.repair(
         review_file=review_file,
         belief_ids=belief_ids,
         model=model,
@@ -2562,10 +2562,22 @@ def main():
     p.add_argument("--dry-run", action="store_true",
                    help="Report findings without applying repairs")
 
-    # research
-    p = sub.add_parser("research",
-        help="Research flagged beliefs: search-and-link, soften, or abandon")
-    p.add_argument("ids", nargs="*", help="Belief IDs to research")
+    # repair (formerly research)
+    p = sub.add_parser("repair",
+        help="Repair flagged beliefs: search-and-link, soften, or abandon")
+    p.add_argument("ids", nargs="*", help="Belief IDs to repair")
+    p.add_argument("--review-file", default=None,
+                   help="Path to review-beliefs JSON report")
+    p.add_argument("-m", "--model", default=None,
+                   help="Model to use (default: claude)")
+    p.add_argument("--timeout", type=int, default=600,
+                   help="LLM timeout in seconds (default: 600)")
+    p.add_argument("--dry-run", action="store_true",
+                   help="Report findings without applying changes")
+
+    # research (backward-compatible alias for repair)
+    p = sub.add_parser("research", help="Alias for 'repair' (deprecated)")
+    p.add_argument("ids", nargs="*", help="Belief IDs to repair")
     p.add_argument("--review-file", default=None,
                    help="Path to review-beliefs JSON report")
     p.add_argument("-m", "--model", default=None,
@@ -2679,7 +2691,8 @@ def main():
         "repair-premises": cmd_repair_premises,
         "propose-update": cmd_propose_update,
         "repair-smuggled": cmd_repair_smuggled,
-        "research": cmd_research,
+        "repair": cmd_repair,
+        "research": cmd_repair,
         "contradictions": cmd_contradictions,
         "namespaces": cmd_namespaces,
     }

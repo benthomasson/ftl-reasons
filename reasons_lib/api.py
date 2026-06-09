@@ -2990,7 +2990,7 @@ def repair_smuggled(
     }
 
 
-def research(
+def repair(
     review_file: str | None = None,
     belief_ids: list[str] | None = None,
     model: str = "claude",
@@ -3054,6 +3054,9 @@ def research(
                         "soften_failed", "extraction_failed")),
         "errors": sum(1 for r in results if r["status"] == "error"),
     }
+
+
+research = repair
 
 
 def detect_contradictions(
