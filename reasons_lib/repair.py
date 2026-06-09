@@ -6,7 +6,7 @@ Three patterns for resolving beliefs flagged invalid by review-beliefs:
 2. Soften — belief overstates the evidence; weaken text to match antecedents
 3. Abandon — dependency tree too broken to repair; retract
 
-The `research_beliefs` orchestrator triages each invalid belief via LLM,
+The `repair_beliefs` orchestrator triages each invalid belief via LLM,
 then executes the appropriate pattern.
 """
 
@@ -344,14 +344,14 @@ def _do_search_and_link(belief_id, node, nodes, comment, model, timeout,
             belief_id,
             sl=",".join(new_ants),
             unless=",".join(original_outlist) if original_outlist else "",
-            label=f"research: linked {claim[:50]}",
+            label=f"repair: linked {claim[:50]}",
             db_path=db_path,
         )
 
     return "linked", claim, matched_ids, match.get("rationale", "")
 
 
-def research_beliefs(review_results, nodes, model="claude",
+def repair_beliefs(review_results, nodes, model="claude",
                      timeout=300, db_path=None, dry_run=False,
                      search_fn=None):
     """Orchestrate triage and repair for invalid beliefs.
@@ -359,7 +359,7 @@ def research_beliefs(review_results, nodes, model="claude",
     Triages each invalid belief into search_and_link, soften, or abandon,
     then executes the appropriate pattern.
 
-    Returns list of research result dicts.
+    Returns list of repair result dicts.
     """
     from . import api
 
@@ -454,7 +454,7 @@ def research_beliefs(review_results, nodes, model="claude",
                 if not dry_run:
                     api.retract_node(
                         belief_id,
-                        reason=f"research: abandoned — {triage.get('rationale', '')}",
+                        reason=f"repair: abandoned — {triage.get('rationale', '')}",
                         db_path=db_path,
                     )
                 result["status"] = "abandoned"
@@ -465,6 +465,9 @@ def research_beliefs(review_results, nodes, model="claude",
         results.append(result)
 
     return results
+
+
+research_beliefs = repair_beliefs
 
 
 def repair_smuggled_beliefs(review_results, nodes, model="claude",

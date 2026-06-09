@@ -2990,7 +2990,7 @@ def repair_smuggled(
     }
 
 
-def research(
+def repair(
     review_file: str | None = None,
     belief_ids: list[str] | None = None,
     model: str = "claude",
@@ -2998,15 +2998,15 @@ def research(
     dry_run: bool = False,
     db_path: str = DEFAULT_DB,
 ) -> dict:
-    """Research flagged beliefs: triage into search-and-link, soften, or abandon.
+    """Repair flagged beliefs: triage into search-and-link, soften, or abandon.
 
     Two input modes:
         review_file: path to a review-beliefs JSON report
-        belief_ids: re-review these beliefs inline, then research invalids
+        belief_ids: re-review these beliefs inline, then repair invalids
 
     Returns dict with results list and summary counts.
     """
-    from .repair import research_beliefs
+    from .repair import repair_beliefs
 
     if review_file:
         import json as _json
@@ -3038,7 +3038,7 @@ def research(
     net = export_network(db_path=db_path)
     nodes = net.get("nodes", {})
 
-    results = research_beliefs(
+    results = repair_beliefs(
         invalid, nodes, model=model, timeout=timeout,
         db_path=db_path, dry_run=dry_run,
     )
@@ -3054,6 +3054,9 @@ def research(
                         "soften_failed", "extraction_failed")),
         "errors": sum(1 for r in results if r["status"] == "error"),
     }
+
+
+research = repair
 
 
 def detect_contradictions(
