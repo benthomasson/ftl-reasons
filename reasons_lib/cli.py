@@ -1585,6 +1585,117 @@ def cmd_review_beliefs(args):
         print(f"  {cost}", file=sys.stderr)
 
 
+def cmd_review_premises(args):
+    _require_sqlite(args, "review-premises")
+    import json
+    from datetime import datetime
+    from .llm import reset_cost_tracker, format_cost_summary
+    reset_cost_tracker()
+
+    model = getattr(args, "model", None) or "claude"
+    ts = datetime.now().isoformat(timespec="seconds")
+    write_report = not args.no_report
+
+    report_path = None
+    if write_report:
+        report_dir = Path(args.report_dir)
+        report_dir.mkdir(parents=True, exist_ok=True)
+        report_path = report_dir / f"review-premises-{ts.replace(':', '')}.json"
+
+    def _build_report(results, status, total_premises=None, skipped=0):
+        inaccurate = sum(1 for r in results if not r.get("accurate", True))
+        overgeneralized = sum(1 for r in results
+                             if r.get("accurate", True) and not r.get("well_scoped", True))
+        return {
+            "timestamp": ts,
+            "status": status,
+            "model": model,
+            "timeout": args.timeout,
+            "dry_run": args.dry_run,
+            "filters": {
+                "belief_ids": args.ids or None,
+                "sample": args.sample,
+                "visible_to": _parse_visible_to(args),
+            },
+            "reviewed": len(results),
+            "total_premises": total_premises,
+            "skipped_no_source": skipped,
+            "summary": {
+                "inaccurate": inaccurate,
+                "overgeneralized": overgeneralized,
+            },
+            "results": results,
+        }
+
+    def _write_report(results, status):
+        if report_path is not None:
+            report_path.write_text(json.dumps(_build_report(results, status), indent=2))
+
+    on_batch = (lambda results: _write_report(results, "partial")) if write_report else None
+
+    result = api.review_premises(
+        belief_ids=args.ids or None,
+        model=model,
+        timeout=args.timeout,
+        sample=args.sample,
+        visible_to=_parse_visible_to(args),
+        dry_run=args.dry_run,
+        on_batch=on_batch,
+        db_path=args.db,
+    )
+
+    reviews = result["results"]
+    if not reviews:
+        print("No premises to review (no premises with resolvable sources found).")
+        cost = format_cost_summary()
+        if cost:
+            print(f"  {cost}", file=sys.stderr)
+        return
+
+    inaccurate = [r for r in reviews if not r.get("accurate", True)]
+    overgeneralized = [r for r in reviews
+                       if r.get("accurate", True) and not r.get("well_scoped", True)]
+
+    for r in reviews:
+        flags = []
+        if not r.get("accurate", True):
+            err = r.get("error_type", "inaccurate")
+            flags.append(f"INACCURATE({err})")
+        if not r.get("well_scoped", True):
+            flags.append("OVERGENERALIZED")
+
+        if flags:
+            print(f"  [{' | '.join(flags)}] {r['id']}")
+            if r.get("comment"):
+                print(f"    {r['comment']}")
+
+    print(f"\nReviewed {result['reviewed']} of {result['total_premises']} premises"
+          f" ({result['skipped_no_source']} skipped, no source)")
+    print(f"  Inaccurate: {result['inaccurate']}  Overgeneralized: {result['overgeneralized']}")
+
+    if report_path is not None:
+        report = _build_report(reviews, "complete",
+                               total_premises=result["total_premises"],
+                               skipped=result["skipped_no_source"])
+        report_path.write_text(json.dumps(report, indent=2))
+        print(f"  Report: {report_path}")
+
+    if args.auto_retract and not args.dry_run and inaccurate:
+        print(f"\nRetracting {len(inaccurate)} inaccurate premise(s)...")
+        for r in inaccurate:
+            try:
+                api.retract_node(r["id"],
+                                 reason=f"review-premises: {r.get('error_type', 'inaccurate')}: {r.get('comment', '')}",
+                                 db_path=args.db)
+                print(f"  RETRACTED {r['id']}")
+            except Exception as e:
+                print(f"  ERROR retracting {r['id']}: {e}", file=sys.stderr)
+
+    cost = format_cost_summary()
+    if cost:
+        print(f"  {cost}", file=sys.stderr)
+
+
 def cmd_propose_update(args):
     _require_sqlite(args, "propose-update")
     import json as _json
@@ -2288,6 +2399,26 @@ def main():
     p.add_argument("--no-report", action="store_true",
                    help="Skip JSON report generation")
 
+    # review-premises
+    p = sub.add_parser("review-premises", help="Review premises against source material for factual accuracy")
+    p.add_argument("ids", nargs="*", help="Specific premise IDs to review (default: all IN premises)")
+    p.add_argument("-m", "--model", default=None,
+                   help="Model to use (default: claude). Prefixes: ollama:<model>, api:<model>, vertex:<model>")
+    p.add_argument("--timeout", type=int, default=600,
+                   help="LLM timeout in seconds (default: 600)")
+    p.add_argument("--sample", type=int, default=None,
+                   help="Randomly sample N premises to review")
+    p.add_argument("--dry-run", action="store_true",
+                   help="Report findings without taking action")
+    p.add_argument("--auto-retract", action="store_true",
+                   help="Retract premises found inaccurate")
+    p.add_argument("--visible-to", metavar="TAG,TAG",
+                   help="Only review nodes whose access_tags are a subset of these tags")
+    p.add_argument("--report-dir", default="reviews",
+                   help="Directory for JSON reports (default: reviews/)")
+    p.add_argument("--no-report", action="store_true",
+                   help="Skip JSON report generation")
+
     # propose-update
     p = sub.add_parser("propose-update",
         help="Propose structured updates or retractions for beliefs (LLM-driven)")
@@ -2437,6 +2568,7 @@ def main():
         "list-negative": cmd_list_negative,
         "topics": cmd_topics,
         "review-beliefs": cmd_review_beliefs,
+        "review-premises": cmd_review_premises,
         "propose-update": cmd_propose_update,
         "repair-smuggled": cmd_repair_smuggled,
         "research": cmd_research,

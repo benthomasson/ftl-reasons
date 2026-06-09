@@ -2618,6 +2618,123 @@ def review_beliefs(
     }
 
 
+def review_premises(
+    belief_ids: list[str] | None = None,
+    model: str = "claude",
+    timeout: int = 300,
+    sample: int | None = None,
+    visible_to: list[str] | None = None,
+    dry_run: bool = False,
+    on_batch: Callable | None = None,
+    db_path: str = DEFAULT_DB,
+) -> dict:
+    """Review premises against their source material for factual accuracy.
+
+    Uses an LLM to evaluate whether each premise accurately reflects what
+    its source document says. Writes last_premise_reviewed and
+    premise_review_result metadata to each reviewed node (unless dry_run).
+
+    Returns: {"results": [...], "reviewed": int, "inaccurate": int,
+              "overgeneralized": int, "total_premises": int,
+              "skipped_no_source": int}
+    """
+    import sys
+    from datetime import datetime
+    from pathlib import Path
+
+    from .check_stale import resolve_source_path
+    from .review_premises import review_premises as _review
+
+    result = export_network(db_path=db_path)
+    nodes = result.get("nodes", {})
+    repos = result.get("repos", {})
+    repos = {k: Path(v) if isinstance(v, str) else v for k, v in repos.items()}
+
+    db_dir = Path(db_path).parent if db_path else None
+
+    all_premises = {
+        k: v for k, v in nodes.items()
+        if v.get("truth_value") == "IN"
+        and (not v.get("justifications") or len(v["justifications"]) == 0)
+    }
+    total_premises = len(all_premises)
+
+    candidates = dict(all_premises)
+
+    if belief_ids:
+        candidates = {k: v for k, v in candidates.items() if k in belief_ids}
+
+    if visible_to is not None:
+        tags = set(visible_to)
+        candidates = {
+            k: v for k, v in candidates.items()
+            if not v.get("metadata", {}).get("access_tags")
+            or all(t in tags for t in v["metadata"]["access_tags"])
+        }
+
+    if sample is not None and len(candidates) > sample:
+        import random
+        sampled_keys = random.sample(sorted(candidates.keys()), sample)
+        candidates = {k: candidates[k] for k in sampled_keys}
+
+    source_contents = {}
+    review_ids = []
+    skipped = 0
+
+    for nid in sorted(candidates.keys()):
+        source = candidates[nid].get("source", "")
+        if not source:
+            skipped += 1
+            continue
+        if source not in source_contents:
+            agent = candidates[nid].get("metadata", {}).get("agent")
+            path = resolve_source_path(source, repos=repos, db_dir=db_dir, agent=agent)
+            if path and path.exists():
+                try:
+                    source_contents[source] = path.read_text()
+                except (OSError, UnicodeDecodeError):
+                    skipped += 1
+                    continue
+            else:
+                print(f"  SKIP {nid}: source not found: {source}", file=sys.stderr)
+                skipped += 1
+                continue
+        review_ids.append(nid)
+
+    results = _review(nodes, premise_ids=review_ids, source_contents=source_contents,
+                      model=model, timeout=timeout, on_batch=on_batch)
+
+    now = datetime.now().isoformat(timespec="seconds")
+
+    if not dry_run and results:
+        result_map = {r["id"]: r for r in results}
+        with _with_network(db_path, write=True) as net:
+            for nid in review_ids:
+                if nid in net.nodes and nid in result_map:
+                    r = result_map[nid]
+                    net.nodes[nid].metadata["last_premise_reviewed"] = now
+                    if r.get("accurate", True) and r.get("well_scoped", True):
+                        net.nodes[nid].metadata["premise_review_result"] = "pass"
+                    elif not r.get("accurate", True):
+                        net.nodes[nid].metadata["premise_review_result"] = r.get("error_type", "inaccurate")
+                    else:
+                        net.nodes[nid].metadata["premise_review_result"] = "overgeneralized"
+
+    inaccurate = sum(1 for r in results if not r.get("accurate", True))
+    overgeneralized = sum(1 for r in results
+                         if r.get("accurate", True) and not r.get("well_scoped", True))
+
+    return {
+        "results": results,
+        "reviewed": len(review_ids),
+        "inaccurate": inaccurate,
+        "overgeneralized": overgeneralized,
+        "total_premises": total_premises,
+        "skipped_no_source": skipped,
+        "timestamp": now,
+    }
+
+
 def propose_update(
     belief_ids: list[str] | None = None,
     model: str = "claude",
