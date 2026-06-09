@@ -344,7 +344,7 @@ def _do_search_and_link(belief_id, node, nodes, comment, model, timeout,
             belief_id,
             sl=",".join(new_ants),
             unless=",".join(original_outlist) if original_outlist else "",
-            label=f"research: linked {claim[:50]}",
+            label=f"repair: linked {claim[:50]}",
             db_path=db_path,
         )
 
@@ -359,7 +359,7 @@ def research_beliefs(review_results, nodes, model="claude",
     Triages each invalid belief into search_and_link, soften, or abandon,
     then executes the appropriate pattern.
 
-    Returns list of research result dicts.
+    Returns list of repair result dicts.
     """
     from . import api
 
@@ -454,7 +454,7 @@ def research_beliefs(review_results, nodes, model="claude",
                 if not dry_run:
                     api.retract_node(
                         belief_id,
-                        reason=f"research: abandoned — {triage.get('rationale', '')}",
+                        reason=f"repair: abandoned — {triage.get('rationale', '')}",
                         db_path=db_path,
                     )
                 result["status"] = "abandoned"
