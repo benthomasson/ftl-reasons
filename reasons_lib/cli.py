@@ -1641,6 +1641,7 @@ def cmd_review_premises(args):
         visible_to=_parse_visible_to(args),
         dry_run=args.dry_run,
         on_batch=on_batch,
+        parallel=getattr(args, "parallel", 0),
         db_path=args.db,
     )
 
@@ -1690,6 +1691,92 @@ def cmd_review_premises(args):
                 print(f"  RETRACTED {r['id']}")
             except Exception as e:
                 print(f"  ERROR retracting {r['id']}: {e}", file=sys.stderr)
+
+    cost = format_cost_summary()
+    if cost:
+        print(f"  {cost}", file=sys.stderr)
+
+
+def cmd_repair_premises(args):
+    _require_sqlite(args, "repair-premises")
+    import json
+    from datetime import datetime
+    from .llm import reset_cost_tracker, format_cost_summary
+    reset_cost_tracker()
+
+    model = getattr(args, "model", None) or "claude"
+    ts = datetime.now().isoformat(timespec="seconds")
+    write_report = not args.no_report
+
+    report_path = None
+    if write_report:
+        report_dir = Path(args.report_dir)
+        report_dir.mkdir(parents=True, exist_ok=True)
+        report_path = report_dir / f"repair-premises-{ts.replace(':', '')}.json"
+
+    review_file = getattr(args, "review_file", None)
+    belief_ids = args.ids or None
+
+    if not review_file and not belief_ids:
+        print("Error: provide premise IDs or --review-file", file=sys.stderr)
+        return
+
+    def _write_report(results, status):
+        if report_path is not None:
+            report = {
+                "timestamp": ts,
+                "status": status,
+                "model": model,
+                "dry_run": args.dry_run,
+                "results": results,
+            }
+            report_path.write_text(json.dumps(report, indent=2))
+
+    on_result = (lambda results: _write_report(results, "partial")) if write_report else None
+
+    result = api.repair_premises(
+        review_file=review_file,
+        belief_ids=belief_ids,
+        model=model,
+        timeout=args.timeout,
+        dry_run=args.dry_run,
+        parallel=getattr(args, "parallel", 0),
+        on_result=on_result,
+        db_path=args.db,
+    )
+
+    repairs = result["results"]
+    if not repairs:
+        print("No inaccurate premises to repair.")
+        cost = format_cost_summary()
+        if cost:
+            print(f"  {cost}", file=sys.stderr)
+        return
+
+    for r in repairs:
+        action = r.get("action", "error")
+        if action == "rewrite":
+            label = "REWRITE"
+        elif action == "retract":
+            label = "RETRACT"
+        else:
+            label = "ERROR"
+        print(f"  [{label}] {r['id']}")
+        if r.get("rationale"):
+            print(f"    {r['rationale']}")
+        if action == "rewrite" and r.get("corrected_text"):
+            text = r["corrected_text"][:100]
+            if len(r["corrected_text"]) > 100:
+                text += "..."
+            print(f"    -> {text}")
+
+    print(f"\nRepaired {len(repairs)} of {result['total_inaccurate']} inaccurate premises")
+    print(f"  Rewritten: {result['rewritten']}  Retracted: {result['retracted']}"
+          f"  Failed: {result['failed']}")
+
+    if report_path is not None:
+        _write_report(repairs, "complete")
+        print(f"  Report: {report_path}")
 
     cost = format_cost_summary()
     if cost:
@@ -2418,6 +2505,26 @@ def main():
                    help="Directory for JSON reports (default: reviews/)")
     p.add_argument("--no-report", action="store_true",
                    help="Skip JSON report generation")
+    p.add_argument("--parallel", type=int, default=0, metavar="N",
+                   help="Number of concurrent workers (0 = sequential)")
+
+    # repair-premises
+    p = sub.add_parser("repair-premises", help="Repair inaccurate premises by rewriting from source or retracting")
+    p.add_argument("ids", nargs="*", help="Premise IDs to repair (requires --review-file or re-reviews these IDs)")
+    p.add_argument("--review-file", default=None,
+                   help="Path to review-premises JSON report")
+    p.add_argument("-m", "--model", default=None,
+                   help="Model to use (default: claude). Prefixes: ollama:<model>, api:<model>, vertex:<model>")
+    p.add_argument("--timeout", type=int, default=600,
+                   help="LLM timeout in seconds (default: 600)")
+    p.add_argument("--dry-run", action="store_true",
+                   help="Report findings without applying changes")
+    p.add_argument("--parallel", type=int, default=0, metavar="N",
+                   help="Number of concurrent workers (0 = sequential)")
+    p.add_argument("--report-dir", default="reviews",
+                   help="Directory for JSON reports (default: reviews/)")
+    p.add_argument("--no-report", action="store_true",
+                   help="Skip JSON report generation")
 
     # propose-update
     p = sub.add_parser("propose-update",
@@ -2569,6 +2676,7 @@ def main():
         "topics": cmd_topics,
         "review-beliefs": cmd_review_beliefs,
         "review-premises": cmd_review_premises,
+        "repair-premises": cmd_repair_premises,
         "propose-update": cmd_propose_update,
         "repair-smuggled": cmd_repair_smuggled,
         "research": cmd_research,

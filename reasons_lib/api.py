@@ -2626,6 +2626,7 @@ def review_premises(
     visible_to: list[str] | None = None,
     dry_run: bool = False,
     on_batch: Callable | None = None,
+    parallel: int = 0,
     db_path: str = DEFAULT_DB,
 ) -> dict:
     """Review premises against their source material for factual accuracy.
@@ -2702,7 +2703,8 @@ def review_premises(
         review_ids.append(nid)
 
     results = _review(nodes, premise_ids=review_ids, source_contents=source_contents,
-                      model=model, timeout=timeout, on_batch=on_batch)
+                      model=model, timeout=timeout, on_batch=on_batch,
+                      parallel=parallel)
 
     now = datetime.now().isoformat(timespec="seconds")
 
@@ -2732,6 +2734,114 @@ def review_premises(
         "total_premises": total_premises,
         "skipped_no_source": skipped,
         "timestamp": now,
+    }
+
+
+def repair_premises(
+    review_file: str | None = None,
+    belief_ids: list[str] | None = None,
+    model: str = "claude",
+    timeout: int = 300,
+    dry_run: bool = False,
+    parallel: int = 0,
+    on_result: Callable | None = None,
+    db_path: str = DEFAULT_DB,
+) -> dict:
+    """Repair inaccurate premises by rewriting from source or retracting.
+
+    Takes review results (from review_file or by re-reviewing belief_ids)
+    and either rewrites premises to match source material or retracts them.
+
+    Returns: {"results": [...], "total_inaccurate": int, "rewritten": int,
+              "retracted": int, "failed": int}
+    """
+    import sys
+    from pathlib import Path
+
+    from .check_stale import resolve_source_path
+    from .repair_premises import repair_premises as _repair
+
+    if review_file:
+        import json as json_mod
+        data = json_mod.loads(Path(review_file).read_text())
+        review_results_list = data.get("results", [])
+    elif belief_ids:
+        review_result = review_premises(
+            belief_ids=belief_ids, model=model, timeout=timeout,
+            dry_run=True, db_path=db_path,
+        )
+        review_results_list = review_result.get("results", [])
+    else:
+        raise ValueError("Either review_file or belief_ids must be provided")
+
+    inaccurate = [r for r in review_results_list if not r.get("accurate", True)]
+    if not inaccurate:
+        return {"results": [], "total_inaccurate": 0, "rewritten": 0,
+                "retracted": 0, "failed": 0}
+
+    review_map = {r["id"]: r for r in inaccurate}
+
+    result = export_network(db_path=db_path)
+    nodes = result.get("nodes", {})
+    repos = result.get("repos", {})
+    repos = {k: Path(v) if isinstance(v, str) else v for k, v in repos.items()}
+    db_dir = Path(db_path).parent if db_path else None
+
+    source_contents = {}
+    repair_ids = []
+
+    for nid in sorted(review_map.keys()):
+        if nid not in nodes:
+            continue
+        source = nodes[nid].get("source", "")
+        if not source:
+            continue
+        if source not in source_contents:
+            agent = nodes[nid].get("metadata", {}).get("agent")
+            path = resolve_source_path(source, repos=repos, db_dir=db_dir, agent=agent)
+            if path and path.exists():
+                try:
+                    source_contents[source] = path.read_text()
+                except (OSError, UnicodeDecodeError):
+                    continue
+            else:
+                print(f"  SKIP {nid}: source not found: {source}", file=sys.stderr)
+                continue
+        repair_ids.append(nid)
+
+    results = _repair(nodes, premise_ids=repair_ids, source_contents=source_contents,
+                      review_results=review_map, model=model, timeout=timeout,
+                      parallel=parallel, on_result=on_result)
+
+    if not dry_run:
+        for r in results:
+            nid = r["id"]
+            action = r.get("action")
+            if action == "rewrite" and r.get("corrected_text"):
+                try:
+                    update_node(nid, text=r["corrected_text"], db_path=db_path)
+                except Exception as e:
+                    print(f"  ERROR updating {nid}: {e}", file=sys.stderr)
+                    r["action"] = "error"
+            elif action == "retract":
+                try:
+                    retract_node(nid,
+                                 reason=f"repair-premises: {r.get('rationale', 'inaccurate')}",
+                                 db_path=db_path)
+                except Exception as e:
+                    print(f"  ERROR retracting {nid}: {e}", file=sys.stderr)
+                    r["action"] = "error"
+
+    rewritten = sum(1 for r in results if r.get("action") == "rewrite")
+    retracted = sum(1 for r in results if r.get("action") == "retract")
+    failed = sum(1 for r in results if r.get("action") == "error")
+
+    return {
+        "results": results,
+        "total_inaccurate": len(inaccurate),
+        "rewritten": rewritten,
+        "retracted": retracted,
+        "failed": failed,
     }
 
 

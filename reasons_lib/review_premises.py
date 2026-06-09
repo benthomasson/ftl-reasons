@@ -111,8 +111,23 @@ def parse_premise_review_response(response):
     return []
 
 
+def _process_batch(batch, nodes, source_contents, model, timeout):
+    """Process a single review batch. Returns (batch_results, error_or_None)."""
+    premises_text = "\n\n".join(
+        format_premise_for_review(
+            pid, nodes,
+            source_contents.get(nodes[pid].get("source", ""), "(source not available)")
+        )
+        for pid in batch
+    )
+    prompt = REVIEW_PREMISES_PROMPT.format(premises=premises_text)
+    response = invoke_model(prompt, model=model, timeout=timeout)
+    return parse_premise_review_response(response)
+
+
 def review_premises(nodes, premise_ids, source_contents, model="claude",
-                    timeout=300, batch_size=REVIEW_BATCH_SIZE, on_batch=None):
+                    timeout=300, batch_size=REVIEW_BATCH_SIZE, on_batch=None,
+                    parallel=0):
     """Review premises against their source material.
 
     Args:
@@ -123,6 +138,7 @@ def review_premises(nodes, premise_ids, source_contents, model="claude",
         timeout: LLM timeout in seconds.
         batch_size: Number of premises per LLM call.
         on_batch: Callback(all_results) after each batch.
+        parallel: Number of concurrent workers (0 = sequential).
 
     Returns: list of review result dicts.
     """
@@ -144,31 +160,43 @@ def review_premises(nodes, premise_ids, source_contents, model="claude",
     for src_pids in by_source.values():
         ordered_ids.extend(src_pids)
 
-    all_results = []
-    total_batches = (len(ordered_ids) + batch_size - 1) // batch_size
-
+    batches = []
     for i in range(0, len(ordered_ids), batch_size):
-        batch = ordered_ids[i:i + batch_size]
-        batch_num = i // batch_size + 1
-        print(f"  Reviewing batch {batch_num}/{total_batches} "
-              f"({len(batch)} premises)...", file=sys.stderr)
+        batches.append(ordered_ids[i:i + batch_size])
 
-        premises_text = "\n\n".join(
-            format_premise_for_review(
-                pid, nodes,
-                source_contents.get(nodes[pid].get("source", ""), "(source not available)")
-            )
-            for pid in batch
-        )
-        prompt = REVIEW_PREMISES_PROMPT.format(premises=premises_text)
+    all_results = []
+    total_batches = len(batches)
 
-        try:
-            response = invoke_model(prompt, model=model, timeout=timeout)
-            results = parse_premise_review_response(response)
-            all_results.extend(results)
-            if on_batch is not None:
-                on_batch(all_results)
-        except Exception as e:
-            print(f"  WARN: batch {batch_num} failed: {e}", file=sys.stderr)
+    if parallel > 0:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        with ThreadPoolExecutor(max_workers=parallel) as executor:
+            futures = {
+                executor.submit(
+                    _process_batch, batch, nodes, source_contents, model, timeout
+                ): batch_num
+                for batch_num, batch in enumerate(batches, 1)
+            }
+            for future in as_completed(futures):
+                batch_num = futures[future]
+                try:
+                    results = future.result()
+                    all_results.extend(results)
+                    print(f"  Batch {batch_num}/{total_batches} complete "
+                          f"({len(results)} results)", file=sys.stderr)
+                    if on_batch is not None:
+                        on_batch(all_results)
+                except Exception as e:
+                    print(f"  WARN: batch {batch_num} failed: {e}", file=sys.stderr)
+    else:
+        for batch_num, batch in enumerate(batches, 1):
+            print(f"  Reviewing batch {batch_num}/{total_batches} "
+                  f"({len(batch)} premises)...", file=sys.stderr)
+            try:
+                results = _process_batch(batch, nodes, source_contents, model, timeout)
+                all_results.extend(results)
+                if on_batch is not None:
+                    on_batch(all_results)
+            except Exception as e:
+                print(f"  WARN: batch {batch_num} failed: {e}", file=sys.stderr)
 
     return all_results
