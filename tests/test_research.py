@@ -12,6 +12,7 @@ from reasons_lib.repair import (
     parse_soften_response,
     triage_belief,
     soften_belief,
+    repair_beliefs,
     research_beliefs,
     _compute_depth,
 )
@@ -192,7 +193,7 @@ class TestSoftenBelief:
         assert result["softened_text"] == "weaker"
 
 
-# --- research_beliefs ---
+# --- repair_beliefs ---
 
 class TestResearchBeliefs:
     def test_search_and_link(self):
@@ -215,7 +216,7 @@ class TestResearchBeliefs:
              patch("reasons_lib.llm.subprocess.run",
                    side_effect=[triage_resp, extract_resp, match_resp]), \
              patch("reasons_lib.api.add_justification"):
-            results = research_beliefs(
+            results = repair_beliefs(
                 review_results, nodes, db_path="test.db",
                 search_fn=_mock_search(search_results),
             )
@@ -239,7 +240,7 @@ class TestResearchBeliefs:
              patch("reasons_lib.llm.subprocess.run",
                    side_effect=[triage_resp, soften_resp]), \
              patch("reasons_lib.api.update_node") as mock_update:
-            results = research_beliefs(
+            results = repair_beliefs(
                 review_results, nodes, db_path="test.db",
                 search_fn=_mock_search([]),
             )
@@ -262,7 +263,7 @@ class TestResearchBeliefs:
              patch("reasons_lib.llm.subprocess.run",
                    side_effect=[triage_resp]), \
              patch("reasons_lib.api.retract_node") as mock_retract:
-            results = research_beliefs(
+            results = repair_beliefs(
                 review_results, nodes, db_path="test.db",
                 search_fn=_mock_search([]),
             )
@@ -282,7 +283,7 @@ class TestResearchBeliefs:
         with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
              patch("reasons_lib.llm.subprocess.run",
                    side_effect=[triage_resp]):
-            results = research_beliefs(
+            results = repair_beliefs(
                 review_results, nodes, db_path="test.db",
                 search_fn=_mock_search([]),
             )
@@ -300,7 +301,7 @@ class TestResearchBeliefs:
         with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
              patch("reasons_lib.llm.subprocess.run",
                    side_effect=[triage_resp, soften_resp]):
-            results = research_beliefs(
+            results = repair_beliefs(
                 review_results, nodes, db_path="test.db",
                 search_fn=_mock_search([]),
             )
@@ -323,7 +324,7 @@ class TestResearchBeliefs:
              patch("reasons_lib.api.update_node") as mock_update, \
              patch("reasons_lib.api.retract_node") as mock_retract, \
              patch("reasons_lib.api.add_justification") as mock_add:
-            results = research_beliefs(
+            results = repair_beliefs(
                 review_results, nodes, db_path="test.db", dry_run=True,
                 search_fn=_mock_search([]),
             )
@@ -361,7 +362,7 @@ class TestResearchBeliefs:
                    side_effect=[triage1, soften1, triage2]), \
              patch("reasons_lib.api.update_node"), \
              patch("reasons_lib.api.retract_node"):
-            results = research_beliefs(
+            results = repair_beliefs(
                 review_results, nodes, db_path="test.db",
                 search_fn=_mock_search([]),
             )
@@ -376,7 +377,7 @@ class TestResearchBeliefs:
             "id": "nonexistent", "valid": False, "comment": "x",
         }]
 
-        results = research_beliefs(
+        results = repair_beliefs(
             review_results, nodes, db_path="test.db",
             search_fn=_mock_search([]),
         )
@@ -396,7 +397,7 @@ class TestResearchBeliefs:
         with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
              patch("reasons_lib.llm.subprocess.run",
                    side_effect=[triage_resp, extract_resp]):
-            results = research_beliefs(
+            results = repair_beliefs(
                 review_results, nodes, db_path="test.db",
                 search_fn=_mock_search([]),
             )
@@ -410,7 +411,7 @@ class TestResearchBeliefs:
             {"id": "derived-boil", "valid": True, "comment": "fine"},
         ]
 
-        results = research_beliefs(
+        results = repair_beliefs(
             review_results, nodes, db_path="test.db",
             search_fn=_mock_search([]),
         )
@@ -580,3 +581,49 @@ class TestCmdResearch:
 
         node = api.show_node("derived-a", db_path=db)
         assert node["truth_value"] == "IN"
+
+
+class TestBackwardCompatAlias:
+    def test_research_beliefs_alias(self):
+        assert research_beliefs is repair_beliefs
+
+    def test_api_research_alias(self):
+        assert api.research is api.repair
+
+
+class TestCmdRepair:
+    def test_help(self):
+        stdout, stderr, code = run_cli("repair", "--help")
+        assert code == 0
+        assert "repair" in stdout.lower()
+
+    def test_from_review_file(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        api.add_node("premise-a", "A is true", db_path=db)
+        api.add_node("derived-a", "A extended", sl="premise-a", db_path=db)
+
+        review_file = tmp_path / "review.json"
+        review_file.write_text(json.dumps({
+            "results": [{
+                "id": "derived-a",
+                "valid": False,
+                "comment": "overstated",
+            }],
+        }))
+
+        triage_resp = _mock_result('{"pattern": "soften", "rationale": "x"}')
+        soften_resp = _mock_result(
+            '{"softened_text": "A weakly extended", "rationale": "weakened"}'
+        )
+
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run",
+                   side_effect=[triage_resp, soften_resp]):
+            stdout, stderr, code = run_cli(
+                "repair",
+                "--review-file", str(review_file),
+                db_path=db,
+            )
+
+        assert code == 0
+        assert "SOFTENED" in stdout

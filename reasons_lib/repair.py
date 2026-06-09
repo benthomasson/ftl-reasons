@@ -6,7 +6,7 @@ Three patterns for resolving beliefs flagged invalid by review-beliefs:
 2. Soften — belief overstates the evidence; weaken text to match antecedents
 3. Abandon — dependency tree too broken to repair; retract
 
-The `research_beliefs` orchestrator triages each invalid belief via LLM,
+The `repair_beliefs` orchestrator triages each invalid belief via LLM,
 then executes the appropriate pattern.
 """
 
@@ -351,7 +351,7 @@ def _do_search_and_link(belief_id, node, nodes, comment, model, timeout,
     return "linked", claim, matched_ids, match.get("rationale", "")
 
 
-def research_beliefs(review_results, nodes, model="claude",
+def repair_beliefs(review_results, nodes, model="claude",
                      timeout=300, db_path=None, dry_run=False,
                      search_fn=None):
     """Orchestrate triage and repair for invalid beliefs.
@@ -465,6 +465,9 @@ def research_beliefs(review_results, nodes, model="claude",
         results.append(result)
 
     return results
+
+
+research_beliefs = repair_beliefs
 
 
 def repair_smuggled_beliefs(review_results, nodes, model="claude",

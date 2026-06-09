@@ -3006,7 +3006,7 @@ def repair(
 
     Returns dict with results list and summary counts.
     """
-    from .repair import research_beliefs
+    from .repair import repair_beliefs
 
     if review_file:
         import json as _json
@@ -3038,7 +3038,7 @@ def repair(
     net = export_network(db_path=db_path)
     nodes = net.get("nodes", {})
 
-    results = research_beliefs(
+    results = repair_beliefs(
         invalid, nodes, model=model, timeout=timeout,
         db_path=db_path, dry_run=dry_run,
     )
