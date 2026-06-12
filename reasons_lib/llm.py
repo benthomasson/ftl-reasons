@@ -100,6 +100,27 @@ def _record_cost(model: str, input_tokens: int, output_tokens: int, cost_usd: fl
     m["total_cost_usd"] += cost_usd
 
 
+def write_cost_file(path: str, command: str) -> None:
+    """Write cost/token summary to a JSON file."""
+    import json as _json
+    from datetime import datetime, timezone
+    summary = get_cost_summary()
+    if summary["calls"] == 0:
+        return
+    data = {
+        "command": command,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "total_cost_usd": summary["total_cost_usd"],
+        "total_input_tokens": summary["input_tokens"],
+        "total_output_tokens": summary["output_tokens"],
+        "total_calls": summary["calls"],
+        "models": summary.get("by_model", {}),
+    }
+    with open(path, "w") as f:
+        _json.dump(data, f, indent=2)
+        f.write("\n")
+
+
 def _parse_cli_json(output: str, model: str) -> str:
     """Parse JSON output from CLI, extract response text and record costs.
 

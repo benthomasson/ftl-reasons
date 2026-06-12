@@ -18,6 +18,7 @@ from reasons_lib.llm import (
     invoke_model,
     reset_cost_tracker,
     resolve_model_cmd,
+    write_cost_file,
 )
 
 
@@ -467,3 +468,77 @@ class TestCostTracker:
         result = format_cost_summary()
         assert "$" not in result
         assert "100 input" in result
+
+
+class TestWriteCostFile:
+
+    def setup_method(self):
+        reset_cost_tracker()
+
+    def test_writes_json(self, tmp_path):
+        _record_cost("claude", 1000, 500, 0.05)
+        path = str(tmp_path / "cost.json")
+        write_cost_file(path, "derive")
+        with open(path) as f:
+            data = json.load(f)
+        assert data["command"] == "derive"
+        assert data["total_cost_usd"] == pytest.approx(0.05)
+        assert data["total_input_tokens"] == 1000
+        assert data["total_output_tokens"] == 500
+        assert data["total_calls"] == 1
+        assert "claude" in data["models"]
+        assert "timestamp" in data
+
+    def test_multiple_models(self, tmp_path):
+        _record_cost("claude", 100, 50, 0.01)
+        _record_cost("gemini", 200, 80, 0.0)
+        path = str(tmp_path / "cost.json")
+        write_cost_file(path, "review-beliefs")
+        with open(path) as f:
+            data = json.load(f)
+        assert data["total_calls"] == 2
+        assert "claude" in data["models"]
+        assert "gemini" in data["models"]
+
+    def test_no_calls_skips_file(self, tmp_path):
+        path = str(tmp_path / "cost.json")
+        write_cost_file(path, "derive")
+        assert not os.path.exists(path)
+
+    def test_timestamp_is_iso(self, tmp_path):
+        _record_cost("claude", 100, 50, 0.01)
+        path = str(tmp_path / "cost.json")
+        write_cost_file(path, "derive")
+        with open(path) as f:
+            data = json.load(f)
+        from datetime import datetime
+        datetime.fromisoformat(data["timestamp"])
+
+
+class TestEmitCost:
+
+    def setup_method(self):
+        reset_cost_tracker()
+
+    def test_writes_cost_file_when_set(self, tmp_path):
+        from reasons_lib.cli import _emit_cost
+        _record_cost("claude", 500, 200, 0.03)
+        cost_path = str(tmp_path / "cost.json")
+        args = type("Args", (), {"cost_file": cost_path})()
+        _emit_cost(args, "derive")
+        with open(cost_path) as f:
+            data = json.load(f)
+        assert data["command"] == "derive"
+        assert data["total_cost_usd"] == pytest.approx(0.03)
+
+    def test_no_cost_file_attr(self):
+        from reasons_lib.cli import _emit_cost
+        _record_cost("claude", 100, 50, 0.01)
+        args = type("Args", (), {})()
+        _emit_cost(args, "derive")
+
+    def test_cost_file_none(self):
+        from reasons_lib.cli import _emit_cost
+        _record_cost("claude", 100, 50, 0.01)
+        args = type("Args", (), {"cost_file": None})()
+        _emit_cost(args, "derive")

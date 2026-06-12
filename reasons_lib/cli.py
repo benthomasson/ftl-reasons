@@ -15,6 +15,17 @@ from importlib.metadata import version as _pkg_version
 from . import api
 
 
+def _emit_cost(args, command):
+    """Print cost summary and optionally write cost file."""
+    from .llm import format_cost_summary, write_cost_file
+    cost = format_cost_summary()
+    if cost:
+        print(f"  {cost}", file=sys.stderr)
+    cost_file = getattr(args, "cost_file", None)
+    if cost_file:
+        write_cost_file(cost_file, command)
+
+
 def cmd_init(args):
     try:
         result = api.init_db(
@@ -1211,7 +1222,7 @@ def _write_derive_report(report_state, status):
 def cmd_derive(args):
     _require_sqlite(args, "derive")
     from datetime import datetime
-    from .llm import reset_cost_tracker, format_cost_summary
+    from .llm import reset_cost_tracker
     reset_cost_tracker()
 
     prompt_template = None
@@ -1310,9 +1321,7 @@ def cmd_derive(args):
         _write_derive_report(report_state, "complete")
         print(f"  Report: {report_state['report_path']}")
 
-    cost = format_cost_summary()
-    if cost:
-        print(f"  {cost}", file=sys.stderr)
+    _emit_cost(args, "derive")
 
 
 def cmd_accept(args):
@@ -1457,7 +1466,7 @@ def cmd_review_beliefs(args):
     _require_sqlite(args, "review-beliefs")
     import json
     from datetime import datetime
-    from .llm import reset_cost_tracker, format_cost_summary
+    from .llm import reset_cost_tracker
     reset_cost_tracker()
 
     model = getattr(args, "model", None) or "claude"
@@ -1580,16 +1589,14 @@ def cmd_review_beliefs(args):
             except Exception as e:
                 print(f"  ERROR retracting {r['id']}: {e}", file=sys.stderr)
 
-    cost = format_cost_summary()
-    if cost:
-        print(f"  {cost}", file=sys.stderr)
+    _emit_cost(args, "review-beliefs")
 
 
 def cmd_review_premises(args):
     _require_sqlite(args, "review-premises")
     import json
     from datetime import datetime
-    from .llm import reset_cost_tracker, format_cost_summary
+    from .llm import reset_cost_tracker
     reset_cost_tracker()
 
     model = getattr(args, "model", None) or "claude"
@@ -1648,9 +1655,7 @@ def cmd_review_premises(args):
     reviews = result["results"]
     if not reviews:
         print("No premises to review (no premises with resolvable sources found).")
-        cost = format_cost_summary()
-        if cost:
-            print(f"  {cost}", file=sys.stderr)
+        _emit_cost(args, "review-premises")
         return
 
     inaccurate = [r for r in reviews if not r.get("accurate", True)]
@@ -1692,16 +1697,14 @@ def cmd_review_premises(args):
             except Exception as e:
                 print(f"  ERROR retracting {r['id']}: {e}", file=sys.stderr)
 
-    cost = format_cost_summary()
-    if cost:
-        print(f"  {cost}", file=sys.stderr)
+    _emit_cost(args, "review-premises")
 
 
 def cmd_repair_premises(args):
     _require_sqlite(args, "repair-premises")
     import json
     from datetime import datetime
-    from .llm import reset_cost_tracker, format_cost_summary
+    from .llm import reset_cost_tracker
     reset_cost_tracker()
 
     model = getattr(args, "model", None) or "claude"
@@ -1748,9 +1751,7 @@ def cmd_repair_premises(args):
     repairs = result["results"]
     if not repairs:
         print("No inaccurate premises to repair.")
-        cost = format_cost_summary()
-        if cost:
-            print(f"  {cost}", file=sys.stderr)
+        _emit_cost(args, "repair-premises")
         return
 
     for r in repairs:
@@ -1778,16 +1779,14 @@ def cmd_repair_premises(args):
         _write_report(repairs, "complete")
         print(f"  Report: {report_path}")
 
-    cost = format_cost_summary()
-    if cost:
-        print(f"  {cost}", file=sys.stderr)
+    _emit_cost(args, "repair-premises")
 
 
 def cmd_propose_update(args):
     _require_sqlite(args, "propose-update")
     import json as _json
     from datetime import datetime
-    from .llm import reset_cost_tracker, format_cost_summary
+    from .llm import reset_cost_tracker
     reset_cost_tracker()
 
     from .propose_update import format_proposals_file
@@ -1868,9 +1867,7 @@ def cmd_propose_update(args):
         }, indent=2))
         print(f"  Report: {report_path}")
 
-    cost = format_cost_summary()
-    if cost:
-        print(f"  {cost}", file=sys.stderr)
+    _emit_cost(args, "propose-update")
 
 
 def cmd_repair_smuggled(args):
@@ -1917,7 +1914,7 @@ def cmd_repair_smuggled(args):
 
 def cmd_repair(args):
     _require_sqlite(args, "repair")
-    from .llm import reset_cost_tracker, format_cost_summary
+    from .llm import reset_cost_tracker
     reset_cost_tracker()
 
     model = getattr(args, "model", None) or "claude"
@@ -1960,9 +1957,7 @@ def cmd_repair(args):
     if args.dry_run:
         print("\n  (dry run -- no changes applied)")
 
-    cost = format_cost_summary()
-    if cost:
-        print(f"  {cost}", file=sys.stderr)
+    _emit_cost(args, "repair")
 
 
 def cmd_contradictions(args):
@@ -1990,7 +1985,7 @@ def cmd_contradictions(args):
             print("No nogoods to apply.")
         return
 
-    from .llm import reset_cost_tracker, format_cost_summary
+    from .llm import reset_cost_tracker
     reset_cost_tracker()
 
     model = getattr(args, "model", None) or "claude"
@@ -2033,9 +2028,7 @@ def cmd_contradictions(args):
         print(f"\nWrote {output} — review, then run:")
         print(f"  reasons contradictions --accept {output}")
 
-    cost = format_cost_summary()
-    if cost:
-        print(f"  {cost}", file=sys.stderr)
+    _emit_cost(args, "contradictions")
 
 
 def cmd_namespaces(args):
@@ -2243,6 +2236,8 @@ def main():
                    help="Override automatic cluster count for --cluster/--intra-cluster")
     p.add_argument("--prompt-file", default=None,
                    help="Custom prompt template file (overrides built-in DERIVE_PROMPT)")
+    p.add_argument("--cost-file", default=None,
+                   help="Write cost/token summary to this JSON file")
 
     # accept
     p = sub.add_parser("accept", help="Accept proposals from a derive proposals file")
@@ -2485,6 +2480,8 @@ def main():
                    help="Directory for JSON reports (default: reviews/)")
     p.add_argument("--no-report", action="store_true",
                    help="Skip JSON report generation")
+    p.add_argument("--cost-file", default=None,
+                   help="Write cost/token summary to this JSON file")
 
     # review-premises
     p = sub.add_parser("review-premises", help="Review premises against source material for factual accuracy")
@@ -2507,6 +2504,8 @@ def main():
                    help="Skip JSON report generation")
     p.add_argument("--parallel", type=int, default=0, metavar="N",
                    help="Number of concurrent workers (0 = sequential)")
+    p.add_argument("--cost-file", default=None,
+                   help="Write cost/token summary to this JSON file")
 
     # repair-premises
     p = sub.add_parser("repair-premises", help="Repair inaccurate premises by rewriting from source or retracting")
@@ -2525,6 +2524,8 @@ def main():
                    help="Directory for JSON reports (default: reviews/)")
     p.add_argument("--no-report", action="store_true",
                    help="Skip JSON report generation")
+    p.add_argument("--cost-file", default=None,
+                   help="Write cost/token summary to this JSON file")
 
     # propose-update
     p = sub.add_parser("propose-update",
@@ -2548,6 +2549,8 @@ def main():
                    help="Directory for JSON reports (default: reviews/)")
     p.add_argument("--no-report", action="store_true",
                    help="Skip JSON report generation")
+    p.add_argument("--cost-file", default=None,
+                   help="Write cost/token summary to this JSON file")
 
     # repair-smuggled
     p = sub.add_parser("repair-smuggled",
@@ -2574,6 +2577,8 @@ def main():
                    help="LLM timeout in seconds (default: 600)")
     p.add_argument("--dry-run", action="store_true",
                    help="Report findings without applying changes")
+    p.add_argument("--cost-file", default=None,
+                   help="Write cost/token summary to this JSON file")
 
     # research (backward-compatible alias for repair)
     p = sub.add_parser("research", help="Alias for 'repair' (deprecated)")
@@ -2586,6 +2591,8 @@ def main():
                    help="LLM timeout in seconds (default: 600)")
     p.add_argument("--dry-run", action="store_true",
                    help="Report findings without applying changes")
+    p.add_argument("--cost-file", default=None,
+                   help="Write cost/token summary to this JSON file")
 
     # contradictions
     p = sub.add_parser("contradictions", help="Detect contradictions between IN beliefs")
@@ -2606,6 +2613,8 @@ def main():
                    help="Output file for contradiction plan (default: proposed-contradictions.md)")
     p.add_argument("--accept", metavar="FILE",
                    help="Apply a reviewed contradiction plan file")
+    p.add_argument("--cost-file", default=None,
+                   help="Write cost/token summary to this JSON file")
 
     # list
     p = sub.add_parser("list", help="List nodes with filters")
