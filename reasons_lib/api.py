@@ -2490,7 +2490,10 @@ def report_gated(
 
     blocker_details = {}
     for bid in gated_data.get("blockers", {}):
-        detail = show_node(bid, **vis, **backend)
+        try:
+            detail = show_node(bid, **vis, **backend)
+        except (KeyError, PermissionError):
+            detail = {}
         blocker_details[bid] = {
             "dependent_count": len(detail.get("dependents", [])),
         }

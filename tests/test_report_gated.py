@@ -9,8 +9,7 @@ import pytest
 
 from reasons_lib import api
 from reasons_lib.report_gated import (
-    _build_structured_report, _format_data_for_prompt, generate_report,
-    report_gated,
+    _build_structured_report, _format_data_for_prompt, report_gated,
 )
 
 

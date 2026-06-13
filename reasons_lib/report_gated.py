@@ -63,9 +63,10 @@ def _build_structured_report(in_count, out_count, gated_data, retracted_premises
         for rp in sorted(retracted_premises, key=lambda r: -r["dependent_count"]):
             dep = rp["dependent_count"]
             impact = f"{dep} dependent(s)" if dep else "no dependents"
+            text = rp["text"][:80].replace("|", "\\|")
+            reason = rp["retract_reason"].replace("|", "\\|")
             lines.append(
-                f"| `{rp['id']}` — {rp['text'][:80]} | {impact} "
-                f"| {rp['retract_reason']} |"
+                f"| `{rp['id']}` — {text} | {impact} | {reason} |"
             )
         lines.append("")
 
