@@ -340,3 +340,21 @@ class TestBuildWikiLlm:
                                     db_path=db)
         assert result["pages"] > 0
         assert mock.call_count == result["pages"]
+
+    def test_parallel_generates_all_pages(self, tmp_path):
+        output_dir = str(tmp_path / "wiki")
+        details = {
+            "node-a": {"text": "A", "truth_value": "IN",
+                       "justifications": [], "dependents": []},
+            "node-b": {"text": "B", "truth_value": "IN",
+                       "justifications": [], "dependents": []},
+        }
+        groups = {"alpha": ["node-a"], "beta": ["node-b"]}
+        with patch("reasons_lib.build_wiki.generate_wiki_page",
+                    return_value="Parallel content"):
+            result = build_wiki(details, groups, output_dir,
+                                model="claude", parallel=2)
+        assert result["pages"] == 2
+        for name in ["alpha.md", "beta.md"]:
+            page = open(os.path.join(output_dir, name)).read()
+            assert "Parallel content" in page

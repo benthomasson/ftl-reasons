@@ -153,7 +153,8 @@ def generate_wiki_page(topic, node_ids, node_details, model, timeout):
 _RESERVED_SLUGS = {"index"}
 
 
-def build_wiki(node_details, groups, output_dir, model="", timeout=300):
+def build_wiki(node_details, groups, output_dir, model="", timeout=300,
+               parallel=0):
     """Write index.md and per-group pages to output_dir.
 
     Args:
@@ -162,6 +163,7 @@ def build_wiki(node_details, groups, output_dir, model="", timeout=300):
         output_dir: directory to write markdown files into
         model: LLM model for page generation (empty = no LLM)
         timeout: LLM timeout in seconds
+        parallel: number of concurrent LLM workers (0 = sequential)
     """
     os.makedirs(output_dir, exist_ok=True)
 
@@ -199,26 +201,50 @@ def build_wiki(node_details, groups, output_dir, model="", timeout=300):
         f.write("\n".join(index_lines))
 
     total_groups = len(groups)
-    for i, (label, nids) in enumerate(groups.items(), 1):
+    generated_content: dict[str, str] = {}
+
+    if model and parallel > 0:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        def _gen(label, nids):
+            return label, generate_wiki_page(label, nids, node_details,
+                                             model, timeout)
+
+        with ThreadPoolExecutor(max_workers=parallel) as executor:
+            futures = {
+                executor.submit(_gen, label, nids): label
+                for label, nids in groups.items()
+            }
+            done = 0
+            for future in as_completed(futures):
+                label = futures[future]
+                done += 1
+                try:
+                    _, content = future.result()
+                    generated_content[label] = content
+                    print(f"  Generated {label} ({done}/{total_groups})",
+                          file=sys.stderr)
+                except Exception as e:
+                    print(f"  WARN: {label} failed: {e} ({done}/{total_groups})",
+                          file=sys.stderr)
+    elif model:
+        for i, (label, nids) in enumerate(groups.items(), 1):
+            print(f"  Generating {label} ({i}/{total_groups})...",
+                  file=sys.stderr)
+            try:
+                generated_content[label] = generate_wiki_page(
+                    label, nids, node_details, model, timeout)
+            except Exception as e:
+                print(f"  WARN: {label} failed: {e}", file=sys.stderr)
+
+    for label, nids in groups.items():
         page_file = label_to_file[label]
         page_lines = [f"# {label}", ""]
         page_lines.append(f"[Back to index](index.md)")
         page_lines.append("")
-        if model:
-            print(f"  Generating {label} ({i}/{total_groups})...",
-                  file=sys.stderr)
-            try:
-                content = generate_wiki_page(label, nids, node_details,
-                                             model, timeout)
-                page_lines.append(content)
-                page_lines.append("")
-            except Exception as e:
-                print(f"  WARN: {label} failed: {e}", file=sys.stderr)
-                for nid in sorted(nids):
-                    detail = node_details.get(nid)
-                    if detail:
-                        page_lines.append(
-                            _format_node(nid, detail, node_to_page))
+        if label in generated_content:
+            page_lines.append(generated_content[label])
+            page_lines.append("")
         else:
             for nid in sorted(nids):
                 detail = node_details.get(nid)

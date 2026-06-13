@@ -2351,6 +2351,7 @@ def build_wiki(
     visible_to: list[str] | None = None,
     model: str = "",
     timeout: int = 300,
+    parallel: int = 0,
     db_path: str = DEFAULT_DB,
 ) -> dict:
     """Export beliefs as interlinked markdown wiki pages grouped by topic or cluster.
@@ -2402,7 +2403,7 @@ def build_wiki(
         groups = _assign_topics(node_ids, topics_result["topics"])
 
     return _build_wiki(node_details, groups, output_dir,
-                       model=model, timeout=timeout)
+                       model=model, timeout=timeout, parallel=parallel)
 
 
 def list_gated(

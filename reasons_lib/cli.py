@@ -1470,6 +1470,7 @@ def cmd_build_wiki(args):
         visible_to=_parse_visible_to(args),
         model=model,
         timeout=args.timeout,
+        parallel=getattr(args, "parallel", 0) or 0,
         db_path=args.db,
     )
     print(f"Wiki written to {result['output_dir']}/")
@@ -2492,6 +2493,7 @@ def main():
     p.add_argument("-m", "--model", default=None,
                    help="LLM model for page generation (e.g. claude, gemini). Without this, pages are structured dumps")
     p.add_argument("--timeout", type=int, default=300, help="LLM timeout in seconds (default: 300)")
+    p.add_argument("--parallel", type=int, default=0, help="Number of concurrent LLM workers (default: 0 = sequential)")
     p.add_argument("--cost-file", default=None, help="Write cost/token JSON to this file")
     p.add_argument("--status", choices=["IN", "OUT"], default=None, help="Filter by truth value")
     p.add_argument("--max-topics", type=int, default=20, help="Max topics for word-frequency grouping (default: 20)")
