@@ -150,6 +150,22 @@ def generate_wiki_page(topic, node_ids, node_details, model, timeout):
     return invoke_model(prompt, model=model, timeout=timeout)
 
 
+def _linkify(content, current_page, node_to_page, all_ids):
+    """Replace cross-page belief IDs with markdown links."""
+    for nid in sorted(all_ids, key=len, reverse=True):
+        target = node_to_page.get(nid)
+        if not target or target == current_page:
+            continue
+        if nid not in content:
+            continue
+        if "[" + nid + "](" in content:
+            continue
+        link = "[" + nid + "](" + target + "#" + nid + ")"
+        pattern = r'(?<![a-z0-9\-])' + re.escape(nid) + r'(?![a-z0-9\-])'
+        content = re.sub(pattern, link, content)
+    return content
+
+
 _RESERVED_SLUGS = {"index"}
 
 
@@ -250,7 +266,10 @@ def build_wiki(node_details, groups, output_dir, model="", timeout=300,
                 detail = node_details.get(nid)
                 if detail:
                     page_lines.append(_format_node(nid, detail, node_to_page))
+        page_text = "\n".join(page_lines)
+        page_text = _linkify(page_text, page_file, node_to_page,
+                             node_details.keys())
         with open(os.path.join(output_dir, page_file), "w") as f:
-            f.write("\n".join(page_lines))
+            f.write(page_text)
 
     return {"output_dir": output_dir, "pages": len(groups), "total_nodes": total}

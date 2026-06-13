@@ -9,8 +9,8 @@ import pytest
 
 from reasons_lib import api
 from reasons_lib.build_wiki import (
-    _assign_topics, _format_beliefs_for_prompt, _format_node, _page_name,
-    build_wiki, generate_wiki_page,
+    _assign_topics, _format_beliefs_for_prompt, _format_node, _linkify,
+    _page_name, build_wiki, generate_wiki_page,
 )
 
 
@@ -245,6 +245,40 @@ class TestBuildWikiCli:
         output_dir = str(tmp_path / "cli_wiki_in")
         stdout, stderr, code = run_cli("build-wiki", "-o", output_dir, "--status", "IN", db_path=db)
         assert code == 0
+
+
+class TestLinkify:
+
+    def test_creates_cross_page_links(self):
+        content = "depends on node-alpha and node-beta"
+        node_to_page = {"node-alpha": "page-a.md", "node-beta": "page-b.md"}
+        result = _linkify(content, "page-c.md", node_to_page,
+                          node_to_page.keys())
+        assert "[node-alpha](page-a.md#node-alpha)" in result
+        assert "[node-beta](page-b.md#node-beta)" in result
+
+    def test_skips_same_page(self):
+        content = "mentions node-alpha"
+        node_to_page = {"node-alpha": "page-a.md"}
+        result = _linkify(content, "page-a.md", node_to_page,
+                          node_to_page.keys())
+        assert result == content
+
+    def test_skips_already_linked(self):
+        content = "see [node-alpha](page-a.md#node-alpha)"
+        node_to_page = {"node-alpha": "page-a.md"}
+        result = _linkify(content, "page-b.md", node_to_page,
+                          node_to_page.keys())
+        assert result.count("[node-alpha]") == 1
+
+    def test_longest_first(self):
+        content = "about node-alpha-extended"
+        node_to_page = {
+            "node-alpha": "a.md",
+            "node-alpha-extended": "b.md",
+        }
+        result = _linkify(content, "c.md", node_to_page, node_to_page.keys())
+        assert "[node-alpha-extended](b.md#node-alpha-extended)" in result
 
 
 class TestFormatBeliefsForPrompt:
