@@ -121,8 +121,11 @@ def add(node_id: str, text: str, sl: str = "", unless: str = "", label: str = ""
         unless: Comma-separated outlist node IDs (must be OUT for justification to hold)
         label: Optional justification label
     """
-    result = api.add_node(node_id, text, sl=sl, unless=unless, label=label, db_path=_get_db())
-    return json.dumps(result, indent=2)
+    try:
+        result = api.add_node(node_id, text, sl=sl, unless=unless, label=label, db_path=_get_db())
+        return json.dumps(result, indent=2)
+    except (ValueError, KeyError) as e:
+        return json.dumps({"error": str(e)})
 
 
 @mcp.tool()
@@ -159,11 +162,14 @@ def what_if(node_id: str, action: str = "retract") -> str:
         node_id: The belief to simulate
         action: "retract" or "assert"
     """
-    if action == "assert":
-        result = api.what_if_assert(node_id, db_path=_get_db())
-    else:
-        result = api.what_if_retract(node_id, db_path=_get_db())
-    return json.dumps(result, indent=2)
+    try:
+        if action == "assert":
+            result = api.what_if_assert(node_id, db_path=_get_db())
+        else:
+            result = api.what_if_retract(node_id, db_path=_get_db())
+        return json.dumps(result, indent=2)
+    except KeyError:
+        return json.dumps({"error": f"Node '{node_id}' not found"})
 
 
 @mcp.tool()
@@ -178,8 +184,11 @@ def add_justification(node_id: str, sl: str = "", unless: str = "", label: str =
         unless: Comma-separated outlist node IDs
         label: Optional justification label
     """
-    result = api.add_justification(node_id, sl=sl, unless=unless, label=label, db_path=_get_db())
-    return json.dumps(result, indent=2)
+    try:
+        result = api.add_justification(node_id, sl=sl, unless=unless, label=label, db_path=_get_db())
+        return json.dumps(result, indent=2)
+    except (ValueError, KeyError) as e:
+        return json.dumps({"error": str(e)})
 
 
 @mcp.tool()

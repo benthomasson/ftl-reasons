@@ -138,6 +138,12 @@ class TestAddTool:
                                            sl="premise-a"))
         assert result["node_id"] == "new-derived"
 
+    def test_add_with_missing_sl_creates_out(self, db):
+        result = json.loads(mcp_server.add("bad-derived", "Bad",
+                                           sl="nonexistent-node"))
+        assert result["node_id"] == "bad-derived"
+        assert result["truth_value"] == "OUT"
+
 
 class TestRetractTool:
 
@@ -162,12 +168,19 @@ class TestWhatIfTool:
 
     def test_what_if_retract(self, db):
         result = json.loads(mcp_server.what_if("premise-a", action="retract"))
-        assert "affected" in result or "would_change" in result or isinstance(result, dict)
+        assert result["node_id"] == "premise-a"
+        assert "retracted" in result
+        assert "total_affected" in result
 
     def test_what_if_assert(self, db):
         api.retract_node("premise-a", db_path=db)
         result = json.loads(mcp_server.what_if("premise-a", action="assert"))
-        assert isinstance(result, dict)
+        assert result["node_id"] == "premise-a"
+        assert "restored" in result
+
+    def test_what_if_missing_returns_error(self, db):
+        result = json.loads(mcp_server.what_if("nonexistent"))
+        assert "error" in result
 
 
 class TestAddJustificationTool:
@@ -175,21 +188,27 @@ class TestAddJustificationTool:
     def test_add_justification(self, db):
         result = json.loads(mcp_server.add_justification(
             "derived-c", sl="premise-a", label="extra"))
-        assert isinstance(result, dict)
+        assert result["node_id"] == "derived-c"
+
+    def test_add_justification_missing_sl(self, db):
+        result = json.loads(mcp_server.add_justification(
+            "derived-c", sl="nonexistent"))
+        assert result["node_id"] == "derived-c"
 
 
 class TestNogoodTool:
 
     def test_nogood(self, db):
         result = json.loads(mcp_server.nogood(["premise-a", "premise-b"]))
-        assert isinstance(result, dict)
+        assert "nogood_id" in result
 
 
 class TestTraceTool:
 
     def test_trace_derived(self, db):
         result = json.loads(mcp_server.trace("derived-c"))
-        assert isinstance(result, (dict, list))
+        assert result["node_id"] == "derived-c"
+        assert "premises" in result
 
     def test_trace_missing_returns_error(self, db):
         result = json.loads(mcp_server.trace("nonexistent"))
@@ -208,14 +227,16 @@ class TestStatusTool:
 
     def test_status(self, db):
         result = json.loads(mcp_server.status())
-        assert "nodes" in result or "total" in result or isinstance(result, dict)
+        assert "nodes" in result
+        assert "in_count" in result
+        assert "total" in result
 
 
 class TestListGatedTool:
 
     def test_list_gated(self, db):
         result = json.loads(mcp_server.list_gated())
-        assert isinstance(result, (dict, list))
+        assert "gated_count" in result
 
 
 class TestExportMarkdownTool:
@@ -230,4 +251,4 @@ class TestTopicsTool:
 
     def test_topics(self, db):
         result = json.loads(mcp_server.topics(limit=10))
-        assert isinstance(result, (dict, list))
+        assert "topics" in result
