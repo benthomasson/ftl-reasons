@@ -2340,6 +2340,68 @@ def topics(
         }
 
 
+def build_wiki(
+    output_dir: str = "wiki",
+    status: str | None = None,
+    max_topics: int = 20,
+    cluster: bool = False,
+    n_clusters: int | None = None,
+    seed: int | None = None,
+    embedding_model: str | None = None,
+    visible_to: list[str] | None = None,
+    db_path: str = DEFAULT_DB,
+) -> dict:
+    """Export beliefs as interlinked markdown wiki pages grouped by topic or cluster.
+
+    Returns: {"output_dir": str, "pages": int, "total_nodes": int}
+    """
+    from .build_wiki import _assign_topics, build_wiki as _build_wiki
+
+    nodes_result = list_nodes(status=status, visible_to=visible_to, db_path=db_path)
+    node_ids = [n["id"] for n in nodes_result["nodes"]]
+
+    if not node_ids:
+        import os
+        os.makedirs(output_dir, exist_ok=True)
+        with open(os.path.join(output_dir, "index.md"), "w") as f:
+            f.write("# Belief Wiki\n\n*No beliefs found.*\n")
+        return {"output_dir": output_dir, "pages": 0, "total_nodes": 0}
+
+    node_details = {}
+    for nid in node_ids:
+        try:
+            node_details[nid] = show_node(nid, visible_to=visible_to, db_path=db_path)
+        except (KeyError, PermissionError):
+            pass
+
+    if cluster:
+        cluster_result = list_clusters(
+            status=status or "",
+            n_clusters=n_clusters,
+            seed=seed,
+            embedding_model=embedding_model,
+            visible_to=visible_to,
+            db_path=db_path,
+        )
+        groups = {}
+        for c in cluster_result["clusters"]:
+            ids_in_cluster = [b["id"] for b in c["beliefs"]]
+            word_counts: dict[str, int] = {}
+            for nid in ids_in_cluster:
+                for word in re.split(r'[-._:]', nid):
+                    if word and len(word) > 2 and word not in _TOPIC_STOP_WORDS:
+                        word_counts[word] = word_counts.get(word, 0) + 1
+            label = max(word_counts, key=word_counts.get) if word_counts else f"cluster-{c['id']}"
+            if label in groups:
+                label = f"{label}-{c['id']}"
+            groups[label] = ids_in_cluster
+    else:
+        topics_result = topics(limit=max_topics, db_path=db_path)
+        groups = _assign_topics(node_ids, topics_result["topics"])
+
+    return _build_wiki(node_details, groups, output_dir)
+
+
 def list_gated(
     visible_to: list[str] | None = None,
     db_path: str = DEFAULT_DB,

@@ -1453,6 +1453,23 @@ def cmd_topics(args):
     print(f"\n{len(result['topics'])} topics from {result['total_nodes']} nodes")
 
 
+def cmd_build_wiki(args):
+    _require_sqlite(args, "build-wiki")
+    result = api.build_wiki(
+        output_dir=args.output,
+        status=args.status or None,
+        max_topics=args.max_topics,
+        cluster=args.cluster,
+        n_clusters=args.n_clusters,
+        seed=args.seed,
+        embedding_model=args.embedding_model,
+        visible_to=_parse_visible_to(args),
+        db_path=args.db,
+    )
+    print(f"Wiki written to {result['output_dir']}/")
+    print(f"  {result['total_nodes']} beliefs across {result['pages']} pages")
+
+
 def cmd_review_beliefs(args):
     _require_sqlite(args, "review-beliefs")
     import json
@@ -2458,6 +2475,17 @@ def main():
     p.add_argument("--limit", type=int, default=20, help="Max topics to show (default: 20)")
     p.add_argument("--json", action="store_true", help="Machine-readable JSON output")
 
+    # build-wiki
+    p = sub.add_parser("build-wiki", help="Export beliefs as interlinked markdown wiki pages")
+    p.add_argument("-o", "--output", default="wiki", help="Output directory (default: wiki)")
+    p.add_argument("--status", choices=["IN", "OUT"], default=None, help="Filter by truth value")
+    p.add_argument("--max-topics", type=int, default=20, help="Max topics for word-frequency grouping (default: 20)")
+    p.add_argument("--cluster", action="store_true", help="Use semantic clustering instead of topic grouping")
+    p.add_argument("--n-clusters", type=int, default=None, help="Override automatic cluster count")
+    p.add_argument("--seed", type=int, default=None, help="Random seed for reproducible clustering")
+    p.add_argument("--embedding-model", default=None, help="Sentence-transformers model for clustering")
+    p.add_argument("--visible-to", metavar="TAG,TAG", help="Only export nodes whose access_tags are a subset of these tags")
+
     # review-beliefs
     p = sub.add_parser("review-beliefs", help="Review derived beliefs for validity, sufficiency, and necessity")
     p.add_argument("ids", nargs="*", help="Specific belief IDs to review (default: all derived)")
@@ -2686,6 +2714,7 @@ def main():
         "list-gated": cmd_list_gated,
         "list-negative": cmd_list_negative,
         "topics": cmd_topics,
+        "build-wiki": cmd_build_wiki,
         "review-beliefs": cmd_review_beliefs,
         "review-premises": cmd_review_premises,
         "repair-premises": cmd_repair_premises,
