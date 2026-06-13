@@ -1475,7 +1475,10 @@ def cmd_build_wiki(args):
     print(f"Wiki written to {result['output_dir']}/")
     print(f"  {result['total_nodes']} beliefs across {result['pages']} pages")
     if model:
-        _emit_cost(args, "build-wiki")
+        from .llm import format_cost_summary
+        cost = format_cost_summary()
+        if cost:
+            print(f"  {cost}", file=sys.stderr)
 
 
 def cmd_review_beliefs(args):
