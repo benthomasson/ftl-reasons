@@ -12,13 +12,19 @@ Add to Claude Code:
 import json
 import os
 
-from mcp.server.fastmcp import FastMCP
+try:
+    from mcp.server.fastmcp import FastMCP
+except ImportError:
+    raise ImportError(
+        "The 'mcp' package is required for the MCP server. "
+        "Install with: pip install 'ftl-reasons[mcp]'"
+    )
 
 from reasons_lib import api
 
 mcp = FastMCP("reasons")
 
-_db: str = os.environ.get("REASONS_DB", api.DEFAULT_DB)
+_db: str | None = None
 
 
 def _find_db() -> str:
@@ -37,19 +43,27 @@ def _find_db() -> str:
     return api.DEFAULT_DB
 
 
+def _get_db() -> str:
+    """Return the resolved database path, discovering lazily if needed."""
+    global _db
+    if _db is None:
+        _db = _find_db()
+    return _db
+
+
 # --- Tier 1: Core ---
 
 
 @mcp.tool()
-def search(query: str, format: str = "markdown", depth: int = 1) -> str:
+def search(query: str, output_format: str = "markdown", depth: int = 1) -> str:
     """Search beliefs by text with neighbor expansion.
 
     Args:
         query: Search terms (matches all terms in any order)
-        format: Output format — "markdown", "json", or "minimal"
+        output_format: Output format — "markdown", "json", or "minimal"
         depth: Hops to expand along justification chains (default 1)
     """
-    return api.search(query, db_path=_db, format=format, depth=depth)
+    return api.search(query, db_path=_get_db(), format=output_format, depth=depth)
 
 
 @mcp.tool()
@@ -59,7 +73,10 @@ def show(node_id: str) -> str:
     Args:
         node_id: The belief identifier (e.g. "ansible-is-declarative")
     """
-    return json.dumps(api.show_node(node_id, db_path=_db), indent=2)
+    try:
+        return json.dumps(api.show_node(node_id, db_path=_get_db()), indent=2)
+    except KeyError:
+        return json.dumps({"error": f"Node '{node_id}' not found"})
 
 
 @mcp.tool()
@@ -69,7 +86,10 @@ def explain(node_id: str) -> str:
     Args:
         node_id: The belief identifier to explain
     """
-    return json.dumps(api.explain_node(node_id, db_path=_db), indent=2)
+    try:
+        return json.dumps(api.explain_node(node_id, db_path=_get_db()), indent=2)
+    except KeyError:
+        return json.dumps({"error": f"Node '{node_id}' not found"})
 
 
 @mcp.tool()
@@ -85,7 +105,7 @@ def list_beliefs(status: str = "", premises_only: bool = False, namespace: str =
         status=status or None,
         premises_only=premises_only,
         namespace=namespace or None,
-        db_path=_db,
+        db_path=_get_db(),
     )
     return json.dumps(result, indent=2)
 
@@ -101,7 +121,7 @@ def add(node_id: str, text: str, sl: str = "", unless: str = "", label: str = ""
         unless: Comma-separated outlist node IDs (must be OUT for justification to hold)
         label: Optional justification label
     """
-    result = api.add_node(node_id, text, sl=sl, unless=unless, label=label, db_path=_db)
+    result = api.add_node(node_id, text, sl=sl, unless=unless, label=label, db_path=_get_db())
     return json.dumps(result, indent=2)
 
 
@@ -113,7 +133,7 @@ def retract(node_id: str, reason: str = "") -> str:
         node_id: The belief to retract
         reason: Why this belief is being retracted
     """
-    return json.dumps(api.retract_node(node_id, reason=reason, db_path=_db), indent=2)
+    return json.dumps(api.retract_node(node_id, reason=reason, db_path=_get_db()), indent=2)
 
 
 @mcp.tool()
@@ -123,7 +143,7 @@ def assert_belief(node_id: str) -> str:
     Args:
         node_id: The belief to assert
     """
-    return json.dumps(api.assert_node(node_id, db_path=_db), indent=2)
+    return json.dumps(api.assert_node(node_id, db_path=_get_db()), indent=2)
 
 
 # --- Tier 2: Reasoning ---
@@ -140,9 +160,9 @@ def what_if(node_id: str, action: str = "retract") -> str:
         action: "retract" or "assert"
     """
     if action == "assert":
-        result = api.what_if_assert(node_id, db_path=_db)
+        result = api.what_if_assert(node_id, db_path=_get_db())
     else:
-        result = api.what_if_retract(node_id, db_path=_db)
+        result = api.what_if_retract(node_id, db_path=_get_db())
     return json.dumps(result, indent=2)
 
 
@@ -158,7 +178,7 @@ def add_justification(node_id: str, sl: str = "", unless: str = "", label: str =
         unless: Comma-separated outlist node IDs
         label: Optional justification label
     """
-    result = api.add_justification(node_id, sl=sl, unless=unless, label=label, db_path=_db)
+    result = api.add_justification(node_id, sl=sl, unless=unless, label=label, db_path=_get_db())
     return json.dumps(result, indent=2)
 
 
@@ -171,7 +191,7 @@ def nogood(node_ids: list[str]) -> str:
     Args:
         node_ids: List of belief IDs that form a contradiction
     """
-    return json.dumps(api.add_nogood(node_ids, db_path=_db), indent=2)
+    return json.dumps(api.add_nogood(node_ids, db_path=_get_db()), indent=2)
 
 
 @mcp.tool()
@@ -181,7 +201,10 @@ def trace(node_id: str) -> str:
     Args:
         node_id: The belief to trace
     """
-    return json.dumps(api.trace_assumptions(node_id, db_path=_db), indent=2)
+    try:
+        return json.dumps(api.trace_assumptions(node_id, db_path=_get_db()), indent=2)
+    except KeyError:
+        return json.dumps({"error": f"Node '{node_id}' not found"})
 
 
 @mcp.tool()
@@ -191,7 +214,7 @@ def compact(budget: int = 500) -> str:
     Args:
         budget: Maximum token budget for the summary
     """
-    return api.compact(budget=budget, db_path=_db)
+    return api.compact(budget=budget, db_path=_get_db())
 
 
 # --- Tier 3: Data management ---
@@ -200,7 +223,7 @@ def compact(budget: int = 500) -> str:
 @mcp.tool()
 def status() -> str:
     """Get a network overview: all nodes with truth values and counts."""
-    return json.dumps(api.get_status(db_path=_db), indent=2)
+    return json.dumps(api.get_status(db_path=_get_db()), indent=2)
 
 
 @mcp.tool()
@@ -209,13 +232,13 @@ def list_gated() -> str:
 
     These are beliefs that would come IN if their blocker was retracted.
     """
-    return json.dumps(api.list_gated(db_path=_db), indent=2)
+    return json.dumps(api.list_gated(db_path=_get_db()), indent=2)
 
 
 @mcp.tool()
 def export_markdown() -> str:
     """Export the entire belief network as markdown (beliefs.md format)."""
-    return api.export_markdown(db_path=_db)
+    return api.export_markdown(db_path=_get_db())
 
 
 @mcp.tool()
@@ -225,7 +248,7 @@ def topics(limit: int = 20) -> str:
     Args:
         limit: Maximum number of topics to return
     """
-    return json.dumps(api.topics(limit=limit, db_path=_db), indent=2)
+    return json.dumps(api.topics(limit=limit, db_path=_get_db()), indent=2)
 
 
 def main():
