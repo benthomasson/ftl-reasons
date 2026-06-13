@@ -24,6 +24,7 @@ llm = ["langchain-anthropic>=0.3", "langchain-google-vertexai>=2.0", "langfuse>=
 
 [project.scripts]
 reasons = "reasons_lib.cli:main"
+reasons-mcp = "reasons_lib.mcp_server:main"
 
 [tool.setuptools]
 packages = ["reasons_lib"]
