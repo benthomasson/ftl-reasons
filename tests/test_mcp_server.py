@@ -6,6 +6,8 @@ from unittest.mock import patch
 
 import pytest
 
+pytest.importorskip("mcp")
+
 from reasons_lib import api
 from reasons_lib import mcp_server
 
@@ -153,6 +155,10 @@ class TestRetractTool:
         node = api.show_node("premise-a", db_path=db)
         assert node["truth_value"] == "OUT"
 
+    def test_retract_missing_returns_error(self, db):
+        result = json.loads(mcp_server.retract("nonexistent"))
+        assert "error" in result
+
 
 class TestAssertBeliefTool:
 
@@ -162,6 +168,10 @@ class TestAssertBeliefTool:
         assert "premise-a" in result["went_in"]
         node = api.show_node("premise-a", db_path=db)
         assert node["truth_value"] == "IN"
+
+    def test_assert_missing_returns_error(self, db):
+        result = json.loads(mcp_server.assert_belief("nonexistent"))
+        assert "error" in result
 
 
 class TestWhatIfTool:
@@ -201,6 +211,10 @@ class TestNogoodTool:
     def test_nogood(self, db):
         result = json.loads(mcp_server.nogood(["premise-a", "premise-b"]))
         assert "nogood_id" in result
+
+    def test_nogood_missing_returns_error(self, db):
+        result = json.loads(mcp_server.nogood(["nonexistent-x", "nonexistent-y"]))
+        assert "error" in result
 
 
 class TestTraceTool:

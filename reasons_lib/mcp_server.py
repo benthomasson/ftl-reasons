@@ -136,7 +136,10 @@ def retract(node_id: str, reason: str = "") -> str:
         node_id: The belief to retract
         reason: Why this belief is being retracted
     """
-    return json.dumps(api.retract_node(node_id, reason=reason, db_path=_get_db()), indent=2)
+    try:
+        return json.dumps(api.retract_node(node_id, reason=reason, db_path=_get_db()), indent=2)
+    except KeyError:
+        return json.dumps({"error": f"Node '{node_id}' not found"})
 
 
 @mcp.tool()
@@ -146,7 +149,10 @@ def assert_belief(node_id: str) -> str:
     Args:
         node_id: The belief to assert
     """
-    return json.dumps(api.assert_node(node_id, db_path=_get_db()), indent=2)
+    try:
+        return json.dumps(api.assert_node(node_id, db_path=_get_db()), indent=2)
+    except KeyError:
+        return json.dumps({"error": f"Node '{node_id}' not found"})
 
 
 # --- Tier 2: Reasoning ---
@@ -200,7 +206,10 @@ def nogood(node_ids: list[str]) -> str:
     Args:
         node_ids: List of belief IDs that form a contradiction
     """
-    return json.dumps(api.add_nogood(node_ids, db_path=_get_db()), indent=2)
+    try:
+        return json.dumps(api.add_nogood(node_ids, db_path=_get_db()), indent=2)
+    except KeyError as e:
+        return json.dumps({"error": str(e)})
 
 
 @mcp.tool()
