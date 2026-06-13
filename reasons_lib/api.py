@@ -2449,6 +2449,64 @@ def list_gated(
         return {"blockers": blockers, "gated_count": gated_count, "blocker_count": len(blockers)}
 
 
+def report_gated(
+    visible_to: list[str] | None = None,
+    model: str = "",
+    timeout: int = 300,
+    db_path: str = DEFAULT_DB,
+    pg_conninfo=None, project_id=None,
+) -> dict:
+    """Generate a problems/open-issues report from gated beliefs.
+
+    Returns: {"report": str, "blocker_count": int, "gated_count": int,
+              "retracted_count": int}
+    """
+    from .report_gated import report_gated as _report_gated
+
+    backend = dict(db_path=db_path, pg_conninfo=pg_conninfo,
+                   project_id=project_id)
+    vis = dict(visible_to=visible_to)
+
+    in_nodes = list_nodes(status="IN", **vis, **backend)
+    out_nodes = list_nodes(status="OUT", **vis, **backend)
+    in_count = in_nodes["count"]
+    out_count = out_nodes["count"]
+
+    out_premises = list_nodes(status="OUT", premises_only=True, **vis,
+                              **backend)
+    retracted = []
+    for node in out_premises["nodes"]:
+        detail = show_node(node["id"], **vis, **backend)
+        reason = detail.get("metadata", {}).get("retract_reason")
+        if reason:
+            retracted.append({
+                "id": node["id"],
+                "text": node["text"],
+                "retract_reason": reason,
+                "dependent_count": node["dependent_count"],
+            })
+
+    gated_data = list_gated(**vis, **backend)
+
+    blocker_details = {}
+    for bid in gated_data.get("blockers", {}):
+        detail = show_node(bid, **vis, **backend)
+        blocker_details[bid] = {
+            "dependent_count": len(detail.get("dependents", [])),
+        }
+
+    report = _report_gated(
+        gated_data, retracted, blocker_details,
+        in_count, out_count, model=model, timeout=timeout,
+    )
+    return {
+        "report": report,
+        "blocker_count": gated_data["blocker_count"],
+        "gated_count": gated_data["gated_count"],
+        "retracted_count": len(retracted),
+    }
+
+
 NEGATIVE_BATCH_SIZE = 50
 
 NEGATIVE_TERMS = [
