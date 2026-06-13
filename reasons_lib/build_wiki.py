@@ -1,11 +1,13 @@
 """Build a static wiki from the belief network.
 
 Exports beliefs as interlinked markdown pages grouped by topic
-(word-frequency) or semantic cluster.
+(word-frequency) or semantic cluster. Optionally uses an LLM to
+synthesize each topic page into a coherent narrative.
 """
 
 import os
 import re
+import sys
 
 
 _TOPIC_STOP_WORDS = {
@@ -87,16 +89,79 @@ def _format_node(node_id, node_detail, node_to_page):
     return "\n".join(lines)
 
 
+WIKI_PAGE_PROMPT = """\
+You are writing a wiki page about "{topic}" for a knowledge base built from \
+a belief network (Truth Maintenance System). The page should be a coherent, \
+readable narrative that synthesizes the beliefs below into an informative article.
+
+## Guidelines
+
+- Write in clear, encyclopedic prose — not a list of beliefs
+- Use markdown headers (##, ###) to organize sections
+- Start with a brief overview paragraph
+- Group related beliefs into thematic sections
+- Mention the status (IN = currently held, OUT = retracted) only when relevant
+- Include belief IDs in parentheses after key claims so readers can trace sources, \
+  e.g. "The system uses SL justifications (sl-justification-mechanism)."
+- Note important dependency relationships between beliefs
+- If some beliefs contradict or qualify others, explain the nuance
+- Do NOT include a title — the page already has one
+- Keep the page concise but comprehensive
+
+## Beliefs
+
+{beliefs}
+
+Write the wiki page content now.
+"""
+
+
+def _format_beliefs_for_prompt(node_ids, node_details):
+    """Format beliefs into a structured text block for the LLM prompt."""
+    lines = []
+    for nid in sorted(node_ids):
+        detail = node_details.get(nid)
+        if not detail:
+            continue
+        lines.append(f"### {nid}")
+        lines.append(f"Status: {detail['truth_value']}")
+        lines.append(f"Text: {detail['text']}")
+
+        antecedents = set()
+        for j in detail.get("justifications", []):
+            for a in j.get("antecedents", []):
+                antecedents.add(a)
+        if antecedents:
+            lines.append(f"Depends on: {', '.join(sorted(antecedents))}")
+
+        dependents = detail.get("dependents", [])
+        if dependents:
+            lines.append(f"Supports: {', '.join(sorted(dependents))}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def generate_wiki_page(topic, node_ids, node_details, model, timeout):
+    """Generate a wiki page for a topic group using an LLM."""
+    from .llm import invoke_model
+
+    beliefs_text = _format_beliefs_for_prompt(node_ids, node_details)
+    prompt = WIKI_PAGE_PROMPT.format(topic=topic, beliefs=beliefs_text)
+    return invoke_model(prompt, model=model, timeout=timeout)
+
+
 _RESERVED_SLUGS = {"index"}
 
 
-def build_wiki(node_details, groups, output_dir):
+def build_wiki(node_details, groups, output_dir, model="", timeout=300):
     """Write index.md and per-group pages to output_dir.
 
     Args:
         node_details: {node_id: show_node dict}
         groups: {group_label: [node_id, ...]}
         output_dir: directory to write markdown files into
+        model: LLM model for page generation (empty = no LLM)
+        timeout: LLM timeout in seconds
     """
     os.makedirs(output_dir, exist_ok=True)
 
@@ -133,15 +198,32 @@ def build_wiki(node_details, groups, output_dir):
     with open(os.path.join(output_dir, "index.md"), "w") as f:
         f.write("\n".join(index_lines))
 
-    for label, nids in groups.items():
+    total_groups = len(groups)
+    for i, (label, nids) in enumerate(groups.items(), 1):
         page_file = label_to_file[label]
         page_lines = [f"# {label}", ""]
         page_lines.append(f"[Back to index](index.md)")
         page_lines.append("")
-        for nid in sorted(nids):
-            detail = node_details.get(nid)
-            if detail:
-                page_lines.append(_format_node(nid, detail, node_to_page))
+        if model:
+            print(f"  Generating {label} ({i}/{total_groups})...",
+                  file=sys.stderr)
+            try:
+                content = generate_wiki_page(label, nids, node_details,
+                                             model, timeout)
+                page_lines.append(content)
+                page_lines.append("")
+            except Exception as e:
+                print(f"  WARN: {label} failed: {e}", file=sys.stderr)
+                for nid in sorted(nids):
+                    detail = node_details.get(nid)
+                    if detail:
+                        page_lines.append(
+                            _format_node(nid, detail, node_to_page))
+        else:
+            for nid in sorted(nids):
+                detail = node_details.get(nid)
+                if detail:
+                    page_lines.append(_format_node(nid, detail, node_to_page))
         with open(os.path.join(output_dir, page_file), "w") as f:
             f.write("\n".join(page_lines))
 

@@ -1455,6 +1455,10 @@ def cmd_topics(args):
 
 def cmd_build_wiki(args):
     _require_sqlite(args, "build-wiki")
+    model = getattr(args, "model", None) or ""
+    if model:
+        from .llm import reset_cost_tracker
+        reset_cost_tracker()
     result = api.build_wiki(
         output_dir=args.output,
         status=args.status or None,
@@ -1464,10 +1468,14 @@ def cmd_build_wiki(args):
         seed=args.seed,
         embedding_model=args.embedding_model,
         visible_to=_parse_visible_to(args),
+        model=model,
+        timeout=args.timeout,
         db_path=args.db,
     )
     print(f"Wiki written to {result['output_dir']}/")
     print(f"  {result['total_nodes']} beliefs across {result['pages']} pages")
+    if model:
+        _emit_cost(args, "build-wiki")
 
 
 def cmd_review_beliefs(args):
@@ -2478,6 +2486,10 @@ def main():
     # build-wiki
     p = sub.add_parser("build-wiki", help="Export beliefs as interlinked markdown wiki pages")
     p.add_argument("-o", "--output", default="wiki", help="Output directory (default: wiki)")
+    p.add_argument("-m", "--model", default=None,
+                   help="LLM model for page generation (e.g. claude, gemini). Without this, pages are structured dumps")
+    p.add_argument("--timeout", type=int, default=300, help="LLM timeout in seconds (default: 300)")
+    p.add_argument("--cost-file", default=None, help="Write cost/token JSON to this file")
     p.add_argument("--status", choices=["IN", "OUT"], default=None, help="Filter by truth value")
     p.add_argument("--max-topics", type=int, default=20, help="Max topics for word-frequency grouping (default: 20)")
     p.add_argument("--cluster", action="store_true", help="Use semantic clustering instead of topic grouping")

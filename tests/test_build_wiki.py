@@ -8,7 +8,10 @@ from unittest.mock import patch
 import pytest
 
 from reasons_lib import api
-from reasons_lib.build_wiki import _assign_topics, _format_node, _page_name, build_wiki
+from reasons_lib.build_wiki import (
+    _assign_topics, _format_beliefs_for_prompt, _format_node, _page_name,
+    build_wiki, generate_wiki_page,
+)
 
 
 def run_cli(*args, db_path=None):
@@ -242,3 +245,98 @@ class TestBuildWikiCli:
         output_dir = str(tmp_path / "cli_wiki_in")
         stdout, stderr, code = run_cli("build-wiki", "-o", output_dir, "--status", "IN", db_path=db)
         assert code == 0
+
+
+class TestFormatBeliefsForPrompt:
+
+    def test_formats_beliefs(self):
+        details = {
+            "node-a": {
+                "text": "A is true",
+                "truth_value": "IN",
+                "justifications": [{"antecedents": ["node-b"], "outlist": []}],
+                "dependents": ["node-c"],
+            },
+        }
+        result = _format_beliefs_for_prompt(["node-a"], details)
+        assert "### node-a" in result
+        assert "Status: IN" in result
+        assert "Text: A is true" in result
+        assert "Depends on: node-b" in result
+        assert "Supports: node-c" in result
+
+    def test_skips_missing_nodes(self):
+        result = _format_beliefs_for_prompt(["missing"], {})
+        assert result.strip() == ""
+
+
+class TestGenerateWikiPage:
+
+    def test_calls_invoke_model(self):
+        details = {
+            "node-a": {
+                "text": "A is true",
+                "truth_value": "IN",
+                "justifications": [],
+                "dependents": [],
+            },
+        }
+        with patch("reasons_lib.llm.invoke_model",
+                    return_value="Generated wiki content") as mock:
+            result = generate_wiki_page("mytopic", ["node-a"], details,
+                                        "claude", 300)
+            assert result == "Generated wiki content"
+            mock.assert_called_once()
+            prompt = mock.call_args[0][0]
+            assert "mytopic" in prompt
+            assert "node-a" in prompt
+
+
+class TestBuildWikiLlm:
+
+    def test_llm_mode_uses_generated_content(self, tmp_path):
+        output_dir = str(tmp_path / "wiki")
+        details = {
+            "node-a": {"text": "A", "truth_value": "IN",
+                       "justifications": [], "dependents": []},
+        }
+        groups = {"alpha": ["node-a"]}
+        with patch("reasons_lib.build_wiki.generate_wiki_page",
+                    return_value="LLM wrote this page"):
+            result = build_wiki(details, groups, output_dir, model="claude")
+        page = open(os.path.join(output_dir, "alpha.md")).read()
+        assert "LLM wrote this page" in page
+        assert result["pages"] == 1
+
+    def test_no_llm_mode_no_invoke(self, tmp_path):
+        output_dir = str(tmp_path / "wiki")
+        details = {
+            "node-a": {"text": "A", "truth_value": "IN",
+                       "justifications": [], "dependents": []},
+        }
+        groups = {"alpha": ["node-a"]}
+        with patch("reasons_lib.build_wiki.generate_wiki_page") as mock:
+            build_wiki(details, groups, output_dir)
+            mock.assert_not_called()
+
+    def test_llm_failure_falls_back(self, tmp_path):
+        output_dir = str(tmp_path / "wiki")
+        details = {
+            "node-a": {"text": "A", "truth_value": "IN",
+                       "justifications": [], "dependents": []},
+        }
+        groups = {"alpha": ["node-a"]}
+        with patch("reasons_lib.build_wiki.generate_wiki_page",
+                    side_effect=RuntimeError("LLM failed")):
+            build_wiki(details, groups, output_dir, model="claude")
+        page = open(os.path.join(output_dir, "alpha.md")).read()
+        assert "### node-a" in page
+
+    def test_api_passes_model_through(self, db, tmp_path):
+        output_dir = str(tmp_path / "wiki_llm")
+        with patch("reasons_lib.build_wiki.generate_wiki_page",
+                    return_value="Generated page") as mock:
+            result = api.build_wiki(output_dir=output_dir, model="claude",
+                                    db_path=db)
+        assert result["pages"] > 0
+        assert mock.call_count == result["pages"]
