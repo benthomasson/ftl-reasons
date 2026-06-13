@@ -15,6 +15,7 @@ import json
 import os
 import shutil
 import subprocess
+import threading
 
 try:
     from langchain_anthropic import ChatAnthropic
@@ -46,6 +47,8 @@ MODEL_COMMANDS = {
 _langfuse_handler = None
 _langfuse_checked = False
 
+_cost_lock = threading.Lock()
+
 _cost_tracker = {
     "calls": 0,
     "input_tokens": 0,
@@ -57,47 +60,52 @@ _cost_tracker = {
 
 def reset_cost_tracker():
     """Reset accumulated cost/token stats."""
-    _cost_tracker["calls"] = 0
-    _cost_tracker["input_tokens"] = 0
-    _cost_tracker["output_tokens"] = 0
-    _cost_tracker["total_cost_usd"] = 0.0
-    _cost_tracker["by_model"] = {}
+    with _cost_lock:
+        _cost_tracker["calls"] = 0
+        _cost_tracker["input_tokens"] = 0
+        _cost_tracker["output_tokens"] = 0
+        _cost_tracker["total_cost_usd"] = 0.0
+        _cost_tracker["by_model"] = {}
 
 
 def get_cost_summary() -> dict:
     """Return accumulated cost/token stats across all LLM calls."""
-    return dict(_cost_tracker)
+    import copy
+    with _cost_lock:
+        return copy.deepcopy(_cost_tracker)
 
 
 def format_cost_summary() -> str:
     """Format cost summary as a human-readable string."""
-    s = _cost_tracker
-    if s["calls"] == 0:
-        return ""
-    parts = []
-    if s["total_cost_usd"] > 0:
-        parts.append(f"${s['total_cost_usd']:.4f}")
-    parts.append(f"{s['input_tokens']:,} input + {s['output_tokens']:,} output tokens")
-    parts.append(f"{s['calls']} call(s)")
-    return "Cost: " + " | ".join(parts)
+    with _cost_lock:
+        s = _cost_tracker
+        if s["calls"] == 0:
+            return ""
+        parts = []
+        if s["total_cost_usd"] > 0:
+            parts.append(f"${s['total_cost_usd']:.4f}")
+        parts.append(f"{s['input_tokens']:,} input + {s['output_tokens']:,} output tokens")
+        parts.append(f"{s['calls']} call(s)")
+        return "Cost: " + " | ".join(parts)
 
 
 def _record_cost(model: str, input_tokens: int, output_tokens: int, cost_usd: float):
     """Record token/cost stats from one LLM call."""
-    _cost_tracker["calls"] += 1
-    _cost_tracker["input_tokens"] += input_tokens
-    _cost_tracker["output_tokens"] += output_tokens
-    _cost_tracker["total_cost_usd"] += cost_usd
+    with _cost_lock:
+        _cost_tracker["calls"] += 1
+        _cost_tracker["input_tokens"] += input_tokens
+        _cost_tracker["output_tokens"] += output_tokens
+        _cost_tracker["total_cost_usd"] += cost_usd
 
-    if model not in _cost_tracker["by_model"]:
-        _cost_tracker["by_model"][model] = {
-            "calls": 0, "input_tokens": 0, "output_tokens": 0, "total_cost_usd": 0.0,
-        }
-    m = _cost_tracker["by_model"][model]
-    m["calls"] += 1
-    m["input_tokens"] += input_tokens
-    m["output_tokens"] += output_tokens
-    m["total_cost_usd"] += cost_usd
+        if model not in _cost_tracker["by_model"]:
+            _cost_tracker["by_model"][model] = {
+                "calls": 0, "input_tokens": 0, "output_tokens": 0, "total_cost_usd": 0.0,
+            }
+        m = _cost_tracker["by_model"][model]
+        m["calls"] += 1
+        m["input_tokens"] += input_tokens
+        m["output_tokens"] += output_tokens
+        m["total_cost_usd"] += cost_usd
 
 
 def _parse_cli_json(output: str, model: str) -> str:
