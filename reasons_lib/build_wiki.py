@@ -87,6 +87,9 @@ def _format_node(node_id, node_detail, node_to_page):
     return "\n".join(lines)
 
 
+_RESERVED_SLUGS = {"index"}
+
+
 def build_wiki(node_details, groups, output_dir):
     """Write index.md and per-group pages to output_dir.
 
@@ -97,9 +100,20 @@ def build_wiki(node_details, groups, output_dir):
     """
     os.makedirs(output_dir, exist_ok=True)
 
+    used_slugs: dict[str, str] = {}
+    label_to_file: dict[str, str] = {}
+    for label in groups:
+        slug = _page_name(label)
+        if slug in _RESERVED_SLUGS:
+            slug = f"{slug}-topic"
+        while slug in used_slugs:
+            slug = f"{slug}-2"
+        used_slugs[slug] = label
+        label_to_file[label] = slug + ".md"
+
     node_to_page = {}
     for label, nids in groups.items():
-        page_file = _page_name(label) + ".md"
+        page_file = label_to_file[label]
         for nid in nids:
             node_to_page[nid] = page_file
 
@@ -107,7 +121,7 @@ def build_wiki(node_details, groups, output_dir):
     index_lines.append("| Topic | Beliefs |")
     index_lines.append("|-------|---------|")
     for label in sorted(groups, key=lambda l: (-len(groups[l]), l)):
-        page_file = _page_name(label) + ".md"
+        page_file = label_to_file[label]
         count = len(groups[label])
         index_lines.append(f"| [{label}]({page_file}) | {count} |")
     index_lines.append("")
@@ -120,7 +134,7 @@ def build_wiki(node_details, groups, output_dir):
         f.write("\n".join(index_lines))
 
     for label, nids in groups.items():
-        page_file = _page_name(label) + ".md"
+        page_file = label_to_file[label]
         page_lines = [f"# {label}", ""]
         page_lines.append(f"[Back to index](index.md)")
         page_lines.append("")

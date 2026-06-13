@@ -1,6 +1,5 @@
 """Tests for the build-wiki command."""
 
-import json
 import os
 import sys
 from io import StringIO
@@ -161,6 +160,31 @@ class TestBuildWiki:
         build_wiki(details, groups, output_dir)
         page = open(os.path.join(output_dir, "topic.md")).read()
         assert "[Back to index](index.md)" in page
+
+    def test_index_slug_collision(self, tmp_path):
+        output_dir = str(tmp_path / "wiki")
+        details = {
+            "node-a": {"text": "A", "truth_value": "IN", "justifications": [], "dependents": []},
+        }
+        groups = {"index": ["node-a"]}
+        result = build_wiki(details, groups, output_dir)
+        assert result["pages"] == 1
+        assert os.path.isfile(os.path.join(output_dir, "index.md"))
+        assert os.path.isfile(os.path.join(output_dir, "index-topic.md"))
+        index = open(os.path.join(output_dir, "index.md")).read()
+        assert "Belief Wiki" in index
+
+    def test_duplicate_slug_collision(self, tmp_path):
+        output_dir = str(tmp_path / "wiki")
+        details = {
+            "node-a": {"text": "A", "truth_value": "IN", "justifications": [], "dependents": []},
+            "node-b": {"text": "B", "truth_value": "IN", "justifications": [], "dependents": []},
+        }
+        groups = {"My Topic": ["node-a"], "My-Topic!": ["node-b"]}
+        result = build_wiki(details, groups, output_dir)
+        assert result["pages"] == 2
+        files = [f for f in os.listdir(output_dir) if f != "index.md"]
+        assert len(files) == 2
 
 
 class TestBuildWikiApi:

@@ -1454,6 +1454,7 @@ def cmd_topics(args):
 
 
 def cmd_build_wiki(args):
+    _require_sqlite(args, "build-wiki")
     result = api.build_wiki(
         output_dir=args.output,
         status=args.status or None,
@@ -1463,7 +1464,7 @@ def cmd_build_wiki(args):
         seed=args.seed,
         embedding_model=args.embedding_model,
         visible_to=_parse_visible_to(args),
-        **_backend_kwargs(args),
+        db_path=args.db,
     )
     print(f"Wiki written to {result['output_dir']}/")
     print(f"  {result['total_nodes']} beliefs across {result['pages']} pages")

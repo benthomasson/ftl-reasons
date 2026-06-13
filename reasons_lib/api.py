@@ -2376,7 +2376,7 @@ def build_wiki(
 
     if cluster:
         cluster_result = list_clusters(
-            status=status or "IN",
+            status=status or "",
             n_clusters=n_clusters,
             seed=seed,
             embedding_model=embedding_model,
@@ -2389,7 +2389,7 @@ def build_wiki(
             word_counts: dict[str, int] = {}
             for nid in ids_in_cluster:
                 for word in re.split(r'[-._:]', nid):
-                    if word and len(word) > 2:
+                    if word and len(word) > 2 and word not in _TOPIC_STOP_WORDS:
                         word_counts[word] = word_counts.get(word, 0) + 1
             label = max(word_counts, key=word_counts.get) if word_counts else f"cluster-{c['id']}"
             if label in groups:
