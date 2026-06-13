@@ -1418,6 +1418,42 @@ def cmd_list_gated(args):
     print(f"{result['blocker_count']} blocker(s) gating {result['gated_count']} belief(s)")
 
 
+def cmd_report_gated(args):
+    model = getattr(args, "model", None) or ""
+    if model:
+        from .llm import reset_cost_tracker
+        reset_cost_tracker()
+
+    result = api.report_gated(
+        visible_to=_parse_visible_to(args),
+        model=model,
+        timeout=args.timeout,
+        **_backend_kwargs(args),
+    )
+
+    report = result["report"]
+    output_path = getattr(args, "output", None)
+    if output_path:
+        with open(output_path, "w") as f:
+            f.write(report)
+        print(f"Report written to {output_path}")
+    else:
+        print(report)
+
+    print(
+        f"  {result['blocker_count']} blocker(s), "
+        f"{result['gated_count']} gated belief(s), "
+        f"{result['retracted_count']} retracted premise(s)",
+        file=sys.stderr,
+    )
+
+    if model:
+        from .llm import format_cost_summary
+        cost = format_cost_summary()
+        if cost:
+            print(f"  {cost}", file=sys.stderr)
+
+
 def cmd_list_negative(args):
     result = api.list_negative(
         visible_to=_parse_visible_to(args),
@@ -2475,6 +2511,14 @@ def main():
     p = sub.add_parser("list-gated", help="List OUT nodes blocked by IN outlist nodes")
     p.add_argument("--visible-to", metavar="TAG,TAG", help="Only show nodes whose access_tags are a subset of these tags")
 
+    # report-gated
+    p = sub.add_parser("report-gated", help="Generate a problems/open-issues report from gated beliefs")
+    p.add_argument("-o", "--output", default=None, help="Write report to file (default: stdout)")
+    p.add_argument("-m", "--model", default=None,
+                   help="LLM model for narrative synthesis (default: structured report)")
+    p.add_argument("--timeout", type=int, default=300, help="LLM timeout in seconds (default: 300)")
+    p.add_argument("--visible-to", metavar="TAG,TAG", help="Only include nodes whose access_tags are a subset of these tags")
+
     p = sub.add_parser("list-negative", help="Find IN beliefs describing problems/defects/risks (LLM-classified)")
     p.add_argument("--visible-to", metavar="TAG,TAG", help="Only show nodes whose access_tags are a subset of these tags")
     p.add_argument("-m", "--model", default=None,
@@ -2728,6 +2772,7 @@ def main():
         "cluster-list": cmd_cluster_list,
         "list": cmd_list,
         "list-gated": cmd_list_gated,
+        "report-gated": cmd_report_gated,
         "list-negative": cmd_list_negative,
         "topics": cmd_topics,
         "build-wiki": cmd_build_wiki,
