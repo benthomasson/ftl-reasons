@@ -70,21 +70,23 @@ def reset_cost_tracker():
 
 def get_cost_summary() -> dict:
     """Return accumulated cost/token stats across all LLM calls."""
+    import copy
     with _cost_lock:
-        return dict(_cost_tracker)
+        return copy.deepcopy(_cost_tracker)
 
 
 def format_cost_summary() -> str:
     """Format cost summary as a human-readable string."""
-    s = _cost_tracker
-    if s["calls"] == 0:
-        return ""
-    parts = []
-    if s["total_cost_usd"] > 0:
-        parts.append(f"${s['total_cost_usd']:.4f}")
-    parts.append(f"{s['input_tokens']:,} input + {s['output_tokens']:,} output tokens")
-    parts.append(f"{s['calls']} call(s)")
-    return "Cost: " + " | ".join(parts)
+    with _cost_lock:
+        s = _cost_tracker
+        if s["calls"] == 0:
+            return ""
+        parts = []
+        if s["total_cost_usd"] > 0:
+            parts.append(f"${s['total_cost_usd']:.4f}")
+        parts.append(f"{s['input_tokens']:,} input + {s['output_tokens']:,} output tokens")
+        parts.append(f"{s['calls']} call(s)")
+        return "Cost: " + " | ".join(parts)
 
 
 def _record_cost(model: str, input_tokens: int, output_tokens: int, cost_usd: float):
