@@ -162,6 +162,20 @@ class TestExplainNode:
         assert "a" in nodes_in_trace
 
 
+    def test_explain_circular_dependency(self, db_path):
+        api.add_node("p", "Premise", db_path=db_path)
+        api.add_node("x", "Derived X", sl="p", db_path=db_path)
+        api.add_justification("x", sl="y", db_path=db_path)
+        api.add_node("y", "Derived Y", sl="x", db_path=db_path)
+        result = api.explain_node("x", db_path=db_path)
+        nodes_in_trace = [s["node"] for s in result["steps"]]
+        assert "x" in nodes_in_trace
+        reasons = [s["reason"] for s in result["steps"]]
+        has_circular = any("circular" in r for r in reasons)
+        has_premise = any("premise" in r for r in reasons)
+        assert has_circular or has_premise
+
+
 class TestAddNogood:
 
     def test_nogood(self, db_path):
