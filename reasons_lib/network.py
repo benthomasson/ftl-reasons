@@ -757,7 +757,8 @@ class Network:
             "truth_value": node.truth_value,
         }
 
-    def explain(self, node_id: str, _visited: set | None = None) -> list[dict]:
+    def explain(self, node_id: str, _visited: set | None = None,
+                _path: set | None = None) -> list[dict]:
         """Trace why a node is IN or OUT.
 
         Returns a list of explanation steps tracing back through justifications.
@@ -767,10 +768,16 @@ class Network:
 
         if _visited is None:
             _visited = set()
-        if node_id in _visited:
+        if _path is None:
+            _path = set()
+
+        if node_id in _path:
             return [{"node": node_id, "truth_value": self.nodes[node_id].truth_value,
-                     "reason": "circular dependency (already visited)"}]
+                     "reason": "circular dependency"}]
+        if node_id in _visited:
+            return []
         _visited.add(node_id)
+        _path = _path | {node_id}
 
         node = self.nodes[node_id]
         steps = []
@@ -798,7 +805,7 @@ class Network:
                         step["outlist"] = list(j.outlist)
                     steps.append(step)
                     for ant_id in j.antecedents:
-                        steps.extend(self.explain(ant_id, _visited))
+                        steps.extend(self.explain(ant_id, _visited, _path))
                     break
         else:
             # All justifications invalid — explain why
