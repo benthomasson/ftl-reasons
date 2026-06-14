@@ -162,6 +162,26 @@ class TestExplainNode:
         assert "a" in nodes_in_trace
 
 
+    def test_explain_circular_dependency(self, db_path):
+        api.add_node("p", "Premise", db_path=db_path)
+        api.add_node("x", "Derived X", sl="p", db_path=db_path)
+        api.add_justification("x", sl="y", db_path=db_path)
+        api.add_node("y", "Derived Y", sl="x", db_path=db_path)
+        api.retract_node("p", db_path=db_path)
+        result = api.explain_node("x", db_path=db_path)
+        reasons = [s["reason"] for s in result["steps"]]
+        assert any("circular" in r for r in reasons)
+
+    def test_explain_diamond_no_false_circular(self, db_path):
+        api.add_node("root", "Root premise", db_path=db_path)
+        api.add_node("left", "Left", sl="root", db_path=db_path)
+        api.add_node("right", "Right", sl="root", db_path=db_path)
+        api.add_node("top", "Top", sl="left,right", db_path=db_path)
+        result = api.explain_node("top", db_path=db_path)
+        reasons = [s["reason"] for s in result["steps"]]
+        assert not any("circular" in r for r in reasons)
+
+
 class TestAddNogood:
 
     def test_nogood(self, db_path):
