@@ -2539,11 +2539,20 @@ NEGATIVE_TERMS = [
     'outdated', 'deprecated', 'fragile', 'brittle', 'hack', 'workaround',
     'technical debt', 'tech debt', 'not implemented', 'unimplemented',
     'incomplete', 'inconsistent', 'unclear', 'confusing', 'problem',
-    'issue', 'concern', 'warning', 'danger', 'threat', 'weakness',
-    'limitation', 'constraint', 'bottleneck', 'blocker', 'obstacle',
-    'undermines', 'concentrated', 'single point of failure', 'no tests',
-    'untested', 'not tested', 'hard-coded', 'hardcoded', 'tight coupling',
-    'tightly coupled', 'monolithic', 'legacy', 'unmaintained',
+    'known issue', 'security issue', 'concern', 'warning', 'danger',
+    'threat', 'weakness', 'limitation', 'constraint', 'bottleneck',
+    'blocker', 'obstacle', 'undermines', 'concentrated',
+    'single point of failure', 'no tests', 'untested', 'not tested',
+    'hard-coded', 'hardcoded', 'tight coupling', 'tightly coupled',
+    'monolithic', 'legacy', 'unmaintained',
+    'blocked', 'blocking', 'deferred', 'stalled', 'unresolved',
+    'disabled', 'skipped',
+    'sole', 'empty', 'placeholder', 'regression', 'corrupted',
+    'orphaned', 'zombie',
+    'absent', 'absence', 'invisible', 'silent', 'hollow', 'vacuum',
+    'debt', 'overhead', 'degradation', 'deficit', 'friction',
+    'undocumented', 'unverified',
+    'dysfunction', 'opacity', 'opaque', 'isolated', 'permanently',
 ]
 
 NEGATIVE_CLASSIFY_PROMPT = """\
@@ -2567,19 +2576,22 @@ If none are genuinely negative, return: []
 def list_negative(
     visible_to: list[str] | None = None,
     model: str = "claude",
+    skip_llm: bool = False,
     db_path: str = DEFAULT_DB,
     pg_conninfo=None, project_id=None,
 ) -> dict:
     """Find IN beliefs that describe problems, defects, or risks.
 
-    Uses keyword pre-filtering then LLM classification via an LLM.
+    Uses keyword pre-filtering then LLM classification.
+    With skip_llm=True, returns keyword-filtered candidates directly.
 
     Returns: {"negative": [{"id": str, "text": str}, ...],
               "count": int, "candidates": int, "total": int}
     """
     if pg_conninfo:
         return _pg_dispatch(pg_conninfo, project_id, "list_negative",
-                            visible_to=visible_to, model=model)
+                            visible_to=visible_to, model=model,
+                            skip_llm=skip_llm)
     from . import ask
 
     with _with_network(db_path) as net:
@@ -2605,6 +2617,14 @@ def list_negative(
 
         if not candidates:
             return empty
+
+        if skip_llm:
+            return {
+                "negative": [{"id": nid, "text": text} for nid, text in candidates],
+                "count": len(candidates),
+                "candidates": len(candidates),
+                "total": total,
+            }
 
         from .llm import invoke_model
 

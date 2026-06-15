@@ -1018,11 +1018,10 @@ class PgApi:
             return {k: Path(v) for k, v in result["repos"].items()}
         return None
 
-    def list_negative(self, visible_to=None, model="claude"):
+    def list_negative(self, visible_to=None, model="claude", skip_llm=False):
         """Find IN beliefs describing problems/defects/risks."""
         import sys
         from .api import NEGATIVE_TERMS, NEGATIVE_CLASSIFY_PROMPT, NEGATIVE_BATCH_SIZE
-        from .llm import invoke_model
 
         pid = self.project_id
 
@@ -1057,6 +1056,16 @@ class PgApi:
 
         if not candidates:
             return empty
+
+        if skip_llm:
+            return {
+                "negative": [{"id": nid, "text": text} for nid, text in candidates],
+                "count": len(candidates),
+                "candidates": len(candidates),
+                "total": total,
+            }
+
+        from .llm import invoke_model
 
         negative_ids = set()
         total_batches = (len(candidates) + NEGATIVE_BATCH_SIZE - 1) // NEGATIVE_BATCH_SIZE
