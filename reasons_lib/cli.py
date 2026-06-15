@@ -1458,6 +1458,7 @@ def cmd_list_negative(args):
     result = api.list_negative(
         visible_to=_parse_visible_to(args),
         model=getattr(args, "model", None) or "claude",
+        skip_llm=getattr(args, "no_llm", False),
         **_backend_kwargs(args),
     )
 
@@ -2523,6 +2524,8 @@ def main():
     p.add_argument("--visible-to", metavar="TAG,TAG", help="Only show nodes whose access_tags are a subset of these tags")
     p.add_argument("-m", "--model", default=None,
                    help="Model to use (default: claude). Prefixes: ollama:<model>, api:<model>, vertex:<model>")
+    p.add_argument("--no-llm", action="store_true",
+                   help="Skip LLM classification; return keyword-filtered candidates directly")
 
     sub.add_parser("namespaces", help="List all agent namespaces in the database")
 

@@ -518,7 +518,8 @@ class TestListNegativeDispatch:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = list_negative(pg_conninfo="postgresql://...", project_id="test")
-        mock_pg.list_negative.assert_called_once_with(visible_to=None, model="claude")
+        mock_pg.list_negative.assert_called_once_with(visible_to=None, model="claude",
+                                                          skip_llm=False)
         assert result["count"] == 1
 
     def test_passes_visible_to_and_model(self):
@@ -532,7 +533,7 @@ class TestListNegativeDispatch:
             result = list_negative(visible_to=["admin"], model="gemini",
                                    pg_conninfo="postgresql://...", project_id="test")
         mock_pg.list_negative.assert_called_once_with(
-            visible_to=["admin"], model="gemini")
+            visible_to=["admin"], model="gemini", skip_llm=False)
         assert result["total"] == 5
 
 

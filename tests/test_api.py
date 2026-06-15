@@ -575,6 +575,34 @@ class TestListNegative:
         found_ids = {n["id"] for n in result["negative"]}
         assert found_ids == {"bug-010", "bug-020", "bug-060"}
 
+    def test_expanded_terms_match(self, db_path):
+        api.add_node("a", "The migration is stalled due to schema conflicts", db_path=db_path)
+        api.add_node("b", "There is a regression in the auth flow", db_path=db_path)
+        api.add_node("c", "The API docs are undocumented for v2", db_path=db_path)
+        api.add_node("d", "Everything works fine", db_path=db_path)
+        with patch("reasons_lib.llm.invoke_model", return_value='["a", "b", "c"]'):
+            result = api.list_negative(db_path=db_path)
+            assert result["candidates"] == 3
+            assert result["total"] == 4
+
+    def test_issue_false_positive_excluded(self, db_path):
+        api.add_node("jira-ref", "The child issue was closed last sprint", db_path=db_path)
+        api.add_node("real-neg", "There is a known issue in the auth module", db_path=db_path)
+        with patch("reasons_lib.llm.invoke_model", return_value='["real-neg"]') as mock_llm:
+            result = api.list_negative(db_path=db_path)
+            assert result["candidates"] == 1
+            assert result["negative"][0]["id"] == "real-neg"
+
+    def test_skip_llm(self, db_path):
+        api.add_node("a", "There is a critical bug here", db_path=db_path)
+        api.add_node("b", "Everything is fine", db_path=db_path)
+        with patch("reasons_lib.llm.invoke_model") as mock_llm:
+            result = api.list_negative(skip_llm=True, db_path=db_path)
+            mock_llm.assert_not_called()
+            assert result["count"] == 1
+            assert result["candidates"] == 1
+            assert result["negative"][0]["id"] == "a"
+
 
 class TestUpdateNode:
 
