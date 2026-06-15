@@ -785,3 +785,64 @@ class TestDeduplicateSemantic:
     def test_jaccard_mode_unchanged(self, db_with_similar):
         result = api.deduplicate(threshold=0.5, semantic=False, db_path=db_with_similar)
         assert result["retracted"] == []
+
+
+class TestLifecycleTimestamps:
+
+    def test_add_node_sets_created_at(self, db_path):
+        api.add_node("ts-a", "Timestamped node", db_path=db_path)
+        node = api.show_node("ts-a", db_path=db_path)
+        assert node["created_at"] != ""
+        assert node["updated_at"] != ""
+        assert node["created_at"] == node["updated_at"]
+
+    def test_update_node_sets_updated_at(self, db_path):
+        api.add_node("ts-b", "Original", db_path=db_path)
+        original = api.show_node("ts-b", db_path=db_path)
+        api.update_node("ts-b", text="Modified", db_path=db_path)
+        updated = api.show_node("ts-b", db_path=db_path)
+        assert updated["updated_at"] >= original["updated_at"]
+
+    def test_set_metadata_sets_updated_at(self, db_path):
+        api.add_node("ts-c", "Meta node", db_path=db_path)
+        original = api.show_node("ts-c", db_path=db_path)
+        api.set_metadata("ts-c", "key", "value", db_path=db_path)
+        updated = api.show_node("ts-c", db_path=db_path)
+        assert updated["updated_at"] >= original["updated_at"]
+
+    def test_retract_sets_retracted_at(self, db_path):
+        api.add_node("ts-d", "To retract", db_path=db_path)
+        api.retract_node("ts-d", db_path=db_path)
+        node = api.show_node("ts-d", db_path=db_path)
+        assert node["retracted_at"] != ""
+        assert node["truth_value"] == "OUT"
+
+    def test_show_node_includes_all_timestamps(self, db_path):
+        api.add_node("ts-e", "Full timestamps", db_path=db_path)
+        node = api.show_node("ts-e", db_path=db_path)
+        for key in ("created_at", "updated_at", "reviewed_at", "verified_at", "retracted_at"):
+            assert key in node
+
+    def test_export_includes_timestamps(self, db_path):
+        api.add_node("ts-f", "Exported node", db_path=db_path)
+        result = api.export_network(db_path=db_path)
+        node_data = result["nodes"]["ts-f"]
+        assert "created_at" in node_data
+        assert node_data["created_at"] != ""
+
+    def test_import_roundtrips_timestamps(self, tmp_path, db_path):
+        api.add_node("ts-g", "Roundtrip node", db_path=db_path)
+        api.retract_node("ts-g", reason="testing", db_path=db_path)
+        export = api.export_network(db_path=db_path)
+
+        import json
+        json_path = str(tmp_path / "export.json")
+        with open(json_path, "w") as f:
+            json.dump(export, f)
+
+        db2 = str(tmp_path / "imported.db")
+        api.init_db(db_path=db2)
+        api.import_json(json_path, db_path=db2)
+        node = api.show_node("ts-g", db_path=db2)
+        assert node["created_at"] == export["nodes"]["ts-g"]["created_at"]
+        assert node["retracted_at"] != ""

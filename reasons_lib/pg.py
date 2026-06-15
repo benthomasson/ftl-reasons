@@ -30,6 +30,10 @@ CREATE TABLE IF NOT EXISTS rms_nodes (
     date TEXT DEFAULT '',
     metadata JSONB DEFAULT '{}',
     created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ,
+    reviewed_at TIMESTAMPTZ,
+    verified_at TIMESTAMPTZ,
+    retracted_at TIMESTAMPTZ,
     PRIMARY KEY (id, project_id)
 );
 
@@ -132,6 +136,14 @@ class PgApi:
             )
             if not cur.fetchone():
                 cur.execute("ALTER TABLE rms_nodes ADD COLUMN source_url TEXT DEFAULT ''")
+            for col in ("updated_at", "reviewed_at", "verified_at", "retracted_at"):
+                cur.execute(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name = 'rms_nodes' AND column_name = %s",
+                    (col,),
+                )
+                if not cur.fetchone():
+                    cur.execute(f"ALTER TABLE rms_nodes ADD COLUMN {col} TIMESTAMPTZ")
             now = datetime.now(timezone.utc).isoformat(timespec="seconds")
             pname = project_name or self.project_id
             for key, val in [
@@ -153,22 +165,25 @@ class PgApi:
 
     def _add_node_raw(self, cur, node_id, text, justifications=None,
                       source="", source_url="", source_hash="", date="",
-                      metadata=None):
+                      metadata=None, created_at="", updated_at=""):
         """Insert a node with pre-parsed justification dicts.
 
         Does NOT commit, validate refs, or inherit access tags.
         Caller is responsible for transaction management.
         """
         pid = self.project_id
-        now = date or datetime.now().isoformat(timespec="seconds")
+        now_ts = datetime.now(timezone.utc)
+        now = date or now_ts.isoformat(timespec="seconds")
         meta = metadata or {}
+        ts_created = created_at or now_ts.isoformat(timespec="seconds")
+        ts_updated = updated_at or ts_created
 
         cur.execute(
             "INSERT INTO rms_nodes (id, project_id, text, source, source_url, "
-            "source_hash, date, metadata) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+            "source_hash, date, metadata, created_at, updated_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
             (node_id, pid, text, source, source_url, source_hash, now,
-             json.dumps(meta)),
+             json.dumps(meta), ts_created, ts_updated),
         )
 
         if justifications:
@@ -358,18 +373,22 @@ class PgApi:
             if reason:
                 metadata["retract_reason"] = reason
 
+            now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
             if old_value == "OUT":
                 cur.execute(
-                    "UPDATE rms_nodes SET metadata = %s WHERE id = %s AND project_id = %s",
-                    (json.dumps(metadata), node_id, pid),
+                    "UPDATE rms_nodes SET metadata = %s, retracted_at = %s, updated_at = %s "
+                    "WHERE id = %s AND project_id = %s",
+                    (json.dumps(metadata), now, now, node_id, pid),
                 )
                 self.conn.commit()
                 return {"changed": [], "went_out": [], "went_in": []}
 
             cur.execute(
-                "UPDATE rms_nodes SET truth_value = 'OUT', metadata = %s "
+                "UPDATE rms_nodes SET truth_value = 'OUT', metadata = %s, "
+                "retracted_at = %s, updated_at = %s "
                 "WHERE id = %s AND project_id = %s",
-                (json.dumps(metadata), node_id, pid),
+                (json.dumps(metadata), now, now, node_id, pid),
             )
             self._log(cur, "retract", node_id, reason or "OUT")
 
@@ -657,7 +676,8 @@ class PgApi:
         pid = self.project_id
         with self.conn.cursor() as cur:
             cur.execute(
-                "SELECT id, text, truth_value, source, source_url, source_hash, metadata "
+                "SELECT id, text, truth_value, source, source_url, source_hash, metadata, "
+                "created_at, updated_at, reviewed_at, verified_at, retracted_at "
                 "FROM rms_nodes WHERE id = %s AND project_id = %s",
                 (node_id, pid),
             )
@@ -665,7 +685,8 @@ class PgApi:
             if not row:
                 raise KeyError(f"Node '{node_id}' not found")
 
-            nid, text, tv, source, source_url, source_hash, meta = row
+            nid, text, tv, source, source_url, source_hash, meta, \
+                created_at, updated_at, reviewed_at, verified_at, retracted_at = row
             if isinstance(meta, str):
                 meta = json.loads(meta)
 
@@ -689,6 +710,9 @@ class PgApi:
 
             dependents = sorted(self._find_dependents(cur, [node_id]))
 
+        def _fmt_ts(val):
+            return val.isoformat(timespec="seconds") if val else ""
+
         return {
             "id": nid,
             "text": text,
@@ -699,6 +723,11 @@ class PgApi:
             "justifications": justifications,
             "dependents": dependents,
             "metadata": meta,
+            "created_at": _fmt_ts(created_at),
+            "updated_at": _fmt_ts(updated_at),
+            "reviewed_at": _fmt_ts(reviewed_at),
+            "verified_at": _fmt_ts(verified_at),
+            "retracted_at": _fmt_ts(retracted_at),
         }
 
     def search(self, query, visible_to=None, format="markdown"):
@@ -1271,16 +1300,23 @@ class PgApi:
         with self.conn.cursor() as cur:
             cur.execute(
                 "SELECT id, text, truth_value, source, source_url, source_hash, "
-                "date, metadata FROM rms_nodes WHERE project_id = %s ORDER BY id",
+                "date, metadata, created_at, updated_at, reviewed_at, "
+                "verified_at, retracted_at "
+                "FROM rms_nodes WHERE project_id = %s ORDER BY id",
                 (pid,),
             )
             nodes = {}
             for row in cur.fetchall():
-                nid, text, tv, source, source_url, source_hash, date, meta = row
+                nid, text, tv, source, source_url, source_hash, date, meta, \
+                    created_at, updated_at, reviewed_at, verified_at, retracted_at = row
                 if isinstance(meta, str):
                     meta = json.loads(meta)
                 if visible_to is not None and not self._is_visible(meta, visible_to):
                     continue
+
+                def _fmt_ts(val):
+                    return val.isoformat(timespec="seconds") if val else ""
+
                 nodes[nid] = {
                     "text": text,
                     "truth_value": tv,
@@ -1290,6 +1326,11 @@ class PgApi:
                     "source_hash": source_hash or "",
                     "date": date or "",
                     "metadata": {k: v for k, v in meta.items() if not k.startswith("_")},
+                    "created_at": _fmt_ts(created_at),
+                    "updated_at": _fmt_ts(updated_at),
+                    "reviewed_at": _fmt_ts(reviewed_at),
+                    "verified_at": _fmt_ts(verified_at),
+                    "retracted_at": _fmt_ts(retracted_at),
                 }
 
             if nodes:
@@ -1463,6 +1504,8 @@ class PgApi:
             if not updates:
                 return {"node_id": node_id, "updated_fields": []}
 
+            updates.append("updated_at = %s")
+            params.append(datetime.now(timezone.utc).isoformat(timespec="seconds"))
             params.extend([node_id, pid])
             cur.execute(
                 f"UPDATE rms_nodes SET {', '.join(updates)} "
@@ -1485,9 +1528,11 @@ class PgApi:
                 raise KeyError(f"Node '{node_id}' not found")
             meta = json.loads(row[0]) if row[0] else {}
             meta[key] = value
+            now = datetime.now(timezone.utc).isoformat(timespec="seconds")
             cur.execute(
-                "UPDATE rms_nodes SET metadata = %s WHERE id = %s AND project_id = %s",
-                (json.dumps(meta), node_id, pid),
+                "UPDATE rms_nodes SET metadata = %s, updated_at = %s "
+                "WHERE id = %s AND project_id = %s",
+                (json.dumps(meta), now, node_id, pid),
             )
         self.conn.commit()
         return {"node_id": node_id, "key": key}
@@ -2247,6 +2292,8 @@ class PgApi:
                             source_hash=ndata.get("source_hash", ""),
                             date=ndata.get("date", ""),
                             metadata=meta,
+                            created_at=ndata.get("created_at", ""),
+                            updated_at=ndata.get("updated_at", ""),
                         )
                         added.add(nid)
                         nodes_imported += 1
@@ -2267,6 +2314,8 @@ class PgApi:
                             source_hash=ndata.get("source_hash", ""),
                             date=ndata.get("date", ""),
                             metadata=meta,
+                            created_at=ndata.get("created_at", ""),
+                            updated_at=ndata.get("updated_at", ""),
                         )
                         added.add(nid)
                         nodes_imported += 1
@@ -2279,6 +2328,21 @@ class PgApi:
 
         with self.conn.cursor() as cur:
             for nid, ndata in data.get("nodes", {}).items():
+                ts_updates = []
+                ts_params = []
+                for ts_col in ("reviewed_at", "verified_at", "retracted_at"):
+                    ts_val = ndata.get(ts_col, "")
+                    if ts_val:
+                        ts_updates.append(f"{ts_col} = %s")
+                        ts_params.append(ts_val)
+                if ts_updates:
+                    ts_params.extend([nid, pid])
+                    cur.execute(
+                        f"UPDATE rms_nodes SET {', '.join(ts_updates)} "
+                        f"WHERE id = %s AND project_id = %s",
+                        ts_params,
+                    )
+
                 target_tv = ndata.get("truth_value", "IN")
                 cur.execute(
                     "SELECT truth_value FROM rms_nodes "

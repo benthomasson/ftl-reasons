@@ -13,6 +13,7 @@ import re
 import sqlite3
 import sys
 from collections.abc import Callable
+from datetime import datetime, timezone
 from itertools import combinations
 from pathlib import Path
 
@@ -627,6 +628,11 @@ def show_node(node_id: str, visible_to: list[str] | None = None, db_path: str = 
             ],
             "dependents": sorted(node.dependents),
             "metadata": node.metadata,
+            "created_at": node.created_at,
+            "updated_at": node.updated_at,
+            "reviewed_at": node.reviewed_at,
+            "verified_at": node.verified_at,
+            "retracted_at": node.retracted_at,
         }
 
 
@@ -808,6 +814,8 @@ def update_node(
             meta["example"] = example
             node.metadata = meta
             updated.append("example")
+        if updated:
+            node.updated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
         return {"node_id": node_id, "updated_fields": updated}
 
 
@@ -829,6 +837,7 @@ def set_metadata(
         meta = node.metadata or {}
         meta[key] = value
         node.metadata = meta
+        node.updated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
         return {"node_id": node_id, "key": key}
 
 
@@ -950,6 +959,11 @@ def export_network(visible_to: list[str] | None = None, db_path: str = DEFAULT_D
                 "source_hash": n.source_hash,
                 "date": n.date,
                 "metadata": {k: v for k, v in n.metadata.items() if not k.startswith("_")},
+                "created_at": n.created_at,
+                "updated_at": n.updated_at,
+                "reviewed_at": n.reviewed_at,
+                "verified_at": n.verified_at,
+                "retracted_at": n.retracted_at,
             }
             for nid, n in sorted(net.nodes.items())
             if visible_to is None or _is_visible(n, visible_to)
@@ -1258,7 +1272,12 @@ def import_json(json_file: str, db_path: str = DEFAULT_DB,
                         source_hash=ndata.get("source_hash", ""),
                         date=ndata.get("date", ""),
                         metadata=ndata.get("metadata", {}),
+                        created_at=ndata.get("created_at", ""),
+                        updated_at=ndata.get("updated_at", ""),
                     )
+                    node.reviewed_at = ndata.get("reviewed_at", "")
+                    node.verified_at = ndata.get("verified_at", "")
+                    node.retracted_at = ndata.get("retracted_at", "")
                     # Restore exact truth value (may differ from computed if retracted)
                     target_tv = ndata.get("truth_value", "IN")
                     if node.truth_value != target_tv:
@@ -1287,7 +1306,7 @@ def import_json(json_file: str, db_path: str = DEFAULT_DB,
                             )
                             for j in jlist
                         ]
-                    net.add_node(
+                    node = net.add_node(
                         id=nid,
                         text=ndata.get("text", ""),
                         justifications=justifications,
@@ -1296,9 +1315,14 @@ def import_json(json_file: str, db_path: str = DEFAULT_DB,
                         source_hash=ndata.get("source_hash", ""),
                         date=ndata.get("date", ""),
                         metadata=ndata.get("metadata", {}),
+                        created_at=ndata.get("created_at", ""),
+                        updated_at=ndata.get("updated_at", ""),
                     )
+                    node.reviewed_at = ndata.get("reviewed_at", "")
+                    node.verified_at = ndata.get("verified_at", "")
+                    node.retracted_at = ndata.get("retracted_at", "")
                     target_tv = ndata.get("truth_value", "IN")
-                    if net.nodes[nid].truth_value != target_tv:
+                    if node.truth_value != target_tv:
                         if target_tv == "OUT":
                             net.retract(nid)
                         else:
@@ -2265,12 +2289,12 @@ def list_nodes(
                             status=status, premises_only=premises_only,
                             has_dependents=has_dependents, namespace=namespace,
                             visible_to=visible_to, label=label)
-    from datetime import datetime, timedelta
+    from datetime import timedelta
 
     with _with_network(db_path) as net:
         memo = {} if (min_depth is not None or max_depth is not None) else None
         if not_reviewed_since is not None:
-            cutoff = datetime.now() - timedelta(days=not_reviewed_since)
+            cutoff = datetime.now(timezone.utc) - timedelta(days=not_reviewed_since)
         else:
             cutoff = None
         nodes = []
@@ -2298,12 +2322,12 @@ def list_nodes(
             if never_reviewed:
                 if not node.justifications:
                     continue
-                if node.metadata.get("last_reviewed"):
+                if node.reviewed_at or node.metadata.get("last_reviewed"):
                     continue
             if cutoff is not None:
                 if not node.justifications:
                     continue
-                last = node.metadata.get("last_reviewed")
+                last = node.reviewed_at or node.metadata.get("last_reviewed", "")
                 if last:
                     try:
                         if datetime.fromisoformat(last) >= cutoff:
@@ -2317,7 +2341,7 @@ def list_nodes(
                 "justification_count": len(node.justifications),
                 "dependent_count": len(node.dependents),
                 "challenges": node.metadata.get("challenges", []),
-                "last_reviewed": node.metadata.get("last_reviewed"),
+                "last_reviewed": node.reviewed_at or node.metadata.get("last_reviewed"),
                 "review_result": node.metadata.get("review_result"),
                 "source_type": node.metadata.get("source_type", ""),
             })
@@ -2692,14 +2716,13 @@ def review_beliefs(
     """Review derived beliefs for validity, sufficiency, and necessity.
 
     Uses an LLM to evaluate whether each derived belief's reasoning
-    from antecedents to conclusion is sound. Writes last_reviewed and
-    review_result metadata to each reviewed node (unless dry_run=True).
+    from antecedents to conclusion is sound. Sets reviewed_at and updated_at
+    timestamps and writes review_result metadata to each reviewed node
+    (unless dry_run=True).
 
     Returns: {"results": [...], "reviewed": int, "invalid": int,
               "insufficient": int, "unnecessary": int, "total_derived": int}
     """
-    from datetime import datetime
-
     from .derive import _get_depth
     from .review import review_beliefs as _review
 
@@ -2761,14 +2784,15 @@ def review_beliefs(
     results = _review(nodes, belief_ids=review_ids, model=model, timeout=timeout,
                       on_batch=on_batch)
 
-    now = datetime.now().isoformat(timespec="seconds")
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
     if not dry_run and results:
         result_map = {r["id"]: r for r in results}
         with _with_network(db_path, write=True) as net:
             for nid in review_ids:
                 if nid in net.nodes and nid in result_map:
-                    net.nodes[nid].metadata["last_reviewed"] = now
+                    net.nodes[nid].reviewed_at = now
+                    net.nodes[nid].updated_at = now
                     net.nodes[nid].metadata["review_result"] = _classify_review_result(result_map[nid])
 
     invalid = sum(1 for r in results if not r.get("valid", True))
@@ -2808,8 +2832,6 @@ def review_premises(
               "skipped_no_source": int}
     """
     import sys
-    from datetime import datetime
-    from pathlib import Path
 
     from .check_stale import resolve_source_path
     from .review_premises import review_premises as _review
@@ -3030,8 +3052,6 @@ def propose_update(
 
     Returns: {"proposals": [...], "reviewed": int, "timestamp": str}
     """
-    from datetime import datetime
-
     from .propose_update import propose_updates as _propose
 
     result = export_network(db_path=db_path)

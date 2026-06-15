@@ -9,7 +9,7 @@ Implements Doyle's (1979) TMS algorithm:
 """
 
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timezone
 
 from . import Node, Justification, Nogood
 
@@ -79,6 +79,11 @@ class Network:
         source_hash: str = "",
         date: str = "",
         metadata: dict | None = None,
+        created_at: str = "",
+        updated_at: str = "",
+        reviewed_at: str = "",
+        verified_at: str = "",
+        retracted_at: str = "",
     ) -> Node:
         """Add a node to the network and propagate.
 
@@ -87,6 +92,11 @@ class Network:
         """
         if id in self.nodes:
             raise ValueError(f"Node '{id}' already exists")
+
+        if not created_at:
+            now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            created_at = now
+            updated_at = now
 
         node = Node(
             id=id,
@@ -97,6 +107,11 @@ class Network:
             source_hash=source_hash,
             date=date,
             metadata=metadata or {},
+            created_at=created_at,
+            updated_at=updated_at,
+            reviewed_at=reviewed_at,
+            verified_at=verified_at,
+            retracted_at=retracted_at,
         )
 
         # Register as dependent of antecedents (inlist) and outlist nodes.
@@ -135,12 +150,17 @@ class Network:
             raise KeyError(f"Node '{node_id}' not found")
 
         node = self.nodes[node_id]
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
         if node.truth_value == "OUT":
             node.metadata["_retracted"] = True
+            node.retracted_at = now
+            node.updated_at = now
             return []
 
         node.truth_value = "OUT"
         node.metadata["_retracted"] = True
+        node.retracted_at = now
+        node.updated_at = now
         if reason:
             node.metadata["retract_reason"] = reason
         changed = [node_id]

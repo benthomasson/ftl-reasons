@@ -39,6 +39,11 @@ class Node:
     source_hash: str = ""
     date: str = ""
     metadata: dict = field(default_factory=dict)
+    created_at: str = ""
+    updated_at: str = ""
+    reviewed_at: str = ""
+    verified_at: str = ""
+    retracted_at: str = ""
 
 
 @dataclass

@@ -628,11 +628,11 @@ class TestReviewBeliefsMetadata:
             api.review_beliefs(db_path=db_path)
 
         node_ab = api.show_node("derived-ab", db_path=db_path)
-        assert node_ab["metadata"]["last_reviewed"]
+        assert node_ab["reviewed_at"]
         assert node_ab["metadata"]["review_result"] == "pass"
 
         node_abc = api.show_node("derived-abc", db_path=db_path)
-        assert node_abc["metadata"]["last_reviewed"]
+        assert node_abc["reviewed_at"]
         assert node_abc["metadata"]["review_result"] == "invalid"
 
     def test_dry_run_skips_metadata(self, db_path):
@@ -646,7 +646,7 @@ class TestReviewBeliefsMetadata:
             api.review_beliefs(dry_run=True, db_path=db_path)
 
         node = api.show_node("derived-ab", db_path=db_path)
-        assert "last_reviewed" not in node["metadata"]
+        assert not node["reviewed_at"]
 
     def test_review_result_classification_priority(self, db_path):
         mock_response = json.dumps([

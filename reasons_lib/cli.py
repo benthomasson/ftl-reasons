@@ -290,6 +290,17 @@ def cmd_show(args):
         indented = node["metadata"]["example"].replace("\n", "\n  ")
         print(f"\nExample:\n  {indented}")
 
+    timestamps = []
+    for ts_key in ("created_at", "updated_at", "reviewed_at", "verified_at", "retracted_at"):
+        ts_val = node.get(ts_key, "")
+        if ts_val:
+            label = ts_key.replace("_", " ").title().replace(" At", "")
+            timestamps.append((label, ts_val))
+    if timestamps:
+        print()
+        for label, val in timestamps:
+            print(f"{label}: {val}")
+
     if node["dependents"]:
         print(f"\nDependents: {', '.join(node['dependents'])}")
 
