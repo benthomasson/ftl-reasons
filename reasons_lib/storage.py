@@ -23,7 +23,12 @@ CREATE TABLE IF NOT EXISTS nodes (
     source_url TEXT DEFAULT '',
     source_hash TEXT DEFAULT '',
     date TEXT DEFAULT '',
-    metadata_json TEXT DEFAULT '{}'
+    metadata_json TEXT DEFAULT '{}',
+    created_at TEXT DEFAULT '',
+    updated_at TEXT DEFAULT '',
+    reviewed_at TEXT DEFAULT '',
+    verified_at TEXT DEFAULT '',
+    retracted_at TEXT DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS justifications (
@@ -82,6 +87,9 @@ class Storage:
         cols = [c[1] for c in self.conn.execute("PRAGMA table_info(nodes)").fetchall()]
         if "source_url" not in cols:
             self.conn.execute("ALTER TABLE nodes ADD COLUMN source_url TEXT DEFAULT ''")
+        for col in ("created_at", "updated_at", "reviewed_at", "verified_at", "retracted_at"):
+            if col not in cols:
+                self.conn.execute(f"ALTER TABLE nodes ADD COLUMN {col} TEXT DEFAULT ''")
         if self._is_new:
             now = datetime.now(timezone.utc).isoformat(timespec="seconds")
             project_name = self._project_name or self.db_path.stem
@@ -112,8 +120,9 @@ class Storage:
 
             for node in network.nodes.values():
                 self.conn.execute(
-                    "INSERT INTO nodes (id, text, truth_value, source, source_url, source_hash, date, metadata_json) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO nodes (id, text, truth_value, source, source_url, source_hash, date, metadata_json, "
+                    "created_at, updated_at, reviewed_at, verified_at, retracted_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         node.id,
                         node.text,
@@ -123,6 +132,11 @@ class Storage:
                         node.source_hash,
                         node.date,
                         json.dumps(node.metadata),
+                        node.created_at,
+                        node.updated_at,
+                        node.reviewed_at,
+                        node.verified_at,
+                        node.retracted_at,
                     ),
                 )
                 self.conn.execute(
@@ -178,9 +192,15 @@ class Storage:
         network = Network()
 
         # Load nodes (without justifications first, to avoid ordering issues)
-        # Check if source_url column exists (backward compat with older DBs)
-        has_source_url = "source_url" in [c[1] for c in self.conn.execute("PRAGMA table_info(nodes)").fetchall()]
-        if has_source_url:
+        cols = [c[1] for c in self.conn.execute("PRAGMA table_info(nodes)").fetchall()]
+        has_source_url = "source_url" in cols
+        has_timestamps = "created_at" in cols
+        if has_timestamps:
+            cursor = self.conn.execute(
+                "SELECT id, text, truth_value, source, source_url, source_hash, date, metadata_json, "
+                "created_at, updated_at, reviewed_at, verified_at, retracted_at FROM nodes"
+            )
+        elif has_source_url:
             cursor = self.conn.execute(
                 "SELECT id, text, truth_value, source, source_url, source_hash, date, metadata_json FROM nodes"
             )
@@ -206,7 +226,12 @@ class Storage:
 
         # Build nodes directly (bypass add_node to preserve exact state)
         for row in node_rows:
-            nid, text, truth_value, source, source_url, source_hash, date, meta_json = row
+            if has_timestamps:
+                nid, text, truth_value, source, source_url, source_hash, date, meta_json, \
+                    created_at, updated_at, reviewed_at, verified_at, retracted_at = row
+            else:
+                nid, text, truth_value, source, source_url, source_hash, date, meta_json = row
+                created_at = updated_at = reviewed_at = verified_at = retracted_at = ""
             node = Node(
                 id=nid,
                 text=text,
@@ -217,6 +242,11 @@ class Storage:
                 source_hash=source_hash,
                 date=date,
                 metadata=json.loads(meta_json),
+                created_at=created_at or "",
+                updated_at=updated_at or "",
+                reviewed_at=reviewed_at or "",
+                verified_at=verified_at or "",
+                retracted_at=retracted_at or "",
             )
             network.nodes[nid] = node
 
