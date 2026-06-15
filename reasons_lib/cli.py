@@ -2019,8 +2019,8 @@ def cmd_repair(args):
 
     print(f"\nTotal invalid: {result['total_invalid']}")
     print(f"  Linked: {result['linked']}  Softened: {result['softened']}"
-          f"  Abandoned: {result['abandoned']}  Failed: {result['failed']}"
-          f"  Errors: {result['errors']}")
+          f"  Abandoned: {result['abandoned']}  Research: {result['needs_research']}"
+          f"  Failed: {result['failed']}  Errors: {result['errors']}")
 
     if args.dry_run:
         print("\n  (dry run -- no changes applied)")
