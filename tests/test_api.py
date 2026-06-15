@@ -847,3 +847,53 @@ class TestLifecycleTimestamps:
         assert node["created_at"] == export["nodes"]["ts-g"]["created_at"]
         assert node["retracted_at"] == export["nodes"]["ts-g"]["retracted_at"]
         assert node["updated_at"] == export["nodes"]["ts-g"]["updated_at"]
+
+    def test_assert_clears_retracted_at(self, db_path):
+        api.add_node("ts-h", "Retract then restore", db_path=db_path)
+        api.retract_node("ts-h", db_path=db_path)
+        retracted = api.show_node("ts-h", db_path=db_path)
+        assert retracted["retracted_at"] != ""
+        assert retracted["truth_value"] == "OUT"
+
+        api.assert_node("ts-h", db_path=db_path)
+        restored = api.show_node("ts-h", db_path=db_path)
+        assert restored["retracted_at"] == ""
+        assert restored["truth_value"] == "IN"
+        assert restored["updated_at"] >= retracted["updated_at"]
+
+    def test_cascade_does_not_set_retracted_at_on_dependents(self, db_path):
+        api.add_node("ts-root", "Root premise", db_path=db_path)
+        api.add_node("ts-dep", "Depends on root", sl="ts-root", db_path=db_path)
+        api.retract_node("ts-root", db_path=db_path)
+
+        root = api.show_node("ts-root", db_path=db_path)
+        dep = api.show_node("ts-dep", db_path=db_path)
+        assert root["retracted_at"] != ""
+        assert dep["truth_value"] == "OUT"
+        assert dep["retracted_at"] == ""
+
+    def test_verified_at_preserved_through_export_import(self, tmp_path, db_path):
+        from datetime import datetime, timezone
+        api.add_node("ts-ver", "Verified node", db_path=db_path)
+
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        from reasons_lib.storage import Storage
+        store = Storage(db_path)
+        net = store.load()
+        net.nodes["ts-ver"].verified_at = now
+        store.save(net)
+        store.close()
+
+        export = api.export_network(db_path=db_path)
+        assert export["nodes"]["ts-ver"]["verified_at"] == now
+
+        import json
+        json_path = str(tmp_path / "verified.json")
+        with open(json_path, "w") as f:
+            json.dump(export, f)
+
+        db2 = str(tmp_path / "verified_import.db")
+        api.init_db(db_path=db2)
+        api.import_json(json_path, db_path=db2)
+        node = api.show_node("ts-ver", db_path=db2)
+        assert node["verified_at"] == now
