@@ -96,8 +96,14 @@ Your task: decide which repair pattern is most appropriate.
    removed from the evidence to repair. Choose this when neither linking nor softening
    can make the derivation sound.
 
+4. **research** — The claim is plausible but cannot be confirmed or denied from the
+   current evidence in the network. Further investigation (code reading, testing,
+   documentation review) could validate or refine it. Choose this when the belief is
+   worth preserving pending more information, rather than abandoning or weakening
+   prematurely.
+
 Respond with ONLY a JSON object:
-{{"pattern": "search_and_link" | "soften" | "abandon", "rationale": "brief explanation"}}"""
+{{"pattern": "search_and_link" | "soften" | "abandon" | "research", "rationale": "brief explanation"}}"""
 
 SOFTEN_PROMPT = """\
 You are rewriting a derived belief to match what its antecedents actually support.
@@ -118,7 +124,7 @@ Preserve the core insight but remove unsupported specificity.
 Respond with ONLY a JSON object:
 {{"softened_text": "the rewritten claim", "rationale": "what was weakened and why"}}"""
 
-VALID_PATTERNS = {"search_and_link", "soften", "abandon"}
+VALID_PATTERNS = {"search_and_link", "soften", "abandon", "research"}
 
 
 def parse_extract_response(response):
@@ -356,8 +362,8 @@ def repair_beliefs(review_results, nodes, model="claude",
                      search_fn=None):
     """Orchestrate triage and repair for invalid beliefs.
 
-    Triages each invalid belief into search_and_link, soften, or abandon,
-    then executes the appropriate pattern.
+    Triages each invalid belief into search_and_link, soften, abandon, or
+    research, then executes the appropriate pattern.
 
     Returns list of repair result dicts.
     """
@@ -458,6 +464,17 @@ def repair_beliefs(review_results, nodes, model="claude",
                         db_path=db_path,
                     )
                 result["status"] = "abandoned"
+
+            elif pattern == "research":
+                print(f"  Pattern: research for {belief_id}...",
+                      file=sys.stderr)
+                if not dry_run:
+                    api.set_metadata(
+                        belief_id, "repair_research",
+                        triage.get("rationale", ""),
+                        db_path=db_path,
+                    )
+                result["status"] = "needs_research"
 
         except Exception as exc:
             result["error"] = str(exc)

@@ -93,6 +93,12 @@ class TestParseTriageResponse:
         result = parse_triage_response(resp)
         assert result["pattern"] == "abandon"
 
+    def test_valid_research(self):
+        resp = '{"pattern": "research", "rationale": "needs investigation"}'
+        result = parse_triage_response(resp)
+        assert result["pattern"] == "research"
+        assert result["rationale"] == "needs investigation"
+
     def test_invalid_pattern_ignored(self):
         resp = '{"pattern": "unknown", "rationale": "hmm"}'
         result = parse_triage_response(resp)
@@ -273,6 +279,49 @@ class TestResearchBeliefs:
         mock_retract.assert_called_once()
         assert "abandoned" in mock_retract.call_args[1]["reason"]
 
+    def test_research_pattern(self):
+        nodes = _make_nodes()
+        review_results = [{
+            "id": "derived-boil", "valid": False, "comment": "needs more evidence",
+        }]
+        triage_resp = _mock_result('{"pattern": "research", "rationale": "needs code review"}')
+
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run",
+                   side_effect=[triage_resp]), \
+             patch("reasons_lib.api.set_metadata") as mock_meta:
+            results = repair_beliefs(
+                review_results, nodes, db_path="test.db",
+                search_fn=_mock_search([]),
+            )
+
+        assert results[0]["pattern"] == "research"
+        assert results[0]["status"] == "needs_research"
+        mock_meta.assert_called_once_with(
+            "derived-boil", "repair_research", "needs code review",
+            db_path="test.db",
+        )
+
+    def test_research_dry_run_no_metadata(self):
+        nodes = _make_nodes()
+        review_results = [{
+            "id": "derived-boil", "valid": False, "comment": "needs more evidence",
+        }]
+        triage_resp = _mock_result('{"pattern": "research", "rationale": "needs investigation"}')
+
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run",
+                   side_effect=[triage_resp]), \
+             patch("reasons_lib.api.set_metadata") as mock_meta:
+            results = repair_beliefs(
+                review_results, nodes, db_path="test.db", dry_run=True,
+                search_fn=_mock_search([]),
+            )
+
+        assert results[0]["pattern"] == "research"
+        assert results[0]["status"] == "needs_research"
+        mock_meta.assert_not_called()
+
     def test_triage_failed(self):
         nodes = _make_nodes()
         review_results = [{
@@ -323,7 +372,8 @@ class TestResearchBeliefs:
                    side_effect=[triage_resp, soften_resp]), \
              patch("reasons_lib.api.update_node") as mock_update, \
              patch("reasons_lib.api.retract_node") as mock_retract, \
-             patch("reasons_lib.api.add_justification") as mock_add:
+             patch("reasons_lib.api.add_justification") as mock_add, \
+             patch("reasons_lib.api.set_metadata") as mock_meta:
             results = repair_beliefs(
                 review_results, nodes, db_path="test.db", dry_run=True,
                 search_fn=_mock_search([]),
@@ -333,6 +383,7 @@ class TestResearchBeliefs:
         mock_update.assert_not_called()
         mock_retract.assert_not_called()
         mock_add.assert_not_called()
+        mock_meta.assert_not_called()
 
     def test_multiple_beliefs_different_patterns(self):
         nodes = _make_nodes()

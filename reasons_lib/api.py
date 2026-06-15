@@ -811,6 +811,27 @@ def update_node(
         return {"node_id": node_id, "updated_fields": updated}
 
 
+def set_metadata(
+    node_id: str,
+    key: str,
+    value,
+    db_path: str = DEFAULT_DB,
+    pg_conninfo=None, project_id=None,
+) -> dict:
+    """Set a single metadata key on a node."""
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "set_metadata",
+                            node_id=node_id, key=key, value=value)
+    with _with_network(db_path, write=True) as net:
+        if node_id not in net.nodes:
+            raise KeyError(f"Node '{node_id}' not found")
+        node = net.nodes[node_id]
+        meta = node.metadata or {}
+        meta[key] = value
+        node.metadata = meta
+        return {"node_id": node_id, "key": key}
+
+
 def challenge(
     target_id: str,
     reason: str,
@@ -3125,7 +3146,7 @@ def repair(
     dry_run: bool = False,
     db_path: str = DEFAULT_DB,
 ) -> dict:
-    """Repair flagged beliefs: triage into search-and-link, soften, or abandon.
+    """Repair flagged beliefs: triage into search-and-link, soften, abandon, or research.
 
     Two input modes:
         review_file: path to a review-beliefs JSON report
@@ -3158,6 +3179,7 @@ def repair(
             "linked": 0,
             "softened": 0,
             "abandoned": 0,
+            "needs_research": 0,
             "failed": 0,
             "errors": 0,
         }
@@ -3176,6 +3198,7 @@ def repair(
         "linked": sum(1 for r in results if r["status"] == "linked"),
         "softened": sum(1 for r in results if r["status"] == "softened"),
         "abandoned": sum(1 for r in results if r["status"] == "abandoned"),
+        "needs_research": sum(1 for r in results if r["status"] == "needs_research"),
         "failed": sum(1 for r in results if r["status"] in
                        ("triage_failed", "no_candidates", "no_match",
                         "soften_failed", "extraction_failed")),
