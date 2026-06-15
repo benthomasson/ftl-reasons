@@ -362,8 +362,8 @@ def repair_beliefs(review_results, nodes, model="claude",
                      search_fn=None):
     """Orchestrate triage and repair for invalid beliefs.
 
-    Triages each invalid belief into search_and_link, soften, or abandon,
-    then executes the appropriate pattern.
+    Triages each invalid belief into search_and_link, soften, abandon, or
+    research, then executes the appropriate pattern.
 
     Returns list of repair result dicts.
     """
