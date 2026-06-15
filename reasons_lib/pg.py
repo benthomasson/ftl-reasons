@@ -418,10 +418,12 @@ class PgApi:
                 return {"changed": [], "went_out": [], "went_in": []}
 
             metadata.pop("_retracted", None)
+            now = datetime.now(timezone.utc).isoformat(timespec="seconds")
             cur.execute(
-                "UPDATE rms_nodes SET truth_value = 'IN', metadata = %s "
+                "UPDATE rms_nodes SET truth_value = 'IN', metadata = %s, "
+                "retracted_at = NULL, updated_at = %s "
                 "WHERE id = %s AND project_id = %s",
-                (json.dumps(metadata), node_id, pid),
+                (json.dumps(metadata), now, node_id, pid),
             )
             self._log(cur, "assert", node_id, "IN")
 
@@ -1305,6 +1307,9 @@ class PgApi:
                 "FROM rms_nodes WHERE project_id = %s ORDER BY id",
                 (pid,),
             )
+            def _fmt_ts(val):
+                return val.isoformat(timespec="seconds") if val else ""
+
             nodes = {}
             for row in cur.fetchall():
                 nid, text, tv, source, source_url, source_hash, date, meta, \
@@ -1313,9 +1318,6 @@ class PgApi:
                     meta = json.loads(meta)
                 if visible_to is not None and not self._is_visible(meta, visible_to):
                     continue
-
-                def _fmt_ts(val):
-                    return val.isoformat(timespec="seconds") if val else ""
 
                 nodes[nid] = {
                     "text": text,
@@ -2328,21 +2330,6 @@ class PgApi:
 
         with self.conn.cursor() as cur:
             for nid, ndata in data.get("nodes", {}).items():
-                ts_updates = []
-                ts_params = []
-                for ts_col in ("reviewed_at", "verified_at", "retracted_at"):
-                    ts_val = ndata.get(ts_col, "")
-                    if ts_val:
-                        ts_updates.append(f"{ts_col} = %s")
-                        ts_params.append(ts_val)
-                if ts_updates:
-                    ts_params.extend([nid, pid])
-                    cur.execute(
-                        f"UPDATE rms_nodes SET {', '.join(ts_updates)} "
-                        f"WHERE id = %s AND project_id = %s",
-                        ts_params,
-                    )
-
                 target_tv = ndata.get("truth_value", "IN")
                 cur.execute(
                     "SELECT truth_value FROM rms_nodes "
@@ -2352,7 +2339,6 @@ class PgApi:
                 row = cur.fetchone()
                 if row and row[0] != target_tv:
                     if target_tv == "OUT":
-                        meta = ndata.get("metadata", {})
                         cur.execute(
                             "UPDATE rms_nodes SET truth_value = 'OUT', "
                             "metadata = metadata || %s "
@@ -2368,6 +2354,22 @@ class PgApi:
                             (nid, pid),
                         )
                         self._log(cur, "assert", nid, "IN")
+
+                # Restore exact timestamps AFTER truth-value fixup
+                ts_updates = []
+                ts_params = []
+                for ts_col in ("updated_at", "reviewed_at", "verified_at", "retracted_at"):
+                    ts_val = ndata.get(ts_col, "")
+                    if ts_val:
+                        ts_updates.append(f"{ts_col} = %s")
+                        ts_params.append(ts_val)
+                if ts_updates:
+                    ts_params.extend([nid, pid])
+                    cur.execute(
+                        f"UPDATE rms_nodes SET {', '.join(ts_updates)} "
+                        f"WHERE id = %s AND project_id = %s",
+                        ts_params,
+                    )
 
             nogoods_imported = 0
             for ng_data in data.get("nogoods", []):

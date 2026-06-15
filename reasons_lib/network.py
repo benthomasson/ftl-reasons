@@ -184,6 +184,8 @@ class Network:
 
         node.truth_value = "IN"
         node.metadata.pop("_retracted", None)
+        node.retracted_at = ""
+        node.updated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
         changed = [node_id]
         self._log("assert", node_id, "IN")
 

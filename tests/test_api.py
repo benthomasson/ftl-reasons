@@ -845,4 +845,5 @@ class TestLifecycleTimestamps:
         api.import_json(json_path, db_path=db2)
         node = api.show_node("ts-g", db_path=db2)
         assert node["created_at"] == export["nodes"]["ts-g"]["created_at"]
-        assert node["retracted_at"] != ""
+        assert node["retracted_at"] == export["nodes"]["ts-g"]["retracted_at"]
+        assert node["updated_at"] == export["nodes"]["ts-g"]["updated_at"]

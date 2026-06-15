@@ -1275,9 +1275,6 @@ def import_json(json_file: str, db_path: str = DEFAULT_DB,
                         created_at=ndata.get("created_at", ""),
                         updated_at=ndata.get("updated_at", ""),
                     )
-                    node.reviewed_at = ndata.get("reviewed_at", "")
-                    node.verified_at = ndata.get("verified_at", "")
-                    node.retracted_at = ndata.get("retracted_at", "")
                     # Restore exact truth value (may differ from computed if retracted)
                     target_tv = ndata.get("truth_value", "IN")
                     if node.truth_value != target_tv:
@@ -1285,6 +1282,11 @@ def import_json(json_file: str, db_path: str = DEFAULT_DB,
                             net.retract(nid)
                         else:
                             net.assert_node(nid)
+                    # Restore exact timestamps AFTER retract/assert to avoid overwrite
+                    node.reviewed_at = ndata.get("reviewed_at", "")
+                    node.verified_at = ndata.get("verified_at", "")
+                    node.retracted_at = ndata.get("retracted_at", "")
+                    node.updated_at = ndata.get("updated_at", "")
                     added.add(nid)
                     nodes_imported += 1
                 else:
@@ -1318,15 +1320,16 @@ def import_json(json_file: str, db_path: str = DEFAULT_DB,
                         created_at=ndata.get("created_at", ""),
                         updated_at=ndata.get("updated_at", ""),
                     )
-                    node.reviewed_at = ndata.get("reviewed_at", "")
-                    node.verified_at = ndata.get("verified_at", "")
-                    node.retracted_at = ndata.get("retracted_at", "")
                     target_tv = ndata.get("truth_value", "IN")
                     if node.truth_value != target_tv:
                         if target_tv == "OUT":
                             net.retract(nid)
                         else:
                             net.assert_node(nid)
+                    node.reviewed_at = ndata.get("reviewed_at", "")
+                    node.verified_at = ndata.get("verified_at", "")
+                    node.retracted_at = ndata.get("retracted_at", "")
+                    node.updated_at = ndata.get("updated_at", "")
                     added.add(nid)
                     nodes_imported += 1
                 break
@@ -2330,7 +2333,10 @@ def list_nodes(
                 last = node.reviewed_at or node.metadata.get("last_reviewed", "")
                 if last:
                     try:
-                        if datetime.fromisoformat(last) >= cutoff:
+                        dt = datetime.fromisoformat(last)
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                        if dt >= cutoff:
                             continue
                     except ValueError:
                         pass
