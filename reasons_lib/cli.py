@@ -383,6 +383,18 @@ def cmd_update(args):
     print(f"Updated {result['node_id']} ({fields})")
 
 
+def cmd_set_metadata(args):
+    try:
+        result = api.set_metadata(
+            args.node_id, args.key, args.value,
+            **_backend_kwargs(args),
+        )
+    except KeyError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    print(f"Set {result['key']} on {result['node_id']}")
+
+
 def cmd_challenge(args):
     try:
         result = api.challenge(
@@ -2219,6 +2231,12 @@ def main():
     p.add_argument("--source-url", default=None, help="Update source URL")
     p.add_argument("--example", default=None, help="Code example demonstrating the belief")
 
+    # set-metadata
+    p = sub.add_parser("set-metadata", help="Set a metadata key on a belief")
+    p.add_argument("node_id", help="Belief to update")
+    p.add_argument("key", help="Metadata key")
+    p.add_argument("value", help="Metadata value")
+
     # challenge
     p = sub.add_parser("challenge", help="Challenge a node — target goes OUT")
     p.add_argument("target_id", help="Node to challenge")
@@ -2763,6 +2781,7 @@ def main():
         "summarize": cmd_summarize,
         "supersede": cmd_supersede,
         "update": cmd_update,
+        "set-metadata": cmd_set_metadata,
         "challenge": cmd_challenge,
         "defend": cmd_defend,
         "trace": cmd_trace,

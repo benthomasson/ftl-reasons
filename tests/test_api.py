@@ -652,6 +652,30 @@ class TestUpdateNode:
         assert node["truth_value"] == "OUT"
 
 
+class TestSetMetadata:
+
+    def test_sets_key(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        api.add_node("a", "A belief", db_path=db)
+        result = api.set_metadata("a", "source_file", "src/foo.py", db_path=db)
+        assert result == {"node_id": "a", "key": "source_file"}
+        node = api.show_node("a", db_path=db)
+        assert node["metadata"]["source_file"] == "src/foo.py"
+
+    def test_overwrites_existing_key(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        api.add_node("a", "A belief", db_path=db)
+        api.set_metadata("a", "k", "v1", db_path=db)
+        api.set_metadata("a", "k", "v2", db_path=db)
+        node = api.show_node("a", db_path=db)
+        assert node["metadata"]["k"] == "v2"
+
+    def test_nonexistent_raises(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        with pytest.raises(KeyError):
+            api.set_metadata("nope", "k", "v", db_path=db)
+
+
 class TestListClusters:
 
     @pytest.fixture
