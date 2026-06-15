@@ -3146,7 +3146,7 @@ def repair(
     dry_run: bool = False,
     db_path: str = DEFAULT_DB,
 ) -> dict:
-    """Repair flagged beliefs: triage into search-and-link, soften, or abandon.
+    """Repair flagged beliefs: triage into search-and-link, soften, abandon, or research.
 
     Two input modes:
         review_file: path to a review-beliefs JSON report

@@ -1464,6 +1464,25 @@ class PgApi:
         self.conn.commit()
         return {"node_id": node_id, "updated_fields": updated_fields}
 
+    def set_metadata(self, node_id, key, value):
+        pid = self.project_id
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT metadata_json FROM rms_nodes WHERE id = %s AND project_id = %s",
+                (node_id, pid),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise KeyError(f"Node '{node_id}' not found")
+            meta = json.loads(row[0]) if row[0] else {}
+            meta[key] = value
+            cur.execute(
+                "UPDATE rms_nodes SET metadata_json = %s WHERE id = %s AND project_id = %s",
+                (json.dumps(meta), node_id, pid),
+            )
+        self.conn.commit()
+        return {"node_id": node_id, "key": key}
+
     def convert_to_premise(self, node_id):
         pid = self.project_id
         with self.conn.cursor() as cur:
