@@ -221,7 +221,8 @@ class TestResearchBeliefs:
         with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
              patch("reasons_lib.llm.subprocess.run",
                    side_effect=[triage_resp, extract_resp, match_resp]), \
-             patch("reasons_lib.api.add_justification"):
+             patch("reasons_lib.api.add_justification"), \
+             patch("reasons_lib.api.set_metadata") as mock_meta:
             results = repair_beliefs(
                 review_results, nodes, db_path="test.db",
                 search_fn=_mock_search(search_results),
@@ -231,6 +232,9 @@ class TestResearchBeliefs:
         assert results[0]["pattern"] == "search_and_link"
         assert results[0]["status"] == "linked"
         assert results[0]["matched_premises"] == ["premise-a"]
+        mock_meta.assert_called_once_with(
+            "derived-boil", "repair_action", "search_and_link", db_path="test.db",
+        )
 
     def test_soften(self):
         nodes = _make_nodes()
@@ -245,7 +249,8 @@ class TestResearchBeliefs:
         with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
              patch("reasons_lib.llm.subprocess.run",
                    side_effect=[triage_resp, soften_resp]), \
-             patch("reasons_lib.api.update_node") as mock_update:
+             patch("reasons_lib.api.update_node") as mock_update, \
+             patch("reasons_lib.api.set_metadata") as mock_meta:
             results = repair_beliefs(
                 review_results, nodes, db_path="test.db",
                 search_fn=_mock_search([]),
@@ -256,6 +261,9 @@ class TestResearchBeliefs:
         assert results[0]["softened_text"] == "The water likely boiled"
         mock_update.assert_called_once_with(
             "derived-boil", text="The water likely boiled", db_path="test.db",
+        )
+        mock_meta.assert_called_once_with(
+            "derived-boil", "repair_action", "softened", db_path="test.db",
         )
 
     def test_abandon(self):
@@ -268,7 +276,8 @@ class TestResearchBeliefs:
         with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
              patch("reasons_lib.llm.subprocess.run",
                    side_effect=[triage_resp]), \
-             patch("reasons_lib.api.retract_node") as mock_retract:
+             patch("reasons_lib.api.retract_node") as mock_retract, \
+             patch("reasons_lib.api.set_metadata") as mock_meta:
             results = repair_beliefs(
                 review_results, nodes, db_path="test.db",
                 search_fn=_mock_search([]),
@@ -278,6 +287,9 @@ class TestResearchBeliefs:
         assert results[0]["status"] == "abandoned"
         mock_retract.assert_called_once()
         assert "abandoned" in mock_retract.call_args[1]["reason"]
+        mock_meta.assert_called_once_with(
+            "derived-boil", "repair_action", "abandoned", db_path="test.db",
+        )
 
     def test_research_pattern(self):
         nodes = _make_nodes()
@@ -297,8 +309,13 @@ class TestResearchBeliefs:
 
         assert results[0]["pattern"] == "research"
         assert results[0]["status"] == "needs_research"
-        mock_meta.assert_called_once_with(
+        assert mock_meta.call_count == 2
+        mock_meta.assert_any_call(
             "derived-boil", "repair_research", "needs code review",
+            db_path="test.db",
+        )
+        mock_meta.assert_any_call(
+            "derived-boil", "repair_action", "research",
             db_path="test.db",
         )
 
@@ -412,7 +429,8 @@ class TestResearchBeliefs:
              patch("reasons_lib.llm.subprocess.run",
                    side_effect=[triage1, soften1, triage2]), \
              patch("reasons_lib.api.update_node"), \
-             patch("reasons_lib.api.retract_node"):
+             patch("reasons_lib.api.retract_node"), \
+             patch("reasons_lib.api.set_metadata"):
             results = repair_beliefs(
                 review_results, nodes, db_path="test.db",
                 search_fn=_mock_search([]),

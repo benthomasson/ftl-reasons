@@ -434,6 +434,8 @@ def repair_beliefs(review_results, nodes, model="claude",
                 result["matched_premises"] = matched
                 if rationale:
                     result["rationale"] = rationale
+                if not dry_run and status == "linked":
+                    api.set_metadata(belief_id, "repair_action", "search_and_link", db_path=db_path)
 
             elif pattern == "soften":
                 print(f"  Pattern: soften for {belief_id}...",
@@ -452,6 +454,7 @@ def repair_beliefs(review_results, nodes, model="claude",
                 result["rationale"] = soften_result.get("rationale", "")
                 if not dry_run:
                     api.update_node(belief_id, text=softened, db_path=db_path)
+                    api.set_metadata(belief_id, "repair_action", "softened", db_path=db_path)
                 result["status"] = "softened"
 
             elif pattern == "abandon":
@@ -463,6 +466,7 @@ def repair_beliefs(review_results, nodes, model="claude",
                         reason=f"repair: abandoned — {triage.get('rationale', '')}",
                         db_path=db_path,
                     )
+                    api.set_metadata(belief_id, "repair_action", "abandoned", db_path=db_path)
                 result["status"] = "abandoned"
 
             elif pattern == "research":
@@ -474,6 +478,7 @@ def repair_beliefs(review_results, nodes, model="claude",
                         triage.get("rationale", ""),
                         db_path=db_path,
                     )
+                    api.set_metadata(belief_id, "repair_action", "research", db_path=db_path)
                 result["status"] = "needs_research"
 
         except Exception as exc:
