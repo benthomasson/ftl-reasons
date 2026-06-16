@@ -3016,6 +3016,7 @@ def repair_premises(
             if action == "rewrite" and r.get("corrected_text"):
                 try:
                     update_node(nid, text=r["corrected_text"], db_path=db_path)
+                    set_metadata(nid, "repair_action", "rewritten", db_path=db_path)
                 except Exception as e:
                     print(f"  ERROR updating {nid}: {e}", file=sys.stderr)
                     r["action"] = "error"
@@ -3024,6 +3025,7 @@ def repair_premises(
                     retract_node(nid,
                                  reason=f"repair-premises: {r.get('rationale', 'inaccurate')}",
                                  db_path=db_path)
+                    set_metadata(nid, "repair_action", "retracted", db_path=db_path)
                 except Exception as e:
                     print(f"  ERROR retracting {nid}: {e}", file=sys.stderr)
                     r["action"] = "error"

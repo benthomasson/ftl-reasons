@@ -280,6 +280,75 @@ class TestApiRepairPremises:
         assert result["results"] == []
 
 
+class TestRepairActionMetadata:
+
+    @pytest.fixture
+    def db_with_reviewed(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        source_file = tmp_path / "entry.md"
+        source_file.write_text("The system uses PostgreSQL for storage.")
+
+        api.init_db(db_path=db)
+        api.add_node("obs-1", "Redis is used for storage",
+                     source=str(source_file), db_path=db)
+        api.add_node("obs-2", "Memcached handles caching",
+                     source=str(source_file), db_path=db)
+
+        review_report = {
+            "results": [
+                {"id": "obs-1", "accurate": False, "well_scoped": True,
+                 "error_type": "misread_source", "comment": "Source says PostgreSQL"},
+                {"id": "obs-2", "accurate": False, "well_scoped": True,
+                 "error_type": "fabricated", "comment": "Source never mentions caching"},
+            ]
+        }
+        review_file = tmp_path / "review.json"
+        review_file.write_text(json.dumps(review_report))
+        return db, str(review_file)
+
+    def test_rewrite_sets_repair_action(self, db_with_reviewed):
+        db, review_file = db_with_reviewed
+        llm_resp = json.dumps([{
+            "id": "obs-1", "action": "rewrite",
+            "corrected_text": "PostgreSQL is used for storage", "rationale": "fixed",
+        }])
+        mock = type("R", (), {"returncode": 0, "stdout": llm_resp, "stderr": ""})()
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run", return_value=mock):
+            api.repair_premises(review_file=review_file, db_path=db)
+
+        node = api.show_node("obs-1", db_path=db)
+        assert node["metadata"].get("repair_action") == "rewritten"
+
+    def test_retract_sets_repair_action(self, db_with_reviewed):
+        db, review_file = db_with_reviewed
+        llm_resp = json.dumps([{
+            "id": "obs-2", "action": "retract",
+            "corrected_text": None, "rationale": "fabricated",
+        }])
+        mock = type("R", (), {"returncode": 0, "stdout": llm_resp, "stderr": ""})()
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run", return_value=mock):
+            api.repair_premises(review_file=review_file, db_path=db)
+
+        node = api.show_node("obs-2", db_path=db)
+        assert node["metadata"].get("repair_action") == "retracted"
+
+    def test_dry_run_no_repair_action(self, db_with_reviewed):
+        db, review_file = db_with_reviewed
+        llm_resp = json.dumps([{
+            "id": "obs-1", "action": "rewrite",
+            "corrected_text": "Fixed", "rationale": "ok",
+        }])
+        mock = type("R", (), {"returncode": 0, "stdout": llm_resp, "stderr": ""})()
+        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons_lib.llm.subprocess.run", return_value=mock):
+            api.repair_premises(review_file=review_file, dry_run=True, db_path=db)
+
+        node = api.show_node("obs-1", db_path=db)
+        assert node["metadata"].get("repair_action") is None
+
+
 class TestCliDispatch:
 
     def test_repair_premises_registered(self):
