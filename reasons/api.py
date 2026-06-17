@@ -2616,6 +2616,133 @@ def report_belief(
     }
 
 
+def verify_belief(
+    node_id: str,
+    trace: bool = False,
+    retract: bool = False,
+    dry_run: bool = False,
+    model: str = "claude",
+    timeout: int = 120,
+    db_path: str = DEFAULT_DB,
+    pg_conninfo=None, project_id=None,
+) -> dict:
+    """Verify a belief against its source documents.
+
+    If trace=True and the belief is derived, traces to leaf premises and
+    verifies each one.  Stamps verified_at on CONFIRMED beliefs.  If
+    retract=True, retracts STALE beliefs.
+
+    Returns: {"results": dict[id, verdict_dict], "verified": list[str],
+              "stale": list[str], "beliefs_checked": list[dict],
+              "is_derived": bool, "dry_run": bool}
+    """
+    from .verify import read_source, verify_beliefs
+    from datetime import datetime, timezone
+
+    backend = dict(db_path=db_path, pg_conninfo=pg_conninfo,
+                   project_id=project_id)
+
+    detail = show_node(node_id, **backend)
+    has_justifications = bool(detail.get("justifications"))
+
+    if has_justifications and trace:
+        trace_data = trace_assumptions(node_id, **backend)
+        premise_ids = trace_data["premises"]
+        beliefs_to_check = []
+        seen = set()
+        for pid in premise_ids:
+            if pid in seen:
+                continue
+            seen.add(pid)
+            try:
+                pd = show_node(pid, **backend)
+                beliefs_to_check.append({
+                    "id": pid,
+                    "text": pd.get("text", ""),
+                    "truth_value": pd.get("truth_value", ""),
+                    "source": pd.get("source", ""),
+                    "source_url": pd.get("source_url", ""),
+                })
+            except (KeyError, PermissionError):
+                beliefs_to_check.append({
+                    "id": pid, "text": "", "truth_value": "UNKNOWN",
+                    "source": "", "source_url": "",
+                })
+    else:
+        beliefs_to_check = [{
+            "id": node_id,
+            "text": detail.get("text", ""),
+            "truth_value": detail.get("truth_value", ""),
+            "source": detail.get("source", ""),
+            "source_url": detail.get("source_url", ""),
+        }]
+
+    beliefs_with_sources = []
+    for b in beliefs_to_check:
+        source_content = read_source(b["source"], db_path=db_path) if b["source"] else None
+        beliefs_with_sources.append((b, source_content))
+
+    if dry_run:
+        return {
+            "results": {},
+            "verified": [],
+            "stale": [],
+            "beliefs_checked": beliefs_to_check,
+            "is_derived": has_justifications,
+            "dry_run": True,
+        }
+
+    verdicts = verify_beliefs(beliefs_with_sources, model=model, timeout=timeout)
+
+    verified = []
+    stale = []
+    retract_failed = []
+    stamp_failed = []
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    for b, _ in beliefs_with_sources:
+        bid = b["id"]
+        verdict = verdicts.get(bid, {})
+        v = verdict.get("verdict", "INCONCLUSIVE")
+
+        if v == "CONFIRMED":
+            verified.append(bid)
+        elif v == "STALE":
+            stale.append(bid)
+            if retract:
+                try:
+                    reason = verdict.get("reason", "stale per verify")
+                    retract_node(bid, reason=f"verify: {reason}", **backend)
+                except Exception:
+                    retract_failed.append(bid)
+
+    if not pg_conninfo and verified:
+        try:
+            with _with_network(db_path, write=True) as net:
+                for bid in verified:
+                    if bid in net.nodes:
+                        net.nodes[bid].verified_at = now
+                        net.nodes[bid].updated_at = now
+                    else:
+                        stamp_failed.append(bid)
+        except Exception:
+            stamp_failed = list(verified)
+
+    result = {
+        "results": verdicts,
+        "verified": verified,
+        "stale": stale,
+        "beliefs_checked": beliefs_to_check,
+        "is_derived": has_justifications,
+        "dry_run": False,
+    }
+    if retract_failed:
+        result["retract_failed"] = retract_failed
+    if stamp_failed:
+        result["stamp_failed"] = stamp_failed
+    return result
+
+
 NEGATIVE_BATCH_SIZE = 50
 
 NEGATIVE_TERMS = [

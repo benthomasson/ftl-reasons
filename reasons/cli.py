@@ -1512,6 +1512,78 @@ def cmd_report(args):
             print(f"  {cost}", file=sys.stderr)
 
 
+def cmd_verify(args):
+    from .llm import reset_cost_tracker, format_cost_summary
+    reset_cost_tracker()
+
+    result = api.verify_belief(
+        args.node_id,
+        trace=getattr(args, "trace", False),
+        retract=getattr(args, "retract", False),
+        dry_run=getattr(args, "dry_run", False),
+        model=getattr(args, "model", "claude") or "claude",
+        timeout=args.timeout,
+        **_backend_kwargs(args),
+    )
+
+    beliefs = result["beliefs_checked"]
+
+    if result["dry_run"]:
+        print(f"--dry-run: {len(beliefs)} belief(s) would be verified:")
+        for b in beliefs:
+            has_src = "yes" if b.get("source") else "NO"
+            print(f"  {b['id']} [source: {has_src}]")
+        return
+
+    markers = {
+        "CONFIRMED": "+", "STALE": "-",
+        "PARTIAL": "~", "INCONCLUSIVE": "?",
+    }
+    verdicts = result["results"]
+
+    confirmed, stale, partial, inconclusive = [], [], [], []
+    for b in beliefs:
+        bid = b["id"]
+        v = verdicts.get(bid, {})
+        verdict = v.get("verdict", "INCONCLUSIVE")
+        reason = v.get("reason", "")
+        quote = v.get("quote")
+        marker = markers.get(verdict, "?")
+
+        print(f"\n  [{marker}] {verdict}: {bid}")
+        if reason:
+            print(f"      {reason}")
+        if quote:
+            print(f'      Quote: "{quote}"')
+
+        if verdict == "CONFIRMED":
+            confirmed.append(bid)
+        elif verdict == "STALE":
+            stale.append(bid)
+        elif verdict == "PARTIAL":
+            partial.append(bid)
+        else:
+            inconclusive.append(bid)
+
+    if result["is_derived"] and getattr(args, "trace", False):
+        total = len(beliefs)
+        print(f"\n  Antecedent summary: {len(confirmed)}/{total} confirmed, "
+              f"{len(stale)} stale, {len(partial)} partial, "
+              f"{len(inconclusive)} inconclusive")
+
+    if result.get("retract_failed"):
+        print(f"\n  WARNING: failed to retract: {', '.join(result['retract_failed'])}", file=sys.stderr)
+    if result.get("stamp_failed"):
+        print(f"\n  WARNING: failed to stamp verified_at: {', '.join(result['stamp_failed'])}", file=sys.stderr)
+
+    print(f"\nResults: {len(confirmed)} confirmed, {len(stale)} stale, "
+          f"{len(partial)} partial, {len(inconclusive)} inconclusive")
+
+    cost = format_cost_summary()
+    if cost:
+        print(f"  {cost}", file=sys.stderr)
+
+
 def cmd_list_negative(args):
     result = api.list_negative(
         visible_to=_parse_visible_to(args),
@@ -2594,6 +2666,19 @@ def main():
                    help="LLM model for narrative synthesis (default: structured report)")
     p.add_argument("--timeout", type=int, default=300, help="LLM timeout in seconds (default: 300)")
 
+    # verify
+    p = sub.add_parser("verify", help="Verify beliefs against their source documents")
+    p.add_argument("node_id", help="Belief ID to verify")
+    p.add_argument("--trace", action="store_true",
+                   help="Trace derived beliefs to leaf premises and verify each")
+    p.add_argument("--retract", action="store_true",
+                   help="Retract beliefs with STALE verdicts")
+    p.add_argument("--dry-run", action="store_true",
+                   help="Show what would be verified without calling LLM")
+    p.add_argument("-m", "--model", default="claude",
+                   help="LLM model to use (default: claude)")
+    p.add_argument("--timeout", type=int, default=120, help="LLM timeout in seconds (default: 120)")
+
     p = sub.add_parser("list-negative", help="Find IN beliefs describing problems/defects/risks (LLM-classified)")
     p.add_argument("--visible-to", metavar="TAG,TAG", help="Only show nodes whose access_tags are a subset of these tags")
     p.add_argument("-m", "--model", default=None,
@@ -2852,6 +2937,7 @@ def main():
         "list-gated": cmd_list_gated,
         "report-gated": cmd_report_gated,
         "report": cmd_report,
+        "verify": cmd_verify,
         "list-negative": cmd_list_negative,
         "topics": cmd_topics,
         "build-wiki": cmd_build_wiki,
