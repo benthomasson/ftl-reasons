@@ -10,9 +10,9 @@ from pathlib import Path
 
 import pytest
 
-from reasons_lib import Justification
-from reasons_lib.network import Network
-from reasons_lib.storage import Storage
+from reasons import Justification
+from reasons.network import Network
+from reasons.storage import Storage
 
 
 # ---------------------------------------------------------------------------
@@ -344,7 +344,7 @@ class TestEdgeCases:
 
     def test_api_rewrite_dependents_stays_clean(self):
         """_rewrite_dependents (used by deduplication) should leave index clean."""
-        from reasons_lib.api import _rewrite_dependents
+        from reasons.api import _rewrite_dependents
         net = Network()
         net.add_node("old", "Old belief")
         net.add_node("new", "New belief")
@@ -361,7 +361,7 @@ class TestEdgeCases:
 
     def test_api_rewrite_dependents_outlist(self):
         """_rewrite_dependents handles outlist references too."""
-        from reasons_lib.api import _rewrite_dependents
+        from reasons.api import _rewrite_dependents
         net = Network()
         net.add_node("old", "Old belief")
         net.add_node("new", "New belief")

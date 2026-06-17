@@ -7,7 +7,7 @@ Install with: pip install 'ftl-reasons[cluster]'
 import pytest
 
 try:
-    from reasons_lib.cluster import (
+    from reasons.cluster import (
         cluster_beliefs, list_clusters, ClusterCache, _require_cluster_deps,
         _auto_k, HAS_CLUSTER_DEPS,
     )
@@ -24,7 +24,7 @@ def test_require_cluster_deps_message():
     """Error message mentions install command when deps missing."""
     if HAS_CLUSTER_DEPS:
         pytest.skip("deps are installed, can't test missing-dep path")
-    from reasons_lib.cluster import _require_cluster_deps
+    from reasons.cluster import _require_cluster_deps
     with pytest.raises(ImportError, match="ftl-reasons\\[cluster\\]"):
         _require_cluster_deps()
 

@@ -535,7 +535,7 @@ class TestMultiTenancy:
     def test_projects_isolated(self, pg_api):
         import os
         import uuid
-        from reasons_lib.pg import PgApi
+        from reasons.pg import PgApi
 
         pg_api.add_node("shared-id", "Project 1 data")
 

@@ -5,8 +5,8 @@ from unittest.mock import patch
 
 import pytest
 
-from reasons_lib import api
-from reasons_lib.review_premises import (
+from reasons import api
+from reasons.review_premises import (
     format_premise_for_review,
     parse_premise_review_response,
     review_premises,
@@ -98,8 +98,8 @@ class TestReviewPremisesBatchLoop:
             "error_type": None, "comment": "matches",
         }])
         mock_result = type("R", (), {"returncode": 0, "stdout": llm_response, "stderr": ""})()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             results = review_premises(nodes, ["obs-1"], source_contents, model="claude")
         assert len(results) == 1
         assert results[0]["accurate"] is True
@@ -118,8 +118,8 @@ class TestReviewPremisesBatchLoop:
         }])
         mock_result = type("R", (), {"returncode": 0, "stdout": llm_response, "stderr": ""})()
         batches = []
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             review_premises(nodes, ["obs-1"], source_contents,
                            on_batch=lambda r: batches.append(len(r)))
         assert batches == [1]
@@ -129,8 +129,8 @@ class TestReviewPremisesBatchLoop:
             "obs-1": {"text": "A", "source": "a.md", "truth_value": "IN"},
         }
         source_contents = {"a.md": "Content."}
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", side_effect=Exception("LLM down")):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", side_effect=Exception("LLM down")):
             results = review_premises(nodes, ["obs-1"], source_contents)
         assert results == []
 
@@ -158,8 +158,8 @@ class TestApiReviewPremises:
             {"id": "obs-2", "accurate": True, "well_scoped": True, "error_type": None, "comment": "ok"},
         ])
         mock_result = type("R", (), {"returncode": 0, "stdout": llm_response, "stderr": ""})()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             result = api.review_premises(dry_run=True, db_path=db_with_premises)
         reviewed_ids = {r["id"] for r in result["results"]}
         assert "derived-1" not in reviewed_ids
@@ -178,8 +178,8 @@ class TestApiReviewPremises:
             {"id": "obs-1", "accurate": True, "well_scoped": True, "error_type": None, "comment": "ok"},
         ])
         mock_result = type("R", (), {"returncode": 0, "stdout": llm_response, "stderr": ""})()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             result = api.review_premises(belief_ids=["obs-1"], dry_run=True,
                                          db_path=db_with_premises)
         assert result["reviewed"] == 1
@@ -189,8 +189,8 @@ class TestApiReviewPremises:
             {"id": "obs-1", "accurate": True, "well_scoped": True, "error_type": None, "comment": "ok"},
         ])
         mock_result = type("R", (), {"returncode": 0, "stdout": llm_response, "stderr": ""})()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             result = api.review_premises(sample=1, dry_run=True,
                                          db_path=db_with_premises)
         assert result["reviewed"] == 1
@@ -203,8 +203,8 @@ class TestApiReviewPremises:
              "error_type": None, "comment": "ok"},
         ])
         mock_result = type("R", (), {"returncode": 0, "stdout": llm_response, "stderr": ""})()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             api.review_premises(db_path=db_with_premises)
 
         net = api.export_network(db_path=db_with_premises)
@@ -222,8 +222,8 @@ class TestApiReviewPremises:
              "error_type": None, "comment": "ok"},
         ])
         mock_result = type("R", (), {"returncode": 0, "stdout": llm_response, "stderr": ""})()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             api.review_premises(dry_run=True, db_path=db_with_premises)
 
         net = api.export_network(db_path=db_with_premises)
@@ -237,8 +237,8 @@ class TestApiReviewPremises:
              "error_type": None, "comment": "too broad"},
         ])
         mock_result = type("R", (), {"returncode": 0, "stdout": llm_response, "stderr": ""})()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             result = api.review_premises(dry_run=True, db_path=db_with_premises)
         assert result["inaccurate"] == 1
         assert result["overgeneralized"] == 1
@@ -248,11 +248,11 @@ class TestApiReviewPremises:
 class TestCliDispatch:
 
     def test_review_premises_registered(self):
-        from reasons_lib import cli
+        from reasons import cli
         assert hasattr(cli, "cmd_review_premises")
 
     def test_dispatch_table(self):
-        from reasons_lib.cli import main
+        from reasons.cli import main
         import argparse
-        from reasons_lib import cli
+        from reasons import cli
         assert callable(cli.cmd_review_premises)

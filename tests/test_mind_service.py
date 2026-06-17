@@ -7,8 +7,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from reasons_lib import api
-from reasons_lib.mind_service import _resolve_config, fetch_export, push_belief
+from reasons import api
+from reasons.mind_service import _resolve_config, fetch_export, push_belief
 
 
 SAMPLE_EXPORT = {
@@ -76,35 +76,35 @@ class TestResolveConfig:
 
 class TestFetchExport:
 
-    @patch("reasons_lib.mind_service.urlopen")
+    @patch("reasons.mind_service.urlopen")
     def test_correct_url(self, mock_urlopen):
         mock_urlopen.return_value = _mock_response(SAMPLE_EXPORT)
         fetch_export("http://localhost", "agent-1", "key-1")
         req = mock_urlopen.call_args[0][0]
         assert req.full_url == "http://localhost/api/agents/agent-1/export"
 
-    @patch("reasons_lib.mind_service.urlopen")
+    @patch("reasons.mind_service.urlopen")
     def test_auth_header(self, mock_urlopen):
         mock_urlopen.return_value = _mock_response(SAMPLE_EXPORT)
         fetch_export("http://localhost", "agent-1", "my-key")
         req = mock_urlopen.call_args[0][0]
         assert req.get_header("Authorization") == "Bearer my-key"
 
-    @patch("reasons_lib.mind_service.urlopen")
+    @patch("reasons.mind_service.urlopen")
     def test_returns_json_string(self, mock_urlopen):
         mock_urlopen.return_value = _mock_response(SAMPLE_EXPORT)
         result = fetch_export("http://localhost", "a", "k")
         data = json.loads(result)
         assert "nodes" in data
 
-    @patch("reasons_lib.mind_service.urlopen")
+    @patch("reasons.mind_service.urlopen")
     def test_401_raises(self, mock_urlopen):
         from urllib.error import HTTPError
         mock_urlopen.side_effect = HTTPError("url", 401, "Unauthorized", {}, BytesIO(b""))
         with pytest.raises(RuntimeError, match="Authentication failed"):
             fetch_export("http://localhost", "a", "k")
 
-    @patch("reasons_lib.mind_service.urlopen")
+    @patch("reasons.mind_service.urlopen")
     def test_404_raises(self, mock_urlopen):
         from urllib.error import HTTPError
         mock_urlopen.side_effect = HTTPError("url", 404, "Not Found", {}, BytesIO(b""))
@@ -114,21 +114,21 @@ class TestFetchExport:
 
 class TestPushBelief:
 
-    @patch("reasons_lib.mind_service.urlopen")
+    @patch("reasons.mind_service.urlopen")
     def test_correct_url(self, mock_urlopen):
         mock_urlopen.return_value = _mock_response({"node_id": "a", "truth_value": "IN"})
         push_belief("http://localhost", "agent-1", "key", "a", "text A")
         req = mock_urlopen.call_args[0][0]
         assert req.full_url == "http://localhost/api/agents/agent-1/beliefs"
 
-    @patch("reasons_lib.mind_service.urlopen")
+    @patch("reasons.mind_service.urlopen")
     def test_post_method(self, mock_urlopen):
         mock_urlopen.return_value = _mock_response({"node_id": "a"})
         push_belief("http://localhost", "a", "k", "node-1", "text")
         req = mock_urlopen.call_args[0][0]
         assert req.method == "POST"
 
-    @patch("reasons_lib.mind_service.urlopen")
+    @patch("reasons.mind_service.urlopen")
     def test_json_body(self, mock_urlopen):
         mock_urlopen.return_value = _mock_response({"node_id": "a"})
         push_belief("http://localhost", "a", "k", "node-1", "some text", sl="x,y", source="obs")
@@ -139,7 +139,7 @@ class TestPushBelief:
         assert body["sl"] == "x,y"
         assert body["source"] == "obs"
 
-    @patch("reasons_lib.mind_service.urlopen")
+    @patch("reasons.mind_service.urlopen")
     def test_omits_empty_sl(self, mock_urlopen):
         mock_urlopen.return_value = _mock_response({"node_id": "a"})
         push_belief("http://localhost", "a", "k", "node-1", "text")
@@ -147,7 +147,7 @@ class TestPushBelief:
         body = json.loads(req.data.decode("utf-8"))
         assert "sl" not in body
 
-    @patch("reasons_lib.mind_service.urlopen")
+    @patch("reasons.mind_service.urlopen")
     def test_auth_header(self, mock_urlopen):
         mock_urlopen.return_value = _mock_response({"node_id": "a"})
         push_belief("http://localhost", "a", "my-key", "node-1", "text")
@@ -157,7 +157,7 @@ class TestPushBelief:
 
 class TestImportApi:
 
-    @patch("reasons_lib.mind_service.urlopen")
+    @patch("reasons.mind_service.urlopen")
     def test_import_with_init(self, mock_urlopen, tmp_path):
         mock_urlopen.return_value = _mock_response(SAMPLE_EXPORT)
         db = str(tmp_path / "test.db")
@@ -168,7 +168,7 @@ class TestImportApi:
         assert result["nogoods_imported"] == 0
         assert Path(db).exists()
 
-    @patch("reasons_lib.mind_service.urlopen")
+    @patch("reasons.mind_service.urlopen")
     def test_import_into_existing_db(self, mock_urlopen, tmp_path):
         mock_urlopen.return_value = _mock_response(SAMPLE_EXPORT)
         db = str(tmp_path / "test.db")
@@ -177,7 +177,7 @@ class TestImportApi:
             url="http://localhost", agent_id="a", api_key="k", db_path=db)
         assert result["nodes_imported"] == 2
 
-    @patch("reasons_lib.mind_service.urlopen")
+    @patch("reasons.mind_service.urlopen")
     def test_missing_config_raises(self, mock_urlopen, monkeypatch):
         monkeypatch.delenv("MIND_SERVICE_URL", raising=False)
         monkeypatch.delenv("MIND_AGENT_ID", raising=False)
@@ -188,7 +188,7 @@ class TestImportApi:
 
 class TestExportApi:
 
-    @patch("reasons_lib.mind_service.urlopen")
+    @patch("reasons.mind_service.urlopen")
     def test_export_pushes_all_nodes(self, mock_urlopen, tmp_path):
         mock_urlopen.return_value = _mock_response({"node_id": "a", "truth_value": "IN"})
         db = str(tmp_path / "test.db")
@@ -200,7 +200,7 @@ class TestExportApi:
         assert result["nodes_exported"] == 2
         assert result["errors"] == 0
 
-    @patch("reasons_lib.mind_service.urlopen")
+    @patch("reasons.mind_service.urlopen")
     def test_export_sends_sl_justifications(self, mock_urlopen, tmp_path):
         mock_urlopen.return_value = _mock_response({"node_id": "d", "truth_value": "IN"})
         db = str(tmp_path / "test.db")
@@ -218,7 +218,7 @@ class TestExportApi:
         assert "a" in derived_body["sl"]
         assert "b" in derived_body["sl"]
 
-    @patch("reasons_lib.mind_service.urlopen")
+    @patch("reasons.mind_service.urlopen")
     def test_export_counts_errors(self, mock_urlopen, tmp_path):
         from urllib.error import HTTPError
         mock_urlopen.side_effect = [
@@ -234,7 +234,7 @@ class TestExportApi:
         assert result["nodes_exported"] == 1
         assert result["errors"] == 1
 
-    @patch("reasons_lib.mind_service.urlopen")
+    @patch("reasons.mind_service.urlopen")
     def test_missing_config_raises(self, mock_urlopen, monkeypatch):
         monkeypatch.delenv("MIND_SERVICE_URL", raising=False)
         monkeypatch.delenv("MIND_AGENT_ID", raising=False)

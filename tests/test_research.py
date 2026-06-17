@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from reasons_lib.repair import (
+from reasons.repair import (
     parse_triage_response,
     parse_soften_response,
     triage_belief,
@@ -16,8 +16,8 @@ from reasons_lib.repair import (
     research_beliefs,
     _compute_depth,
 )
-from reasons_lib import api
-from reasons_lib.cli import main
+from reasons import api
+from reasons.cli import main
 
 
 def run_cli(*args, db_path=None):
@@ -172,16 +172,16 @@ class TestComputeDepth:
 class TestTriageBelief:
     def test_returns_pattern(self):
         resp = _mock_result('{"pattern": "soften", "rationale": "overstated"}')
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=resp):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=resp):
             result = triage_belief("belief context", "review comment",
                                    depth=3, flagged_ancestors=1)
         assert result["pattern"] == "soften"
 
     def test_prompt_includes_depth(self):
         resp = _mock_result('{"pattern": "abandon", "rationale": "x"}')
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=resp) as mock_run:
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=resp) as mock_run:
             triage_belief("ctx", "cmt", depth=5, flagged_ancestors=3)
             prompt_sent = mock_run.call_args[1].get("input", "")
             assert "5" in prompt_sent
@@ -193,8 +193,8 @@ class TestTriageBelief:
 class TestSoftenBelief:
     def test_returns_softened_text(self):
         resp = _mock_result('{"softened_text": "weaker", "rationale": "toned down"}')
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=resp):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=resp):
             result = soften_belief("strong claim", "- ant: evidence")
         assert result["softened_text"] == "weaker"
 
@@ -218,11 +218,11 @@ class TestResearchBeliefs:
             '{"matched_ids": ["premise-a"], "rationale": "match"}'
         )
 
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run",
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run",
                    side_effect=[triage_resp, extract_resp, match_resp]), \
-             patch("reasons_lib.api.add_justification"), \
-             patch("reasons_lib.api.set_metadata") as mock_meta:
+             patch("reasons.api.add_justification"), \
+             patch("reasons.api.set_metadata") as mock_meta:
             results = repair_beliefs(
                 review_results, nodes, db_path="test.db",
                 search_fn=_mock_search(search_results),
@@ -246,11 +246,11 @@ class TestResearchBeliefs:
             '{"softened_text": "The water likely boiled", "rationale": "weakened"}'
         )
 
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run",
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run",
                    side_effect=[triage_resp, soften_resp]), \
-             patch("reasons_lib.api.update_node") as mock_update, \
-             patch("reasons_lib.api.set_metadata") as mock_meta:
+             patch("reasons.api.update_node") as mock_update, \
+             patch("reasons.api.set_metadata") as mock_meta:
             results = repair_beliefs(
                 review_results, nodes, db_path="test.db",
                 search_fn=_mock_search([]),
@@ -273,11 +273,11 @@ class TestResearchBeliefs:
         }]
         triage_resp = _mock_result('{"pattern": "abandon", "rationale": "too deep"}')
 
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run",
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run",
                    side_effect=[triage_resp]), \
-             patch("reasons_lib.api.retract_node") as mock_retract, \
-             patch("reasons_lib.api.set_metadata") as mock_meta:
+             patch("reasons.api.retract_node") as mock_retract, \
+             patch("reasons.api.set_metadata") as mock_meta:
             results = repair_beliefs(
                 review_results, nodes, db_path="test.db",
                 search_fn=_mock_search([]),
@@ -298,10 +298,10 @@ class TestResearchBeliefs:
         }]
         triage_resp = _mock_result('{"pattern": "research", "rationale": "needs code review"}')
 
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run",
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run",
                    side_effect=[triage_resp]), \
-             patch("reasons_lib.api.set_metadata") as mock_meta:
+             patch("reasons.api.set_metadata") as mock_meta:
             results = repair_beliefs(
                 review_results, nodes, db_path="test.db",
                 search_fn=_mock_search([]),
@@ -326,10 +326,10 @@ class TestResearchBeliefs:
         }]
         triage_resp = _mock_result('{"pattern": "research", "rationale": "needs investigation"}')
 
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run",
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run",
                    side_effect=[triage_resp]), \
-             patch("reasons_lib.api.set_metadata") as mock_meta:
+             patch("reasons.api.set_metadata") as mock_meta:
             results = repair_beliefs(
                 review_results, nodes, db_path="test.db", dry_run=True,
                 search_fn=_mock_search([]),
@@ -346,8 +346,8 @@ class TestResearchBeliefs:
         }]
         triage_resp = _mock_result("I cannot decide")
 
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run",
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run",
                    side_effect=[triage_resp]):
             results = repair_beliefs(
                 review_results, nodes, db_path="test.db",
@@ -364,8 +364,8 @@ class TestResearchBeliefs:
         triage_resp = _mock_result('{"pattern": "soften", "rationale": "x"}')
         soften_resp = _mock_result('{"softened_text": "", "rationale": "cant"}')
 
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run",
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run",
                    side_effect=[triage_resp, soften_resp]):
             results = repair_beliefs(
                 review_results, nodes, db_path="test.db",
@@ -384,13 +384,13 @@ class TestResearchBeliefs:
             '{"softened_text": "weaker", "rationale": "y"}'
         )
 
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run",
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run",
                    side_effect=[triage_resp, soften_resp]), \
-             patch("reasons_lib.api.update_node") as mock_update, \
-             patch("reasons_lib.api.retract_node") as mock_retract, \
-             patch("reasons_lib.api.add_justification") as mock_add, \
-             patch("reasons_lib.api.set_metadata") as mock_meta:
+             patch("reasons.api.update_node") as mock_update, \
+             patch("reasons.api.retract_node") as mock_retract, \
+             patch("reasons.api.add_justification") as mock_add, \
+             patch("reasons.api.set_metadata") as mock_meta:
             results = repair_beliefs(
                 review_results, nodes, db_path="test.db", dry_run=True,
                 search_fn=_mock_search([]),
@@ -425,12 +425,12 @@ class TestResearchBeliefs:
         soften1 = _mock_result('{"softened_text": "weaker", "rationale": "y"}')
         triage2 = _mock_result('{"pattern": "abandon", "rationale": "z"}')
 
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run",
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run",
                    side_effect=[triage1, soften1, triage2]), \
-             patch("reasons_lib.api.update_node"), \
-             patch("reasons_lib.api.retract_node"), \
-             patch("reasons_lib.api.set_metadata"):
+             patch("reasons.api.update_node"), \
+             patch("reasons.api.retract_node"), \
+             patch("reasons.api.set_metadata"):
             results = repair_beliefs(
                 review_results, nodes, db_path="test.db",
                 search_fn=_mock_search([]),
@@ -463,8 +463,8 @@ class TestResearchBeliefs:
         triage_resp = _mock_result('{"pattern": "search_and_link", "rationale": "gap"}')
         extract_resp = _mock_result("   ")
 
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run",
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run",
                    side_effect=[triage_resp, extract_resp]):
             results = repair_beliefs(
                 review_results, nodes, db_path="test.db",
@@ -504,8 +504,8 @@ class TestApiResearch:
         }]))
         triage_resp = _mock_result('{"pattern": "abandon", "rationale": "broken"}')
 
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run",
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run",
                    side_effect=[review_resp, triage_resp]):
             result = api.research(
                 belief_ids=["derived-a"],
@@ -536,8 +536,8 @@ class TestApiResearch:
         )
         extract_resp = _mock_result("   ")
 
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run",
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run",
                    side_effect=[triage_resp, extract_resp]):
             result = api.research(
                 review_file=str(review_file),
@@ -562,8 +562,8 @@ class TestApiResearch:
             "comment": "fine",
         }]))
 
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run",
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run",
                    side_effect=[review_resp]):
             result = api.research(
                 belief_ids=["derived-a"],
@@ -606,8 +606,8 @@ class TestCmdResearch:
             '{"softened_text": "A weakly extended", "rationale": "weakened"}'
         )
 
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run",
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run",
                    side_effect=[triage_resp, soften_resp]):
             stdout, stderr, code = run_cli(
                 "research",
@@ -634,8 +634,8 @@ class TestCmdResearch:
 
         triage_resp = _mock_result('{"pattern": "abandon", "rationale": "x"}')
 
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run",
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run",
                    side_effect=[triage_resp]):
             stdout, stderr, code = run_cli(
                 "research",
@@ -685,8 +685,8 @@ class TestCmdRepair:
             '{"softened_text": "A weakly extended", "rationale": "weakened"}'
         )
 
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run",
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run",
                    side_effect=[triage_resp, soften_resp]):
             stdout, stderr, code = run_cli(
                 "repair",

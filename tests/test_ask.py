@@ -8,12 +8,12 @@ from unittest.mock import patch
 
 import pytest
 
-from reasons_lib.ask import (
+from reasons.ask import (
     extract_tool_call, build_ask_prompt, build_final_prompt, build_simple_prompt,
     ask, _invoke_claude, _strip_belief_metadata, _search_source_chunks,
     NO_BELIEFS_MSG,
 )
-from reasons_lib.cli import main
+from reasons.cli import main
 
 
 @pytest.fixture
@@ -170,7 +170,7 @@ class TestCmdAskNoSynth:
 class TestInvokeClaude:
 
     def test_claude_not_in_path(self):
-        with patch("reasons_lib.llm.shutil.which", return_value=None):
+        with patch("reasons.llm.shutil.which", return_value=None):
             with pytest.raises(FileNotFoundError, match="claude"):
                 _invoke_claude("test prompt")
 
@@ -180,7 +180,7 @@ class TestAskNoBeliefs:
     def test_empty_network_llm_declines(self, db_path):
         run_cli("init", db_path=db_path)
         refusal = "I don't have enough beliefs in the network to answer this question."
-        with patch("reasons_lib.ask.invoke_model", return_value=refusal):
+        with patch("reasons.ask.invoke_model", return_value=refusal):
             result = ask("what is the meaning of life", db_path=db_path)
         assert "don't have enough beliefs" in result
 
@@ -188,20 +188,20 @@ class TestAskNoBeliefs:
         run_cli("init", db_path=db_path)
         run_cli("add", "alpha", "Alpha belief about propagation", db_path=db_path)
         refusal = "I don't have enough beliefs in the network to answer this question."
-        with patch("reasons_lib.ask.invoke_model", return_value=refusal):
+        with patch("reasons.ask.invoke_model", return_value=refusal):
             result = ask("zzzznonexistent", db_path=db_path)
         assert "don't have enough beliefs" in result
 
     def test_timeout_on_empty_returns_no_beliefs_message(self, db_path):
         run_cli("init", db_path=db_path)
-        with patch("reasons_lib.ask.invoke_model",
+        with patch("reasons.ask.invoke_model",
                     side_effect=subprocess.TimeoutExpired("claude", 300)):
             result = ask("nothing matches", db_path=db_path)
         assert result == NO_BELIEFS_MSG
 
     def test_error_on_empty_returns_no_beliefs_message(self, db_path):
         run_cli("init", db_path=db_path)
-        with patch("reasons_lib.ask.invoke_model",
+        with patch("reasons.ask.invoke_model",
                     side_effect=RuntimeError("claude crashed")):
             result = ask("nothing matches", db_path=db_path)
         assert result == NO_BELIEFS_MSG
@@ -218,7 +218,7 @@ class TestAskNoBeliefs:
                 return '{"tool": "search_beliefs", "query": "retraction"}'
             raise subprocess.TimeoutExpired("claude", 300)
 
-        with patch("reasons_lib.ask.invoke_model", side_effect=mock_invoke):
+        with patch("reasons.ask.invoke_model", side_effect=mock_invoke):
             result = ask("zzzznothing", db_path=db_path)
         assert "retraction" in result.lower()
         assert result != NO_BELIEFS_MSG
@@ -235,7 +235,7 @@ class TestAskNoBeliefs:
                 return '{"tool": "search_beliefs", "query": "zzzznothing"}'
             raise subprocess.TimeoutExpired("claude", 300)
 
-        with patch("reasons_lib.ask.invoke_model", side_effect=mock_invoke):
+        with patch("reasons.ask.invoke_model", side_effect=mock_invoke):
             result = ask("propagation", db_path=db_path)
         assert "propagation" in result.lower()
         assert result != NO_BELIEFS_MSG
@@ -247,7 +247,7 @@ class TestAskWithMockedLLM:
         run_cli("init", db_path=db_path)
         run_cli("add", "a", "Alpha belief", db_path=db_path)
 
-        with patch("reasons_lib.ask.invoke_model", return_value="The answer is alpha."):
+        with patch("reasons.ask.invoke_model", return_value="The answer is alpha."):
             result = ask("what is alpha?", db_path=db_path)
         assert result == "The answer is alpha."
 
@@ -267,7 +267,7 @@ class TestAskWithMockedLLM:
             call_count[0] += 1
             return responses[idx]
 
-        with patch("reasons_lib.ask.invoke_model", side_effect=mock_invoke):
+        with patch("reasons.ask.invoke_model", side_effect=mock_invoke):
             result = ask("how does retraction work?", db_path=db_path)
         assert "retraction" in result.lower() or "Retraction" in result
         assert call_count[0] == 2
@@ -284,7 +284,7 @@ class TestAskWithMockedLLM:
                 return '{"tool": "search_beliefs", "query": "more"}'
             return "The answer based on alpha [a]."
 
-        with patch("reasons_lib.ask.invoke_model", side_effect=mock_invoke):
+        with patch("reasons.ask.invoke_model", side_effect=mock_invoke):
             result = ask("alpha", db_path=db_path)
         assert calls[0] == 4
         assert "alpha" in result.lower()
@@ -294,7 +294,7 @@ class TestAskWithMockedLLM:
         run_cli("init", db_path=db_path)
         run_cli("add", "a", "Alpha belief", db_path=db_path)
 
-        with patch("reasons_lib.ask.invoke_model",
+        with patch("reasons.ask.invoke_model",
                     side_effect=subprocess.TimeoutExpired("claude", 300)):
             result = ask("alpha", db_path=db_path)
         assert "a" in result
@@ -303,7 +303,7 @@ class TestAskWithMockedLLM:
         run_cli("init", db_path=db_path)
         run_cli("add", "a", "Alpha belief", db_path=db_path)
 
-        with patch("reasons_lib.ask.invoke_model",
+        with patch("reasons.ask.invoke_model",
                     side_effect=RuntimeError("claude crashed")):
             result = ask("alpha", db_path=db_path)
         assert "a" in result
@@ -312,7 +312,7 @@ class TestAskWithMockedLLM:
         run_cli("init", db_path=db_path)
         run_cli("add", "a", "Alpha", db_path=db_path)
 
-        with patch("reasons_lib.ask.invoke_model",
+        with patch("reasons.ask.invoke_model",
                     return_value='{"tool": "unknown_tool", "query": "x"}'):
             result = ask("question", db_path=db_path)
         assert "unknown_tool" in result
@@ -329,7 +329,7 @@ class TestAskWithMockedLLM:
                 return '{"tool": "search_beliefs", "query": "more"}'
             raise subprocess.TimeoutExpired("claude", 300)
 
-        with patch("reasons_lib.ask.invoke_model", side_effect=mock_invoke):
+        with patch("reasons.ask.invoke_model", side_effect=mock_invoke):
             result = ask("alpha", db_path=db_path)
         assert calls[0] == 4
         assert "search_beliefs" not in result
@@ -339,7 +339,7 @@ class TestAskWithMockedLLM:
         run_cli("init", db_path=db_path)
         run_cli("add", "a", "Alpha belief", db_path=db_path)
 
-        with patch("reasons_lib.ask.invoke_model",
+        with patch("reasons.ask.invoke_model",
                     return_value='{"tool": "search_beliefs", "query": "more"}'):
             result = ask("alpha", db_path=db_path)
         assert "search_beliefs" not in result
@@ -384,7 +384,7 @@ class TestAskSourcesPreserved:
             assert "Important source doc content" in prompt
             return "Answer combining beliefs and sources."
 
-        with patch("reasons_lib.ask.invoke_model", side_effect=mock_invoke):
+        with patch("reasons.ask.invoke_model", side_effect=mock_invoke):
             result = ask("important docs", db_path=db_path, sources_db=sources_db)
         assert calls[0] == 2
         assert result == "Answer combining beliefs and sources."
@@ -404,7 +404,7 @@ class TestAskSourcesPreserved:
             assert "**Source:**" not in prompt, "Source metadata leaked into natural prompt"
             return "Natural answer about retraction."
 
-        with patch("reasons_lib.ask.invoke_model", side_effect=mock_invoke):
+        with patch("reasons.ask.invoke_model", side_effect=mock_invoke):
             result = ask("retraction", db_path=db_path, natural=True)
         assert calls[0] == 2
         assert result == "Natural answer about retraction."
@@ -438,7 +438,7 @@ class TestAskSimple:
         run_cli("init", db_path=db_path)
         run_cli("add", "a", "Alpha belief about propagation", db_path=db_path)
 
-        with patch("reasons_lib.ask.invoke_model",
+        with patch("reasons.ask.invoke_model",
                     return_value="Propagation uses BFS [a].") as mock_llm:
             result = ask("propagation", db_path=db_path, simple=True)
         assert result == "Propagation uses BFS [a]."
@@ -453,7 +453,7 @@ class TestAskSimple:
         run_cli("init", db_path=db_path)
         run_cli("add", "a", "Alpha belief", db_path=db_path)
 
-        with patch("reasons_lib.ask.invoke_model",
+        with patch("reasons.ask.invoke_model",
                     side_effect=subprocess.TimeoutExpired("claude", 300)):
             result = ask("alpha", db_path=db_path, simple=True)
         assert "Alpha" in result
@@ -462,7 +462,7 @@ class TestAskSimple:
         run_cli("init", db_path=db_path)
         run_cli("add", "a", "Alpha belief", db_path=db_path)
 
-        with patch("reasons_lib.ask.invoke_model",
+        with patch("reasons.ask.invoke_model",
                     side_effect=RuntimeError("model crashed")):
             result = ask("alpha", db_path=db_path, simple=True)
         assert "Alpha" in result
@@ -471,7 +471,7 @@ class TestAskSimple:
         run_cli("init", db_path=db_path)
         run_cli("add", "a", "Alpha belief", db_path=db_path)
 
-        with patch("reasons_lib.ask.invoke_model",
+        with patch("reasons.ask.invoke_model",
                     return_value="Answer.") as mock_llm:
             ask("alpha", db_path=db_path, simple=True)
         prompt = mock_llm.call_args[0][0]
@@ -670,7 +670,7 @@ class TestAskNatural:
         run_cli("init", db_path=db_path)
         run_cli("add", "a", "Alpha belief about propagation", db_path=db_path)
 
-        with patch("reasons_lib.ask.invoke_model",
+        with patch("reasons.ask.invoke_model",
                     return_value="Natural answer.") as mock_llm:
             result = ask("propagation", db_path=db_path, simple=True, natural=True)
         prompt = mock_llm.call_args[0][0]
@@ -682,7 +682,7 @@ class TestAskNatural:
         run_cli("init", db_path=db_path)
         run_cli("add", "a", "Alpha belief", db_path=db_path)
 
-        with patch("reasons_lib.ask.invoke_model",
+        with patch("reasons.ask.invoke_model",
                     return_value="Natural answer.") as mock_llm:
             ask("alpha", db_path=db_path, simple=True, natural=True)
         prompt = mock_llm.call_args[0][0]
@@ -693,7 +693,7 @@ class TestAskNatural:
         run_cli("init", db_path=db_path)
         run_cli("add", "a", "Alpha belief", db_path=db_path)
 
-        with patch("reasons_lib.ask.invoke_model",
+        with patch("reasons.ask.invoke_model",
                     return_value="Answer.") as mock_llm:
             ask("alpha", db_path=db_path, simple=True, natural=False)
         prompt = mock_llm.call_args[0][0]
@@ -703,7 +703,7 @@ class TestAskNatural:
         run_cli("init", db_path=db_path)
         run_cli("add", "a", "Alpha belief", db_path=db_path)
 
-        with patch("reasons_lib.ask.invoke_model",
+        with patch("reasons.ask.invoke_model",
                     return_value="Answer from full mode.") as mock_llm:
             result = ask("alpha", db_path=db_path, natural=True)
         prompt = mock_llm.call_args[0][0]
@@ -740,7 +740,7 @@ class TestAskWithSources:
         run_cli("init", db_path=db_path)
         run_cli("add", "a", "Summit info belief", db_path=db_path)
 
-        with patch("reasons_lib.ask.invoke_model",
+        with patch("reasons.ask.invoke_model",
                     return_value="Answer with sources.") as mock_llm:
             result = ask("Summit", db_path=db_path, simple=True,
                          sources_db=sources_db)
@@ -752,7 +752,7 @@ class TestAskWithSources:
     def test_sources_only_when_beliefs_empty(self, db_path, sources_db):
         run_cli("init", db_path=db_path)
 
-        with patch("reasons_lib.ask.invoke_model",
+        with patch("reasons.ask.invoke_model",
                     return_value="Answer from sources only.") as mock_llm:
             result = ask("Summit", db_path=db_path, simple=True,
                          sources_db=sources_db)
@@ -804,7 +804,7 @@ class TestAskDual:
             else:
                 return "Merged: alpha is described in both sources."
 
-        with patch("reasons_lib.ask.invoke_model", side_effect=mock_invoke):
+        with patch("reasons.ask.invoke_model", side_effect=mock_invoke):
             result = ask("alpha", db_path=db_path, simple=True, dual=True,
                          sources_db=sources_db)
         assert calls[0] == 3
@@ -833,7 +833,7 @@ class TestAskDual:
             else:
                 return "Merged answer."
 
-        with patch("reasons_lib.ask.invoke_model", side_effect=mock_invoke):
+        with patch("reasons.ask.invoke_model", side_effect=mock_invoke):
             result = ask("alpha", db_path=db_path, simple=True, dual=True,
                          sources_db=sources_db, natural=True)
         assert calls[0] == 3

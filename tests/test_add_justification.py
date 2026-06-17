@@ -2,8 +2,8 @@
 
 import pytest
 
-from reasons_lib import Justification, api
-from reasons_lib.network import Network
+from reasons import Justification, api
+from reasons.network import Network
 
 
 class TestNetworkAddJustification:

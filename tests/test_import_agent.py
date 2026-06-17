@@ -5,7 +5,7 @@ import tempfile
 
 import pytest
 
-from reasons_lib import api
+from reasons import api
 
 
 SAMPLE_BELIEFS = """\
@@ -388,7 +388,7 @@ Depends on premise-a
     assert "fix-agent:premise-a" in result["changed"]
 
     # Run propagate (recompute_all) — retractions must stick
-    from reasons_lib.storage import Storage
+    from reasons.storage import Storage
 
     store = Storage(db)
     net = store.load()
@@ -435,7 +435,7 @@ def test_retracted_json_belief_survives_propagate(db, tmp_path):
     api.retract_node("jfix-agent:premise-a", db_path=db)
 
     # Run propagate — retractions must stick
-    from reasons_lib.storage import Storage
+    from reasons.storage import Storage
 
     store = Storage(db)
     net = store.load()

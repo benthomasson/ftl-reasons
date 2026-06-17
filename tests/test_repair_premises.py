@@ -5,8 +5,8 @@ from unittest.mock import patch
 
 import pytest
 
-from reasons_lib import api
-from reasons_lib.repair_premises import (
+from reasons import api
+from reasons.repair_premises import (
     format_premise_for_repair,
     parse_repair_response,
     repair_premises,
@@ -100,8 +100,8 @@ class TestRepairPremisesLoop:
             "corrected_text": "Correct claim", "rationale": "fixed",
         }])
         mock = self._mock_result(llm_resp)
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock):
             results = repair_premises(nodes, ["obs-1"], source_contents, review_results)
         assert len(results) == 1
         assert results[0]["action"] == "rewrite"
@@ -127,8 +127,8 @@ class TestRepairPremisesLoop:
                                     "corrected_text": None, "rationale": "no support"}])
             return type("R", (), {"returncode": 0, "stdout": resp, "stderr": ""})()
 
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", side_effect=mock_run):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", side_effect=mock_run):
             results = repair_premises(nodes, ["obs-1", "obs-2"], source_contents,
                                      review_results, parallel=2)
         assert len(results) == 2
@@ -148,8 +148,8 @@ class TestRepairPremisesLoop:
                                 "corrected_text": None, "rationale": "gone"}])
         mock = self._mock_result(llm_resp)
         callbacks = []
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock):
             repair_premises(nodes, ["obs-1"], source_contents, review_results,
                            on_result=lambda r: callbacks.append(len(r)))
         assert callbacks == [1]
@@ -159,8 +159,8 @@ class TestRepairPremisesLoop:
         source_contents = {"doc.md": "Content."}
         review_results = {"obs-1": {"error_type": "fabricated", "comment": "bad"}}
 
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", side_effect=Exception("LLM down")):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", side_effect=Exception("LLM down")):
             results = repair_premises(nodes, ["obs-1"], source_contents, review_results)
         assert len(results) == 1
         assert results[0]["action"] == "error"
@@ -199,8 +199,8 @@ class TestApiRepairPremises:
              "corrected_text": "PostgreSQL is used for storage", "rationale": "fixed"},
         ])
         mock = type("R", (), {"returncode": 0, "stdout": llm_resp, "stderr": ""})()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock):
             result = api.repair_premises(review_file=review_file, dry_run=True, db_path=db)
         assert result["total_inaccurate"] == 2
 
@@ -217,8 +217,8 @@ class TestApiRepairPremises:
                                     "corrected_text": None, "rationale": "no support"}])
             return type("R", (), {"returncode": 0, "stdout": resp, "stderr": ""})()
 
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", side_effect=mock_run):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", side_effect=mock_run):
             result = api.repair_premises(review_file=review_file, db_path=db)
 
         assert result["rewritten"] >= 1
@@ -239,8 +239,8 @@ class TestApiRepairPremises:
                                     "corrected_text": "Fixed", "rationale": "ok"}])
             return type("R", (), {"returncode": 0, "stdout": resp, "stderr": ""})()
 
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", side_effect=mock_run):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", side_effect=mock_run):
             result = api.repair_premises(review_file=review_file, db_path=db)
 
         assert result["retracted"] >= 1
@@ -255,8 +255,8 @@ class TestApiRepairPremises:
              "corrected_text": "Fixed", "rationale": "ok"},
         ])
         mock = type("R", (), {"returncode": 0, "stdout": llm_resp, "stderr": ""})()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock):
             api.repair_premises(review_file=review_file, dry_run=True, db_path=db)
 
         net = api.export_network(db_path=db)
@@ -313,8 +313,8 @@ class TestRepairActionMetadata:
             "corrected_text": "PostgreSQL is used for storage", "rationale": "fixed",
         }])
         mock = type("R", (), {"returncode": 0, "stdout": llm_resp, "stderr": ""})()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock):
             api.repair_premises(review_file=review_file, db_path=db)
 
         node = api.show_node("obs-1", db_path=db)
@@ -327,8 +327,8 @@ class TestRepairActionMetadata:
             "corrected_text": None, "rationale": "fabricated",
         }])
         mock = type("R", (), {"returncode": 0, "stdout": llm_resp, "stderr": ""})()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock):
             api.repair_premises(review_file=review_file, db_path=db)
 
         node = api.show_node("obs-2", db_path=db)
@@ -341,8 +341,8 @@ class TestRepairActionMetadata:
             "corrected_text": "Fixed", "rationale": "ok",
         }])
         mock = type("R", (), {"returncode": 0, "stdout": llm_resp, "stderr": ""})()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock):
             api.repair_premises(review_file=review_file, dry_run=True, db_path=db)
 
         node = api.show_node("obs-1", db_path=db)
@@ -352,7 +352,7 @@ class TestRepairActionMetadata:
 class TestCliDispatch:
 
     def test_repair_premises_registered(self):
-        from reasons_lib import cli
+        from reasons import cli
         assert hasattr(cli, "cmd_repair_premises")
         assert callable(cli.cmd_repair_premises)
 
@@ -361,7 +361,7 @@ class TestReviewPremisesParallel:
 
     def test_parallel_batches(self, tmp_path):
         """Verify parallel=2 processes batches concurrently."""
-        from reasons_lib.review_premises import review_premises
+        from reasons.review_premises import review_premises
 
         nodes = {
             f"obs-{i}": {"text": f"Claim {i}", "source": "doc.md", "truth_value": "IN"}
@@ -382,8 +382,8 @@ class TestReviewPremisesParallel:
             return type("R", (), {"returncode": 0, "stdout": resp, "stderr": ""})()
 
         premise_ids = [f"obs-{i}" for i in range(10)]
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", side_effect=mock_run):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", side_effect=mock_run):
             results = review_premises(nodes, premise_ids, source_contents,
                                       parallel=2, batch_size=5)
         assert len(results) == 10

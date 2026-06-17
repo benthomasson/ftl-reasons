@@ -7,15 +7,15 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from reasons_lib.repair import (
+from reasons.repair import (
     parse_extract_response,
     parse_match_response,
     extract_smuggled_claim,
     find_matching_premises,
     repair_smuggled_beliefs,
 )
-from reasons_lib import api
-from reasons_lib.cli import main
+from reasons import api
+from reasons.cli import main
 
 
 def run_cli(*args, db_path=None):
@@ -135,8 +135,8 @@ class TestExtractSmuggledClaim:
             "stdout": "Water boils at 100C at sea level",
             "stderr": "",
         })()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result) as mock_run:
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result) as mock_run:
             claim = extract_smuggled_claim(
                 "### derived-boil\nClaim: water boiled",
                 "Conclusion assumes boiling point knowledge",
@@ -150,8 +150,8 @@ class TestExtractSmuggledClaim:
         mock_result = type("R", (), {
             "returncode": 0, "stdout": "  ", "stderr": "",
         })()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             claim = extract_smuggled_claim("context", "comment")
             assert claim == ""
 
@@ -165,8 +165,8 @@ class TestFindMatchingPremises:
             "stdout": '{"matched_ids": ["premise-a"], "rationale": "states the fact"}',
             "stderr": "",
         })()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             result = find_matching_premises(
                 "Water boils at 100C",
                 [{"id": "premise-a", "text": "Water boils at 100C at sea level"}],
@@ -174,7 +174,7 @@ class TestFindMatchingPremises:
             assert result["matched_ids"] == ["premise-a"]
 
     def test_empty_candidates_skips_llm(self):
-        with patch("reasons_lib.llm.subprocess.run") as mock_run:
+        with patch("reasons.llm.subprocess.run") as mock_run:
             result = find_matching_premises("some claim", [])
             mock_run.assert_not_called()
             assert result["matched_ids"] == []
@@ -206,9 +206,9 @@ class TestRepairSmuggledBeliefs:
             '{"matched_ids": ["premise-a"], "rationale": "directly states it"}'
         )
 
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", side_effect=[extract_resp, match_resp]), \
-             patch("reasons_lib.api.add_justification") as mock_add:
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", side_effect=[extract_resp, match_resp]), \
+             patch("reasons.api.add_justification") as mock_add:
             repairs = repair_smuggled_beliefs(
                 review_results, nodes, db_path="test.db",
                 search_fn=self._mock_search(search_results),
@@ -234,9 +234,9 @@ class TestRepairSmuggledBeliefs:
             '{"matched_ids": ["premise-a"], "rationale": "match"}'
         )
 
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", side_effect=[extract_resp, match_resp]), \
-             patch("reasons_lib.api.add_justification") as mock_add:
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", side_effect=[extract_resp, match_resp]), \
+             patch("reasons.api.add_justification") as mock_add:
             repairs = repair_smuggled_beliefs(
                 review_results, nodes, db_path="test.db", dry_run=True,
                 search_fn=self._mock_search(search_results),
@@ -252,8 +252,8 @@ class TestRepairSmuggledBeliefs:
         }]
         extract_resp = self._mock_result("Water boils at 100C")
 
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", side_effect=[extract_resp]):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", side_effect=[extract_resp]):
             repairs = repair_smuggled_beliefs(
                 review_results, nodes, db_path="test.db",
                 search_fn=self._mock_search([]),
@@ -275,8 +275,8 @@ class TestRepairSmuggledBeliefs:
             '{"matched_ids": [], "rationale": "no match"}'
         )
 
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", side_effect=[extract_resp, match_resp]):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", side_effect=[extract_resp, match_resp]):
             repairs = repair_smuggled_beliefs(
                 review_results, nodes, db_path="test.db",
                 search_fn=self._mock_search(search_results),
@@ -291,8 +291,8 @@ class TestRepairSmuggledBeliefs:
         }]
         extract_resp = self._mock_result("   ")
 
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", side_effect=[extract_resp]):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", side_effect=[extract_resp]):
             repairs = repair_smuggled_beliefs(
                 review_results, nodes, db_path="test.db",
                 search_fn=self._mock_search([]),
@@ -312,8 +312,8 @@ class TestRepairSmuggledBeliefs:
         ]
         extract_resp = self._mock_result("Something about sea level")
 
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", side_effect=[extract_resp]):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", side_effect=[extract_resp]):
             repairs = repair_smuggled_beliefs(
                 review_results, nodes, db_path="test.db",
                 search_fn=self._mock_search(search_results),
@@ -333,8 +333,8 @@ class TestRepairSmuggledBeliefs:
         ]
         extract_resp = self._mock_result("Boiling occurs")
 
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", side_effect=[extract_resp]):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", side_effect=[extract_resp]):
             repairs = repair_smuggled_beliefs(
                 review_results, nodes, db_path="test.db",
                 search_fn=self._mock_search(search_results),
@@ -379,9 +379,9 @@ class TestRepairSmuggledBeliefs:
             '{"matched_ids": ["premise-d"], "rationale": "match"}'
         )
 
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", side_effect=[extract_resp, match_resp]), \
-             patch("reasons_lib.api.add_justification") as mock_add:
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", side_effect=[extract_resp, match_resp]), \
+             patch("reasons.api.add_justification") as mock_add:
             repairs = repair_smuggled_beliefs(
                 review_results, nodes, db_path="test.db",
                 search_fn=self._mock_search(search_results),
@@ -432,11 +432,11 @@ class TestRepairSmuggledBeliefs:
             call_count[0] += 1
             return json.dumps(search1 if call_count[0] == 1 else search2)
 
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", side_effect=[
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", side_effect=[
                  extract_resp1, match_resp1, extract_resp2, match_resp2,
              ]), \
-             patch("reasons_lib.api.add_justification"):
+             patch("reasons.api.add_justification"):
             repairs = repair_smuggled_beliefs(
                 review_results, nodes, db_path="test.db",
                 search_fn=mock_search,
@@ -498,8 +498,8 @@ class TestCmdRepairSmuggled:
             "stderr": "",
         })()
 
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", side_effect=[extract_resp, match_resp]):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", side_effect=[extract_resp, match_resp]):
             stdout, stderr, code = run_cli(
                 "repair-smuggled",
                 "--review-file", str(review_file),
@@ -528,8 +528,8 @@ class TestCmdRepairSmuggled:
             "returncode": 0, "stdout": "some claim", "stderr": "",
         })()
 
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", side_effect=[extract_resp]):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", side_effect=[extract_resp]):
             stdout, stderr, code = run_cli(
                 "repair-smuggled",
                 "--review-file", str(review_file),

@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from reasons_lib.network import Network
-from reasons_lib.check_stale import check_stale, hash_file
+from reasons.network import Network
+from reasons.check_stale import check_stale, hash_file
 
 
 def _hash(content: str) -> str:

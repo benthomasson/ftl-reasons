@@ -8,14 +8,14 @@ from unittest.mock import patch
 
 import pytest
 
-from reasons_lib.ask import (
+from reasons.ask import (
     _build_tools_section,
     _build_mcp_instructions,
     build_ask_prompt,
     extract_tool_call,
     ask,
 )
-from reasons_lib.cli import main
+from reasons.cli import main
 
 
 class FakeBridge:
@@ -184,7 +184,7 @@ class TestAskWithMcpDispatch:
             idx[0] += 1
             return r
 
-        with patch("reasons_lib.ask.invoke_model", side_effect=mock_invoke):
+        with patch("reasons.ask.invoke_model", side_effect=mock_invoke):
             result = ask("run a query", db_path=db_path, mcp_servers=[bridge])
 
         assert result == "The query returned 1."
@@ -214,7 +214,7 @@ class TestAskWithMcpDispatch:
             idx[0] += 1
             return r
 
-        with patch("reasons_lib.ask.invoke_model", side_effect=mock_invoke):
+        with patch("reasons.ask.invoke_model", side_effect=mock_invoke):
             result = ask("alpha", db_path=db_path, mcp_servers=[bridge])
 
         assert "alpha" in result.lower()
@@ -237,7 +237,7 @@ class TestAskWithMcpDispatch:
                 return '{"tool": "search_beliefs", "query": "more"}'
             return "Final answer."
 
-        with patch("reasons_lib.ask.invoke_model", side_effect=mock_invoke):
+        with patch("reasons.ask.invoke_model", side_effect=mock_invoke):
             result = ask("alpha", db_path=db_path, mcp_servers=[bridge])
 
         assert calls[0] == 6

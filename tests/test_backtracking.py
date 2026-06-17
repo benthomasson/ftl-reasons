@@ -7,9 +7,9 @@ retracts the premise with minimal disruption instead of an arbitrary node.
 
 import pytest
 
-from reasons_lib import Justification
-from reasons_lib.network import Network
-from reasons_lib import api
+from reasons import Justification
+from reasons.network import Network
+from reasons import api
 
 
 class TestTraceAssumptions:

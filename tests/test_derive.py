@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from reasons_lib import api
-from reasons_lib.derive import (
+from reasons import api
+from reasons.derive import (
     build_prompt,
     parse_proposals,
     validate_proposals,
@@ -818,7 +818,7 @@ import json
 import sys
 from io import StringIO
 from unittest.mock import patch
-from reasons_lib.cli import main
+from reasons.cli import main
 
 
 def _run_cli(*args, db_path=None):
@@ -858,8 +858,8 @@ def test_derive_report_written(simple_network, tmp_path):
         {"id": "new-belief", "text": "A new derived belief",
          "antecedents": ["fact-a", "fact-b"]},
     ])
-    with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-         patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+    with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+         patch("reasons.llm.subprocess.run", return_value=mock_result):
         stdout, stderr, code = _run_cli(
             "derive", "--auto", "--report-dir", report_dir,
             db_path=simple_network)
@@ -885,8 +885,8 @@ def test_derive_no_report_flag(simple_network, tmp_path):
         {"id": "new-belief-2", "text": "Another belief",
          "antecedents": ["fact-a"]},
     ])
-    with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-         patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+    with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+         patch("reasons.llm.subprocess.run", return_value=mock_result):
         stdout, stderr, code = _run_cli(
             "derive", "--auto", "--no-report", "--report-dir", report_dir,
             db_path=simple_network)
@@ -911,8 +911,8 @@ def test_derive_exhaust_report_has_rounds(simple_network, tmp_path):
         # Second round: no proposals (saturated)
         return type("R", (), {"returncode": 0, "stdout": "No proposals.", "stderr": ""})()
 
-    with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-         patch("reasons_lib.llm.subprocess.run", side_effect=mock_run):
+    with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+         patch("reasons.llm.subprocess.run", side_effect=mock_run):
         stdout, stderr, code = _run_cli(
             "derive", "--exhaust", "--report-dir", report_dir,
             db_path=simple_network)
@@ -934,7 +934,7 @@ def test_derive_exhaust_report_has_rounds(simple_network, tmp_path):
 # --- Cluster integration tests ---
 
 try:
-    from reasons_lib.cluster import HAS_CLUSTER_DEPS
+    from reasons.cluster import HAS_CLUSTER_DEPS
 except ImportError:
     HAS_CLUSTER_DEPS = False
 
@@ -977,7 +977,7 @@ def test_build_prompt_with_intra_cluster(simple_network):
 
 @skip_no_cluster
 def test_intra_cluster_rotation():
-    from reasons_lib.cluster import cluster_beliefs_intra
+    from reasons.cluster import cluster_beliefs_intra
     beliefs = {f"b-{i}": f"Belief about topic {i % 3}" for i in range(30)}
     ids_r0, stats_r0 = cluster_beliefs_intra(beliefs, budget=5, round_num=0, seed=42)
     ids_r1, stats_r1 = cluster_beliefs_intra(beliefs, budget=5, round_num=1, seed=42)

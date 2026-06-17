@@ -2,11 +2,11 @@
 
 import pytest
 
-from reasons_lib import api
-from reasons_lib.export_markdown import export_markdown
-from reasons_lib.import_beliefs import import_into_network, parse_beliefs
-from reasons_lib.network import Network
-from reasons_lib.storage import Storage
+from reasons import api
+from reasons.export_markdown import export_markdown
+from reasons.import_beliefs import import_into_network, parse_beliefs
+from reasons.network import Network
+from reasons.storage import Storage
 
 
 @pytest.fixture
@@ -108,7 +108,7 @@ The API uses REST.
     def test_show_displays_accepted_pr(self, db, capsys):
         api.add_node("n1", "A belief.", accepted_pr="https://github.com/org/repo/pull/42",
                       db_path=db)
-        from reasons_lib.cli import cmd_show
+        from reasons.cli import cmd_show
         import argparse
         args = argparse.Namespace(
             node_id="n1", db=db, visible_to=None,
@@ -120,7 +120,7 @@ The API uses REST.
 
     def test_show_omits_when_absent(self, db, capsys):
         api.add_node("n1", "A belief.", db_path=db)
-        from reasons_lib.cli import cmd_show
+        from reasons.cli import cmd_show
         import argparse
         args = argparse.Namespace(
             node_id="n1", db=db, visible_to=None,

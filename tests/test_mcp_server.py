@@ -8,8 +8,8 @@ import pytest
 
 pytest.importorskip("mcp")
 
-from reasons_lib import api
-from reasons_lib import mcp_server
+from reasons import api
+from reasons import mcp_server
 
 
 @pytest.fixture

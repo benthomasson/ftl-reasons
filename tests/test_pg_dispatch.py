@@ -6,13 +6,13 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from reasons_lib.api import (
+from reasons.api import (
     _pg_dispatch, export_markdown,
     import_json, import_beliefs, import_agent, sync_agent,
     hash_sources, check_stale, lookup,
     add_repo, list_repos, list_negative,
 )
-from reasons_lib.cli import _backend_kwargs, _require_sqlite
+from reasons.cli import _backend_kwargs, _require_sqlite
 
 
 class TestPgDispatch:
@@ -20,7 +20,7 @@ class TestPgDispatch:
     def test_dispatch_calls_pgapi_method(self):
         mock_pg = MagicMock()
         mock_pg.get_status.return_value = {"total": 5}
-        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+        with patch("reasons.pg.PgApi") as MockPgApi:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = _pg_dispatch("postgresql://...", "proj-1", "get_status")
@@ -29,7 +29,7 @@ class TestPgDispatch:
     def test_dispatch_passes_kwargs(self):
         mock_pg = MagicMock()
         mock_pg.show_node.return_value = {"id": "a", "text": "Alpha"}
-        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+        with patch("reasons.pg.PgApi") as MockPgApi:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = _pg_dispatch("postgresql://...", "proj-1", "show_node", node_id="a")
@@ -165,41 +165,41 @@ class TestExportMarkdownPgPath:
     }
 
     def test_produces_markdown(self):
-        with patch("reasons_lib.api.export_network", return_value=self.EXPORT_DATA):
+        with patch("reasons.api.export_network", return_value=self.EXPORT_DATA):
             md = export_markdown(pg_conninfo="postgresql://...", project_id="test")
         assert isinstance(md, str)
         assert len(md) > 0
 
     def test_contains_node_ids(self):
-        with patch("reasons_lib.api.export_network", return_value=self.EXPORT_DATA):
+        with patch("reasons.api.export_network", return_value=self.EXPORT_DATA):
             md = export_markdown(pg_conninfo="postgresql://...", project_id="test")
         assert "premise-a" in md
         assert "derived-b" in md
         assert "gated-c" in md
 
     def test_contains_node_text(self):
-        with patch("reasons_lib.api.export_network", return_value=self.EXPORT_DATA):
+        with patch("reasons.api.export_network", return_value=self.EXPORT_DATA):
             md = export_markdown(pg_conninfo="postgresql://...", project_id="test")
         assert "Alpha premise" in md
         assert "Beta derived from alpha" in md
 
     def test_contains_justification_refs(self):
-        with patch("reasons_lib.api.export_network", return_value=self.EXPORT_DATA):
+        with patch("reasons.api.export_network", return_value=self.EXPORT_DATA):
             md = export_markdown(pg_conninfo="postgresql://...", project_id="test")
         assert "premise-a" in md
 
     def test_contains_source_info(self):
-        with patch("reasons_lib.api.export_network", return_value=self.EXPORT_DATA):
+        with patch("reasons.api.export_network", return_value=self.EXPORT_DATA):
             md = export_markdown(pg_conninfo="postgresql://...", project_id="test")
         assert "test.py" in md
 
     def test_contains_nogoods(self):
-        with patch("reasons_lib.api.export_network", return_value=self.EXPORT_DATA):
+        with patch("reasons.api.export_network", return_value=self.EXPORT_DATA):
             md = export_markdown(pg_conninfo="postgresql://...", project_id="test")
         assert "nogood" in md.lower()
 
     def test_dependents_reconstructed(self):
-        with patch("reasons_lib.api.export_network", return_value=self.EXPORT_DATA):
+        with patch("reasons.api.export_network", return_value=self.EXPORT_DATA):
             md = export_markdown(pg_conninfo="postgresql://...", project_id="test")
         # premise-a is an antecedent of derived-b and gated-c,
         # so it should show dependents in the markdown
@@ -208,7 +208,7 @@ class TestExportMarkdownPgPath:
 
     def test_empty_network(self):
         empty = {"meta": {}, "nodes": {}, "nogoods": [], "repos": {}}
-        with patch("reasons_lib.api.export_network", return_value=empty):
+        with patch("reasons.api.export_network", return_value=empty):
             md = export_markdown(pg_conninfo="postgresql://...", project_id="test")
         assert isinstance(md, str)
 
@@ -223,7 +223,7 @@ class TestImportJsonDispatch:
 
         mock_pg = MagicMock()
         mock_pg.import_json.return_value = {"nodes_imported": 1, "nogoods_imported": 0}
-        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+        with patch("reasons.pg.PgApi") as MockPgApi:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = import_json(str(json_file),
@@ -248,7 +248,7 @@ class TestImportBeliefsDispatch:
             "claims_imported": 1, "claims_skipped": 0,
             "claims_retracted": 0, "nogoods_imported": 0,
         }
-        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+        with patch("reasons.pg.PgApi") as MockPgApi:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = import_beliefs(str(beliefs_file),
@@ -273,7 +273,7 @@ class TestImportAgentDispatch:
             "claims_retracted": 0, "claims_propagated": 0,
             "nogoods_imported": 0,
         }
-        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+        with patch("reasons.pg.PgApi") as MockPgApi:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = import_agent("remote", str(beliefs_file),
@@ -298,7 +298,7 @@ class TestImportAgentDispatch:
             "claims_retracted": 0, "claims_propagated": 0,
             "nogoods_imported": 0,
         }
-        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+        with patch("reasons.pg.PgApi") as MockPgApi:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = import_agent("remote", str(json_file),
@@ -323,7 +323,7 @@ class TestSyncAgentDispatch:
             "beliefs_unchanged": 0, "beliefs_propagated": 0,
             "nogoods_imported": 0,
         }
-        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+        with patch("reasons.pg.PgApi") as MockPgApi:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = sync_agent("remote", str(beliefs_file),
@@ -339,7 +339,7 @@ class TestImportCliNoLongerBlocked:
         json_file.write_text('{"nodes": {}, "nogoods": []}')
         mock_pg = MagicMock()
         mock_pg.import_json.return_value = {"nodes_imported": 0, "nogoods_imported": 0}
-        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+        with patch("reasons.pg.PgApi") as MockPgApi:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = import_json(str(json_file),
@@ -354,7 +354,7 @@ class TestImportCliNoLongerBlocked:
             "claims_imported": 0, "claims_skipped": 0,
             "claims_retracted": 0, "nogoods_imported": 0,
         }
-        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+        with patch("reasons.pg.PgApi") as MockPgApi:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = import_beliefs(str(f),
@@ -367,7 +367,7 @@ class TestHashSourcesDispatch:
     def test_dispatches_to_pg(self):
         mock_pg = MagicMock()
         mock_pg.hash_sources.return_value = {"hashed": [], "count": 0}
-        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+        with patch("reasons.pg.PgApi") as MockPgApi:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = hash_sources(pg_conninfo="postgresql://...", project_id="test")
@@ -377,7 +377,7 @@ class TestHashSourcesDispatch:
     def test_passes_force_and_repos(self):
         mock_pg = MagicMock()
         mock_pg.hash_sources.return_value = {"hashed": [{"node_id": "a"}], "count": 1}
-        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+        with patch("reasons.pg.PgApi") as MockPgApi:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = hash_sources(force=True, repos={"myrepo": "/tmp/repo"},
@@ -394,7 +394,7 @@ class TestCheckStaleDispatch:
         mock_pg.check_stale.return_value = {
             "stale": [], "checked": 5, "stale_count": 0, "upgraded": 0,
         }
-        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+        with patch("reasons.pg.PgApi") as MockPgApi:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = check_stale(pg_conninfo="postgresql://...", project_id="test")
@@ -406,7 +406,7 @@ class TestCheckStaleDispatch:
         mock_pg.check_stale.return_value = {
             "stale": [], "checked": 3, "stale_count": 0, "upgraded": 2,
         }
-        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+        with patch("reasons.pg.PgApi") as MockPgApi:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = check_stale(upgrade_hashes=True,
@@ -420,7 +420,7 @@ class TestLookupDispatch:
     def test_dispatches_to_pg(self):
         mock_pg = MagicMock()
         mock_pg.lookup.return_value = "Found 1 matching belief(s):\n\n### a [IN]\nAlpha\n"
-        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+        with patch("reasons.pg.PgApi") as MockPgApi:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = lookup("alpha", pg_conninfo="postgresql://...", project_id="test")
@@ -430,7 +430,7 @@ class TestLookupDispatch:
     def test_passes_visible_to(self):
         mock_pg = MagicMock()
         mock_pg.lookup.return_value = "No beliefs found matching 'secret'"
-        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+        with patch("reasons.pg.PgApi") as MockPgApi:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = lookup("secret", visible_to=["admin"],
@@ -443,7 +443,7 @@ class TestMaintenanceCliNoLongerBlocked:
     def test_hash_sources_accepts_pg(self):
         mock_pg = MagicMock()
         mock_pg.hash_sources.return_value = {"hashed": [], "count": 0}
-        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+        with patch("reasons.pg.PgApi") as MockPgApi:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = hash_sources(pg_conninfo="postgresql://...", project_id="test")
@@ -454,7 +454,7 @@ class TestMaintenanceCliNoLongerBlocked:
         mock_pg.check_stale.return_value = {
             "stale": [], "checked": 0, "stale_count": 0, "upgraded": 0,
         }
-        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+        with patch("reasons.pg.PgApi") as MockPgApi:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = check_stale(pg_conninfo="postgresql://...", project_id="test")
@@ -463,7 +463,7 @@ class TestMaintenanceCliNoLongerBlocked:
     def test_lookup_accepts_pg(self):
         mock_pg = MagicMock()
         mock_pg.lookup.return_value = "No beliefs found matching 'test'"
-        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+        with patch("reasons.pg.PgApi") as MockPgApi:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = lookup("test", pg_conninfo="postgresql://...", project_id="test")
@@ -475,7 +475,7 @@ class TestAddRepoDispatch:
     def test_dispatches_to_pg(self):
         mock_pg = MagicMock()
         mock_pg.add_repo.return_value = {"name": "myrepo", "path": "/tmp/repo"}
-        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+        with patch("reasons.pg.PgApi") as MockPgApi:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = add_repo("myrepo", "/tmp/repo",
@@ -489,7 +489,7 @@ class TestListReposDispatch:
     def test_dispatches_to_pg(self):
         mock_pg = MagicMock()
         mock_pg.list_repos.return_value = {"repos": {"myrepo": "/tmp/repo"}}
-        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+        with patch("reasons.pg.PgApi") as MockPgApi:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = list_repos(pg_conninfo="postgresql://...", project_id="test")
@@ -499,7 +499,7 @@ class TestListReposDispatch:
     def test_empty_repos(self):
         mock_pg = MagicMock()
         mock_pg.list_repos.return_value = {"repos": {}}
-        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+        with patch("reasons.pg.PgApi") as MockPgApi:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = list_repos(pg_conninfo="postgresql://...", project_id="test")
@@ -514,7 +514,7 @@ class TestListNegativeDispatch:
             "negative": [{"id": "a", "text": "A bug"}],
             "count": 1, "candidates": 3, "total": 10,
         }
-        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+        with patch("reasons.pg.PgApi") as MockPgApi:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = list_negative(pg_conninfo="postgresql://...", project_id="test")
@@ -527,7 +527,7 @@ class TestListNegativeDispatch:
         mock_pg.list_negative.return_value = {
             "negative": [], "count": 0, "candidates": 0, "total": 5,
         }
-        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+        with patch("reasons.pg.PgApi") as MockPgApi:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = list_negative(visible_to=["admin"], model="gemini",
@@ -542,7 +542,7 @@ class TestRepoAndNegativeCliNoLongerBlocked:
     def test_add_repo_accepts_pg(self):
         mock_pg = MagicMock()
         mock_pg.add_repo.return_value = {"name": "r", "path": "/p"}
-        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+        with patch("reasons.pg.PgApi") as MockPgApi:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = add_repo("r", "/p",
@@ -552,7 +552,7 @@ class TestRepoAndNegativeCliNoLongerBlocked:
     def test_list_repos_accepts_pg(self):
         mock_pg = MagicMock()
         mock_pg.list_repos.return_value = {"repos": {}}
-        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+        with patch("reasons.pg.PgApi") as MockPgApi:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = list_repos(pg_conninfo="postgresql://...", project_id="test")
@@ -563,7 +563,7 @@ class TestRepoAndNegativeCliNoLongerBlocked:
         mock_pg.list_negative.return_value = {
             "negative": [], "count": 0, "candidates": 0, "total": 0,
         }
-        with patch("reasons_lib.pg.PgApi") as MockPgApi:
+        with patch("reasons.pg.PgApi") as MockPgApi:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = list_negative(pg_conninfo="postgresql://...", project_id="test")

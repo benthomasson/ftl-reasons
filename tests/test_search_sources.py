@@ -5,7 +5,7 @@ import sqlite3
 
 import pytest
 
-from reasons_lib.ask import search_source_chunks
+from reasons.ask import search_source_chunks
 
 
 def _create_fts_db(path):
@@ -109,7 +109,7 @@ class TestSearchSourcesCli:
 
     def test_text_output(self, tmp_path, capsys):
         db = _create_fts_db(tmp_path / "chunks.db")
-        from reasons_lib.cli import cmd_search_sources
+        from reasons.cli import cmd_search_sources
         args = type("Args", (), {
             "query": "retraction",
             "db": db,
@@ -123,7 +123,7 @@ class TestSearchSourcesCli:
 
     def test_json_output(self, tmp_path, capsys):
         db = _create_fts_db(tmp_path / "chunks.db")
-        from reasons_lib.cli import cmd_search_sources
+        from reasons.cli import cmd_search_sources
         args = type("Args", (), {
             "query": "retraction",
             "db": db,
@@ -138,7 +138,7 @@ class TestSearchSourcesCli:
 
     def test_no_results_message(self, tmp_path, capsys):
         db = _create_fts_db(tmp_path / "chunks.db")
-        from reasons_lib.cli import cmd_search_sources
+        from reasons.cli import cmd_search_sources
         args = type("Args", (), {
             "query": "xyznonexistent",
             "db": db,

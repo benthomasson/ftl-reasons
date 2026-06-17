@@ -6,11 +6,11 @@ from unittest.mock import patch
 
 import pytest
 
-from reasons_lib import api
+from reasons import api
 
 
 def run_cli(*args, db_path=None):
-    from reasons_lib.cli import main
+    from reasons.cli import main
     argv = ["reasons"]
     if db_path:
         argv += ["--db", db_path]

@@ -6,10 +6,10 @@ and an outlist (must be OUT). "Believe X unless Y is believed."
 
 import pytest
 
-from reasons_lib import Justification
-from reasons_lib.network import Network
-from reasons_lib.storage import Storage
-from reasons_lib import api
+from reasons import Justification
+from reasons.network import Network
+from reasons.storage import Storage
+from reasons import api
 
 
 class TestOutlistBasic:

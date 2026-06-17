@@ -2,7 +2,7 @@
 
 import pytest
 
-from reasons_lib import api
+from reasons import api
 
 
 @pytest.fixture
