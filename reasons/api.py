@@ -2561,6 +2561,61 @@ def report_gated(
     }
 
 
+def report_belief(
+    node_id: str,
+    sources_db: str | None = None,
+    model: str = "",
+    timeout: int = 300,
+    db_path: str = DEFAULT_DB,
+    pg_conninfo=None, project_id=None,
+) -> dict:
+    """Generate an evidence report tracing a belief to its root premises.
+
+    Returns: {"report": str, "premise_count": int}
+    """
+    from .report_belief import report_belief as _report_belief
+
+    backend = dict(db_path=db_path, pg_conninfo=pg_conninfo,
+                   project_id=project_id)
+
+    node_detail = show_node(node_id, **backend)
+    explain_data = explain_node(node_id, **backend)
+    trace_data = trace_assumptions(node_id, **backend)
+
+    premises_data = []
+    for pid in trace_data["premises"]:
+        try:
+            detail = show_node(pid, **backend)
+            premises_data.append({
+                "id": pid,
+                "text": detail.get("text", ""),
+                "truth_value": detail.get("truth_value", ""),
+                "source": detail.get("source", ""),
+            })
+        except (KeyError, PermissionError):
+            premises_data.append({"id": pid, "text": "", "truth_value": "UNKNOWN", "source": ""})
+
+    source_chunks = {}
+    if sources_db:
+        from .ask import search_source_chunks
+        for pd in premises_data:
+            if pd["text"]:
+                try:
+                    chunks = search_source_chunks(pd["text"], sources_db, top_k=3)
+                    source_chunks[pd["id"]] = chunks
+                except Exception:
+                    source_chunks[pd["id"]] = []
+
+    report = _report_belief(
+        node_id, node_detail, explain_data["steps"], premises_data,
+        source_chunks, model=model, timeout=timeout,
+    )
+    return {
+        "report": report,
+        "premise_count": len(premises_data),
+    }
+
+
 NEGATIVE_BATCH_SIZE = 50
 
 NEGATIVE_TERMS = [

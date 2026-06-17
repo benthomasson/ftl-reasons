@@ -1477,6 +1477,41 @@ def cmd_report_gated(args):
             print(f"  {cost}", file=sys.stderr)
 
 
+def cmd_report(args):
+    model = getattr(args, "model", None) or ""
+    if model:
+        from .llm import reset_cost_tracker
+        reset_cost_tracker()
+
+    result = api.report_belief(
+        args.node_id,
+        sources_db=getattr(args, "sources_db", None),
+        model=model,
+        timeout=args.timeout,
+        **_backend_kwargs(args),
+    )
+
+    report = result["report"]
+    output_path = getattr(args, "output", None)
+    if output_path:
+        with open(output_path, "w") as f:
+            f.write(report)
+        print(f"Report written to {output_path}")
+    else:
+        print(report)
+
+    print(
+        f"  {result['premise_count']} root premise(s)",
+        file=sys.stderr,
+    )
+
+    if model:
+        from .llm import format_cost_summary
+        cost = format_cost_summary()
+        if cost:
+            print(f"  {cost}", file=sys.stderr)
+
+
 def cmd_list_negative(args):
     result = api.list_negative(
         visible_to=_parse_visible_to(args),
@@ -2549,6 +2584,16 @@ def main():
     p.add_argument("--timeout", type=int, default=300, help="LLM timeout in seconds (default: 300)")
     p.add_argument("--visible-to", metavar="TAG,TAG", help="Only include nodes whose access_tags are a subset of these tags")
 
+    # report
+    p = sub.add_parser("report", help="Trace a belief to its root premises with source evidence")
+    p.add_argument("node_id", help="Belief ID to report on")
+    p.add_argument("--sources-db", default=None, metavar="FTS_DB",
+                   help="FTS5 chunks database for source evidence (e.g. rag_fts.db)")
+    p.add_argument("-o", "--output", default=None, help="Write report to file (default: stdout)")
+    p.add_argument("-m", "--model", default=None,
+                   help="LLM model for narrative synthesis (default: structured report)")
+    p.add_argument("--timeout", type=int, default=300, help="LLM timeout in seconds (default: 300)")
+
     p = sub.add_parser("list-negative", help="Find IN beliefs describing problems/defects/risks (LLM-classified)")
     p.add_argument("--visible-to", metavar="TAG,TAG", help="Only show nodes whose access_tags are a subset of these tags")
     p.add_argument("-m", "--model", default=None,
@@ -2806,6 +2851,7 @@ def main():
         "list": cmd_list,
         "list-gated": cmd_list_gated,
         "report-gated": cmd_report_gated,
+        "report": cmd_report,
         "list-negative": cmd_list_negative,
         "topics": cmd_topics,
         "build-wiki": cmd_build_wiki,
