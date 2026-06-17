@@ -1571,6 +1571,11 @@ def cmd_verify(args):
               f"{len(stale)} stale, {len(partial)} partial, "
               f"{len(inconclusive)} inconclusive")
 
+    if result.get("retract_failed"):
+        print(f"\n  WARNING: failed to retract: {', '.join(result['retract_failed'])}", file=sys.stderr)
+    if result.get("stamp_failed"):
+        print(f"\n  WARNING: failed to stamp verified_at: {', '.join(result['stamp_failed'])}", file=sys.stderr)
+
     print(f"\nResults: {len(confirmed)} confirmed, {len(stale)} stale, "
           f"{len(partial)} partial, {len(inconclusive)} inconclusive")
 
