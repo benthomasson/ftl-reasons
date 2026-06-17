@@ -7,14 +7,14 @@ from unittest.mock import patch, call
 
 import pytest
 
-from reasons_lib.review import (
+from reasons.review import (
     format_belief_for_review,
     parse_review_response,
     review_beliefs,
     REVIEW_BATCH_SIZE,
 )
-from reasons_lib import api
-from reasons_lib.cli import main
+from reasons import api
+from reasons.cli import main
 
 
 def run_cli(*args, db_path=None):
@@ -235,8 +235,8 @@ class TestReviewBeliefs:
              "necessary": True, "unnecessary_antecedents": [], "comment": "ok"},
         ])
         mock_result = type("R", (), {"returncode": 0, "stdout": mock_response, "stderr": ""})()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             results = review_beliefs(nodes, belief_ids=["derived-ab"], model="claude")
         assert len(results) == 1
         assert results[0]["id"] == "derived-ab"
@@ -256,8 +256,8 @@ class TestReviewBeliefs:
         nodes = _make_nodes()
         mock_response = json.dumps([])
         mock_result = type("R", (), {"returncode": 0, "stdout": mock_response, "stderr": ""})()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             results = review_beliefs(nodes, belief_ids=["nonexistent"])
         assert results == []
 
@@ -269,8 +269,8 @@ class TestReviewBeliefs:
              "necessary": True, "unnecessary_antecedents": [], "comment": "ok"},
         ])
         mock_result = type("R", (), {"returncode": 0, "stdout": mock_response, "stderr": ""})()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result) as mock_run:
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result) as mock_run:
             results = review_beliefs(nodes, batch_size=1)
         # 2 derived IN beliefs (derived-ab, derived-deep) = 2 batches
         assert mock_run.call_count == 2
@@ -282,15 +282,15 @@ class TestReviewBeliefs:
              "necessary": True, "unnecessary_antecedents": [], "comment": "ok"},
         ])
         mock_result = type("R", (), {"returncode": 0, "stdout": mock_response, "stderr": ""})()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result) as mock_run:
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result) as mock_run:
             review_beliefs(nodes, belief_ids=["derived-ab"], timeout=600)
         assert mock_run.call_args[1]["timeout"] == 600
 
     def test_llm_error_continues(self):
         nodes = _make_nodes()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", side_effect=RuntimeError("LLM failed")):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", side_effect=RuntimeError("LLM failed")):
             results = review_beliefs(nodes, belief_ids=["derived-ab"])
         assert results == []
 
@@ -317,8 +317,8 @@ class TestReviewBeliefsApi:
              "necessary": True, "unnecessary_antecedents": [], "comment": "ok"},
         ])
         mock_result = type("R", (), {"returncode": 0, "stdout": mock_response, "stderr": ""})()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             result = api.review_beliefs(db_path=db_path)
         assert result["reviewed"] == 2
         assert result["total_derived"] == 2
@@ -329,8 +329,8 @@ class TestReviewBeliefsApi:
              "necessary": True, "unnecessary_antecedents": [], "comment": "ok"},
         ])
         mock_result = type("R", (), {"returncode": 0, "stdout": mock_response, "stderr": ""})()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             result = api.review_beliefs(min_depth=2, db_path=db_path)
         # derived-abc is depth 2 (depends on derived-ab which is depth 1)
         assert result["reviewed"] == 1
@@ -341,8 +341,8 @@ class TestReviewBeliefsApi:
              "necessary": True, "unnecessary_antecedents": [], "comment": "ok"},
         ])
         mock_result = type("R", (), {"returncode": 0, "stdout": mock_response, "stderr": ""})()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             result = api.review_beliefs(sample=1, db_path=db_path)
         assert result["reviewed"] == 1
 
@@ -352,8 +352,8 @@ class TestReviewBeliefsApi:
              "necessary": True, "unnecessary_antecedents": [], "comment": "ok"},
         ])
         mock_result = type("R", (), {"returncode": 0, "stdout": mock_response, "stderr": ""})()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             result = api.review_beliefs(depends_on="derived-ab", db_path=db_path)
         # Only derived-abc depends on derived-ab
         assert result["reviewed"] == 1
@@ -367,8 +367,8 @@ class TestReviewBeliefsApi:
              "necessary": True, "unnecessary_antecedents": [], "comment": "ok"},
         ])
         mock_result = type("R", (), {"returncode": 0, "stdout": mock_response, "stderr": ""})()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             result = api.review_beliefs(namespace="eng", db_path=db_path)
         assert result["reviewed"] == 1
         assert result["results"][0]["id"] == "eng:derived-x"
@@ -384,8 +384,8 @@ class TestReviewBeliefsApi:
              "necessary": True, "unnecessary_antecedents": [], "comment": "ok"},
         ])
         mock_result = type("R", (), {"returncode": 0, "stdout": mock_response, "stderr": ""})()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             result = api.review_beliefs(namespace="", db_path=db_path)
         # Only local derived beliefs (no colon in ID)
         assert result["reviewed"] == 2
@@ -401,8 +401,8 @@ class TestReviewBeliefsApi:
              "comment": "insufficient and unnecessary"},
         ])
         mock_result = type("R", (), {"returncode": 0, "stdout": mock_response, "stderr": ""})()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             result = api.review_beliefs(db_path=db_path)
         assert result["invalid"] == 1
         assert result["insufficient"] == 1
@@ -420,8 +420,8 @@ class TestReviewBeliefsApi:
              "necessary": True, "unnecessary_antecedents": [], "comment": "ok"},
         ])
         mock_result = type("R", (), {"returncode": 0, "stdout": mock_response, "stderr": ""})()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             result = api.review_beliefs(visible_to=["public"], db_path=db_path)
         # tagged-derived requires "secret" tag, so excluded; only 2 untagged derived remain
         assert result["reviewed"] == 2
@@ -448,8 +448,8 @@ class TestCmdReviewBeliefs:
              "necessary": True, "unnecessary_antecedents": [],
              "comment": "conclusion does not follow"},
         ])
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             stdout, stderr, code = run_cli(
                 "review-beliefs", "--auto-retract", db_path=db_path)
         assert "RETRACTED derived-ab" in stdout
@@ -463,8 +463,8 @@ class TestCmdReviewBeliefs:
              "necessary": True, "unnecessary_antecedents": [],
              "comment": "conclusion does not follow"},
         ])
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             stdout, stderr, code = run_cli(
                 "review-beliefs", "--auto-retract", "--dry-run", db_path=db_path)
         assert "RETRACTED" not in stdout
@@ -479,8 +479,8 @@ class TestCmdReviewBeliefs:
              "necessary": False, "unnecessary_antecedents": ["premise-b"],
              "comment": "not valid and unnecessary antecedent"},
         ])
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             stdout, stderr, code = run_cli(
                 "review-beliefs", "-o", output_file, db_path=db_path)
         assert f"Wrote findings to {output_file}" in stdout
@@ -500,8 +500,8 @@ class TestCmdReviewBeliefs:
              "necessary": False, "unnecessary_antecedents": ["premise-a"],
              "comment": "all three axes fail"},
         ])
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             stdout, stderr, code = run_cli(
                 "review-beliefs", "--dry-run", db_path=db_path)
         assert "INVALID" in stdout
@@ -521,8 +521,8 @@ class TestCmdReviewBeliefs:
             {"id": "derived-ab", "valid": True, "sufficient": True,
              "necessary": True, "unnecessary_antecedents": [], "comment": "ok"},
         ])
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             stdout, stderr, code = run_cli(
                 "review-beliefs", "--report-dir", report_dir, db_path=db_path)
         assert "Report:" in stdout
@@ -556,8 +556,8 @@ class TestCmdReviewBeliefs:
             "returncode": 0, "stdout": mock_response, "stderr": ""
         })()
 
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             api.review_beliefs(
                 model="claude", on_batch=capture_on_batch, db_path=db_path)
 
@@ -571,8 +571,8 @@ class TestCmdReviewBeliefs:
             {"id": "derived-ab", "valid": True, "sufficient": True,
              "necessary": True, "unnecessary_antecedents": [], "comment": "ok"},
         ])
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             stdout, stderr, code = run_cli(
                 "review-beliefs", "--report-dir", report_dir, db_path=db_path)
 
@@ -590,8 +590,8 @@ class TestCmdReviewBeliefs:
             {"id": "derived-ab", "valid": True, "sufficient": True,
              "necessary": True, "unnecessary_antecedents": [], "comment": "ok"},
         ])
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             stdout, stderr, code = run_cli(
                 "review-beliefs", "--no-report", "--report-dir", report_dir,
                 db_path=db_path)
@@ -623,8 +623,8 @@ class TestReviewBeliefsMetadata:
              "comment": "does not follow"},
         ])
         mock_result = type("R", (), {"returncode": 0, "stdout": mock_response, "stderr": ""})()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             api.review_beliefs(db_path=db_path)
 
         node_ab = api.show_node("derived-ab", db_path=db_path)
@@ -641,8 +641,8 @@ class TestReviewBeliefsMetadata:
              "necessary": True, "unnecessary_antecedents": [], "comment": "ok"},
         ])
         mock_result = type("R", (), {"returncode": 0, "stdout": mock_response, "stderr": ""})()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             api.review_beliefs(dry_run=True, db_path=db_path)
 
         node = api.show_node("derived-ab", db_path=db_path)
@@ -655,8 +655,8 @@ class TestReviewBeliefsMetadata:
              "comment": "all fail"},
         ])
         mock_result = type("R", (), {"returncode": 0, "stdout": mock_response, "stderr": ""})()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             api.review_beliefs(belief_ids=["derived-ab"], db_path=db_path)
 
         node = api.show_node("derived-ab", db_path=db_path)
@@ -669,8 +669,8 @@ class TestReviewBeliefsMetadata:
              "comment": "not enough"},
         ])
         mock_result = type("R", (), {"returncode": 0, "stdout": mock_response, "stderr": ""})()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             api.review_beliefs(belief_ids=["derived-ab"], db_path=db_path)
 
         node = api.show_node("derived-ab", db_path=db_path)
@@ -704,8 +704,8 @@ class TestListNodesReviewFilters:
              "necessary": True, "unnecessary_antecedents": [], "comment": "ok"},
         ])
         mock_result = type("R", (), {"returncode": 0, "stdout": mock_response, "stderr": ""})()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             api.review_beliefs(belief_ids=["derived-ab"], db_path=db_path)
 
         result = api.list_nodes(never_reviewed=True, db_path=db_path)
@@ -719,8 +719,8 @@ class TestListNodesReviewFilters:
              "necessary": True, "unnecessary_antecedents": [], "comment": "ok"},
         ])
         mock_result = type("R", (), {"returncode": 0, "stdout": mock_response, "stderr": ""})()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             api.review_beliefs(belief_ids=["derived-ab"], db_path=db_path)
 
         result = api.list_nodes(not_reviewed_since=30, db_path=db_path)

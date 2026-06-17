@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from reasons_lib import api
+from reasons import api
 
 
 INITIAL_BELIEFS = """\

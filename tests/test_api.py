@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from reasons_lib import api
+from reasons import api
 
 
 @pytest.fixture
@@ -102,7 +102,7 @@ class TestPropagate:
         assert api.show_node("b", db_path=db_path)["truth_value"] == "IN"
         api.retract_node("a", reason="test", db_path=db_path)
         api.assert_node("a", db_path=db_path)
-        from reasons_lib.storage import Storage
+        from reasons.storage import Storage
         store = Storage(db_path)
         net = store.load()
         net.nodes["b"].truth_value = "OUT"
@@ -316,7 +316,7 @@ class TestFtsSearch:
         assert "a" in result
 
     def test_porter_stemming_plural(self, db_path):
-        from reasons_lib.api import _fts_search
+        from reasons.api import _fts_search
         api.add_node("a", "max 250 jobs per pipeline", db_path=db_path)
         results = _fts_search("job", db_path)
         assert "a" in results
@@ -337,19 +337,19 @@ class TestFtsSearch:
         assert "a" not in result
 
     def test_stop_words_filtered(self, db_path):
-        from reasons_lib.api import _fts_search
+        from reasons.api import _fts_search
         api.add_node("a", "propagation uses BFS algorithm", db_path=db_path)
         results = _fts_search("What is the propagation algorithm?", db_path)
         assert "a" in results
 
     def test_all_stop_words_falls_back_to_raw(self, db_path):
-        from reasons_lib.api import _fts_search
+        from reasons.api import _fts_search
         api.add_node("a", "the system is working", db_path=db_path)
         results = _fts_search("what is the", db_path)
         assert "a" in results
 
     def test_single_char_words_only_returns_empty(self, db_path):
-        from reasons_lib.api import _fts_search
+        from reasons.api import _fts_search
         api.add_node("a", "some content", db_path=db_path)
         results = _fts_search("a b c", db_path)
         assert results == []
@@ -361,13 +361,13 @@ class TestFtsSearch:
         assert "a" in result
 
     def test_punctuation_in_query(self, db_path):
-        from reasons_lib.api import _fts_search
+        from reasons.api import _fts_search
         api.add_node("a", "propagation uses BFS", db_path=db_path)
         results = _fts_search("propagation? (BFS)", db_path)
         assert "a" in results
 
     def test_long_query_does_not_explode(self, db_path):
-        from reasons_lib.api import _fts_search, _fts_query
+        from reasons.api import _fts_search, _fts_query
         from unittest.mock import patch as mock_patch
         api.add_node("a", "alpha beta gamma delta", db_path=db_path)
         query = " ".join(f"term{i}" for i in range(20))
@@ -378,7 +378,7 @@ class TestFtsSearch:
             call_count[0] += 1
             return original_fts_query(conn, terms)
 
-        with mock_patch("reasons_lib.api._fts_query", side_effect=counting_fts_query):
+        with mock_patch("reasons.api._fts_query", side_effect=counting_fts_query):
             _fts_search(query, db_path)
         assert call_count[0] <= 51
 
@@ -463,7 +463,7 @@ class TestListGated:
 class TestListNegative:
 
     def test_empty_db(self, db_path):
-        with patch("reasons_lib.llm.invoke_model") as mock_llm:
+        with patch("reasons.llm.invoke_model") as mock_llm:
             result = api.list_negative(db_path=db_path)
             assert result == {"negative": [], "count": 0, "candidates": 0, "total": 0}
             mock_llm.assert_not_called()
@@ -471,7 +471,7 @@ class TestListNegative:
     def test_no_keyword_matches(self, db_path):
         api.add_node("a", "The sky is blue", db_path=db_path)
         api.add_node("b", "Water flows downhill", db_path=db_path)
-        with patch("reasons_lib.llm.invoke_model") as mock_llm:
+        with patch("reasons.llm.invoke_model") as mock_llm:
             result = api.list_negative(db_path=db_path)
             assert result["count"] == 0
             assert result["candidates"] == 0
@@ -482,7 +482,7 @@ class TestListNegative:
         api.add_node("a", "The auth module has a bug in token refresh", db_path=db_path)
         api.add_node("b", "Error handling logs all failures", db_path=db_path)
         api.add_node("c", "The sky is blue", db_path=db_path)
-        with patch("reasons_lib.llm.invoke_model", return_value='["a"]'):
+        with patch("reasons.llm.invoke_model", return_value='["a"]'):
             result = api.list_negative(db_path=db_path)
             assert result["count"] == 1
             assert result["candidates"] == 2
@@ -492,7 +492,7 @@ class TestListNegative:
     def test_llm_filters_all(self, db_path):
         api.add_node("a", "Error handling is comprehensive", db_path=db_path)
         api.add_node("b", "Failure modes are well documented", db_path=db_path)
-        with patch("reasons_lib.llm.invoke_model", return_value='[]'):
+        with patch("reasons.llm.invoke_model", return_value='[]'):
             result = api.list_negative(db_path=db_path)
             assert result["count"] == 0
             assert result["candidates"] == 2
@@ -502,19 +502,19 @@ class TestListNegative:
         api.add_node("a", "There is a critical bug here", db_path=db_path)
         api.add_node("b", "This has a missing check", db_path=db_path)
         multiline = '[\n  "a",\n  "b"\n]'
-        with patch("reasons_lib.llm.invoke_model", return_value=multiline):
+        with patch("reasons.llm.invoke_model", return_value=multiline):
             result = api.list_negative(db_path=db_path)
             assert result["count"] == 2
 
     def test_malformed_llm_response(self, db_path):
         api.add_node("a", "There is a critical bug here", db_path=db_path)
-        with patch("reasons_lib.llm.invoke_model", return_value="Sorry, I cannot do that."):
+        with patch("reasons.llm.invoke_model", return_value="Sorry, I cannot do that."):
             result = api.list_negative(db_path=db_path)
             assert result["count"] == 0
 
     def test_llm_returns_unknown_ids(self, db_path):
         api.add_node("a", "There is a critical bug here", db_path=db_path)
-        with patch("reasons_lib.llm.invoke_model", return_value='["a", "nonexistent", "also-fake"]'):
+        with patch("reasons.llm.invoke_model", return_value='["a", "nonexistent", "also-fake"]'):
             result = api.list_negative(db_path=db_path)
             assert result["count"] == 1
             assert result["negative"][0]["id"] == "a"
@@ -522,21 +522,21 @@ class TestListNegative:
     def test_prose_with_brackets_before_json(self, db_path):
         api.add_node("a", "There is a critical bug here", db_path=db_path)
         response = 'Based on [the analysis], here are the negative beliefs: ["a"]'
-        with patch("reasons_lib.llm.invoke_model", return_value=response):
+        with patch("reasons.llm.invoke_model", return_value=response):
             result = api.list_negative(db_path=db_path)
             assert result["count"] == 1
             assert result["negative"][0]["id"] == "a"
 
     def test_claude_not_found_propagates(self, db_path):
         api.add_node("a", "There is a critical bug here", db_path=db_path)
-        with patch("reasons_lib.llm.invoke_model", side_effect=FileNotFoundError("'claude' CLI not found in PATH")):
+        with patch("reasons.llm.invoke_model", side_effect=FileNotFoundError("'claude' CLI not found in PATH")):
             with pytest.raises(FileNotFoundError):
                 api.list_negative(db_path=db_path)
 
     def test_visible_to(self, db_path):
         api.add_node("a", "Auth has a critical bug", access_tags=["internal"], db_path=db_path)
         api.add_node("b", "API has a missing validation", db_path=db_path)
-        with patch("reasons_lib.llm.invoke_model", return_value='["b"]') as mock_llm:
+        with patch("reasons.llm.invoke_model", return_value='["b"]') as mock_llm:
             result = api.list_negative(visible_to=["public"], db_path=db_path)
             assert result["count"] == 1
             assert result["total"] == 1
@@ -547,7 +547,7 @@ class TestListNegative:
     def test_single_batch_calls_llm_once(self, db_path):
         for i in range(5):
             api.add_node(f"bug-{i}", f"There is a bug in module {i}", db_path=db_path)
-        with patch("reasons_lib.llm.invoke_model", return_value='["bug-0"]') as mock_llm:
+        with patch("reasons.llm.invoke_model", return_value='["bug-0"]') as mock_llm:
             result = api.list_negative(db_path=db_path)
             assert mock_llm.call_count == 1
             assert result["count"] == 1
@@ -567,7 +567,7 @@ class TestListNegative:
             else:
                 return '[]'
 
-        with patch("reasons_lib.llm.invoke_model", side_effect=mock_invoke):
+        with patch("reasons.llm.invoke_model", side_effect=mock_invoke):
             result = api.list_negative(db_path=db_path)
         assert call_count[0] == 3
         assert result["count"] == 3
@@ -580,7 +580,7 @@ class TestListNegative:
         api.add_node("b", "There is a regression in the auth flow", db_path=db_path)
         api.add_node("c", "The API docs are undocumented for v2", db_path=db_path)
         api.add_node("d", "Everything works fine", db_path=db_path)
-        with patch("reasons_lib.llm.invoke_model", return_value='["a", "b", "c"]'):
+        with patch("reasons.llm.invoke_model", return_value='["a", "b", "c"]'):
             result = api.list_negative(db_path=db_path)
             assert result["candidates"] == 3
             assert result["total"] == 4
@@ -588,7 +588,7 @@ class TestListNegative:
     def test_issue_false_positive_excluded(self, db_path):
         api.add_node("jira-ref", "The child issue was closed last sprint", db_path=db_path)
         api.add_node("real-neg", "There is a known issue in the auth module", db_path=db_path)
-        with patch("reasons_lib.llm.invoke_model", return_value='["real-neg"]') as mock_llm:
+        with patch("reasons.llm.invoke_model", return_value='["real-neg"]') as mock_llm:
             result = api.list_negative(db_path=db_path)
             assert result["candidates"] == 1
             assert result["negative"][0]["id"] == "real-neg"
@@ -596,7 +596,7 @@ class TestListNegative:
     def test_skip_llm(self, db_path):
         api.add_node("a", "There is a critical bug here", db_path=db_path)
         api.add_node("b", "Everything is fine", db_path=db_path)
-        with patch("reasons_lib.llm.invoke_model") as mock_llm:
+        with patch("reasons.llm.invoke_model") as mock_llm:
             result = api.list_negative(skip_llm=True, db_path=db_path)
             mock_llm.assert_not_called()
             assert result["count"] == 1
@@ -691,7 +691,7 @@ class TestListClusters:
 
     def test_filters_by_status(self, db_with_beliefs):
         mock_result = {"clusters": [{"id": 0, "beliefs": []}], "n_clusters": 1, "embedding_model": "test"}
-        with patch("reasons_lib.cluster.list_clusters", return_value=mock_result) as mock_lc:
+        with patch("reasons.cluster.list_clusters", return_value=mock_result) as mock_lc:
             api.list_clusters(status="IN", db_path=db_with_beliefs)
             beliefs_arg = mock_lc.call_args[0][0]
             assert all(k.startswith("in-") for k in beliefs_arg)
@@ -699,7 +699,7 @@ class TestListClusters:
 
     def test_filters_out_status(self, db_with_beliefs):
         mock_result = {"clusters": [{"id": 0, "beliefs": []}], "n_clusters": 1, "embedding_model": "test"}
-        with patch("reasons_lib.cluster.list_clusters", return_value=mock_result) as mock_lc:
+        with patch("reasons.cluster.list_clusters", return_value=mock_result) as mock_lc:
             api.list_clusters(status="OUT", db_path=db_with_beliefs)
             beliefs_arg = mock_lc.call_args[0][0]
             assert all(k.startswith("out-") for k in beliefs_arg)
@@ -714,19 +714,19 @@ class TestListClusters:
 
     def test_passes_seed(self, db_with_beliefs):
         mock_result = {"clusters": [], "n_clusters": 0, "embedding_model": "test"}
-        with patch("reasons_lib.cluster.list_clusters", return_value=mock_result) as mock_lc:
+        with patch("reasons.cluster.list_clusters", return_value=mock_result) as mock_lc:
             api.list_clusters(seed=42, db_path=db_with_beliefs)
             assert mock_lc.call_args[1]["seed"] == 42
 
     def test_passes_n_clusters(self, db_with_beliefs):
         mock_result = {"clusters": [], "n_clusters": 0, "embedding_model": "test"}
-        with patch("reasons_lib.cluster.list_clusters", return_value=mock_result) as mock_lc:
+        with patch("reasons.cluster.list_clusters", return_value=mock_result) as mock_lc:
             api.list_clusters(n_clusters=3, db_path=db_with_beliefs)
             assert mock_lc.call_args[1]["n_clusters"] == 3
 
 
 try:
-    from reasons_lib.cluster import HAS_CLUSTER_DEPS
+    from reasons.cluster import HAS_CLUSTER_DEPS
 except ImportError:
     HAS_CLUSTER_DEPS = False
 
@@ -877,7 +877,7 @@ class TestLifecycleTimestamps:
         api.add_node("ts-ver", "Verified node", db_path=db_path)
 
         now = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        from reasons_lib.storage import Storage
+        from reasons.storage import Storage
         store = Storage(db_path)
         net = store.load()
         net.nodes["ts-ver"].verified_at = now

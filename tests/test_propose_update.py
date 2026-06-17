@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from reasons_lib.propose_update import (
+from reasons.propose_update import (
     format_belief_for_update,
     format_proposal_markdown,
     format_proposals_file,
@@ -378,7 +378,7 @@ class TestFormatProposalsFile:
 
 
 class TestProposeUpdates:
-    @patch("reasons_lib.propose_update.invoke_model")
+    @patch("reasons.propose_update.invoke_model")
     def test_basic_flow(self, mock_invoke, sample_nodes):
         mock_invoke.return_value = json.dumps([{
             "id": "premise-a",
@@ -399,7 +399,7 @@ class TestProposeUpdates:
         assert results[0]["id"] == "premise-a"
         mock_invoke.assert_called_once()
 
-    @patch("reasons_lib.propose_update.invoke_model")
+    @patch("reasons.propose_update.invoke_model")
     def test_no_proposals_returned(self, mock_invoke, sample_nodes):
         mock_invoke.return_value = "[]"
         results = propose_updates(
@@ -408,7 +408,7 @@ class TestProposeUpdates:
         )
         assert results == []
 
-    @patch("reasons_lib.propose_update.invoke_model")
+    @patch("reasons.propose_update.invoke_model")
     def test_batching(self, mock_invoke, sample_nodes):
         mock_invoke.return_value = "[]"
         propose_updates(
@@ -418,7 +418,7 @@ class TestProposeUpdates:
         )
         assert mock_invoke.call_count == 2
 
-    @patch("reasons_lib.propose_update.invoke_model")
+    @patch("reasons.propose_update.invoke_model")
     def test_default_all_in_beliefs(self, mock_invoke, sample_nodes):
         mock_invoke.return_value = "[]"
         propose_updates(sample_nodes)
@@ -426,7 +426,7 @@ class TestProposeUpdates:
         assert "premise-a" in call_prompt
         assert "derived-b" in call_prompt
 
-    @patch("reasons_lib.propose_update.invoke_model")
+    @patch("reasons.propose_update.invoke_model")
     def test_handles_llm_error(self, mock_invoke, sample_nodes):
         mock_invoke.side_effect = RuntimeError("model failed")
         results = propose_updates(
@@ -435,7 +435,7 @@ class TestProposeUpdates:
         )
         assert results == []
 
-    @patch("reasons_lib.propose_update.invoke_model")
+    @patch("reasons.propose_update.invoke_model")
     def test_on_batch_callback(self, mock_invoke, sample_nodes):
         mock_invoke.return_value = json.dumps([{
             "id": "premise-a", "action": "update",

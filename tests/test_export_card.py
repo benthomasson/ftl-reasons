@@ -2,10 +2,10 @@
 
 import yaml
 
-from reasons_lib import Justification
-from reasons_lib.metadata import SCHEMA_VERSION
-from reasons_lib.network import Network
-from reasons_lib.export_card import export_card
+from reasons import Justification
+from reasons.metadata import SCHEMA_VERSION
+from reasons.network import Network
+from reasons.export_card import export_card
 
 
 def _parse_frontmatter(text):
@@ -20,7 +20,7 @@ def _make_network(nodes=None, project_name="test-project", nogoods=None):
     net.meta = {"project_name": project_name}
     if nodes:
         for nid, data in nodes.items():
-            from reasons_lib import Node
+            from reasons import Node
             node = Node(nid, data.get("text", f"Text for {nid}"))
             node.truth_value = data.get("truth_value", "IN")
             for jdata in data.get("justifications", []):
@@ -32,7 +32,7 @@ def _make_network(nodes=None, project_name="test-project", nogoods=None):
                 node.justifications.append(j)
             net.nodes[nid] = node
     if nogoods:
-        from reasons_lib import Nogood
+        from reasons import Nogood
         for ng in nogoods:
             net.nogoods.append(Nogood(**ng))
     return net

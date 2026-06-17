@@ -21,7 +21,7 @@ Reasons — a belief tracking system based on Doyle's 1979 Truth Maintenance Sys
 ## Project Structure
 
 ```
-reasons_lib/
+reasons/                # importable as `import reasons` (also aliased as reasons_lib for backwards compat)
   __init__.py         # Node, Justification, Nogood dataclasses
   network.py          # Network class — dependency graph + propagation + dialectical
   api.py              # Functional Python API (returns dicts, for CLI + LangGraph)
@@ -31,6 +31,7 @@ reasons_lib/
   export_markdown.py  # Generate beliefs.md from network
   check_stale.py      # Source hash comparison + hash_sources
   compact.py          # Token-budgeted summary with summary node support
+reasons_lib/            # backwards-compat shim — re-exports from reasons/
 tests/
   test_network.py     # Propagation, cascading, diamond dependencies
   test_storage.py     # SQLite round-trips

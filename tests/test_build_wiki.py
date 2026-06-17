@@ -7,15 +7,15 @@ from unittest.mock import patch
 
 import pytest
 
-from reasons_lib import api
-from reasons_lib.build_wiki import (
+from reasons import api
+from reasons.build_wiki import (
     _assign_topics, _format_beliefs_for_prompt, _format_node, _linkify,
     _page_name, build_wiki, generate_wiki_page,
 )
 
 
 def run_cli(*args, db_path=None):
-    from reasons_lib.cli import main
+    from reasons.cli import main
     argv = ["reasons"]
     if db_path:
         argv += ["--db", db_path]
@@ -315,7 +315,7 @@ class TestGenerateWikiPage:
                 "dependents": [],
             },
         }
-        with patch("reasons_lib.llm.invoke_model",
+        with patch("reasons.llm.invoke_model",
                     return_value="Generated wiki content") as mock:
             result = generate_wiki_page("mytopic", ["node-a"], details,
                                         "claude", 300)
@@ -335,7 +335,7 @@ class TestBuildWikiLlm:
                        "justifications": [], "dependents": []},
         }
         groups = {"alpha": ["node-a"]}
-        with patch("reasons_lib.build_wiki.generate_wiki_page",
+        with patch("reasons.build_wiki.generate_wiki_page",
                     return_value="LLM wrote this page"):
             result = build_wiki(details, groups, output_dir, model="claude")
         page = open(os.path.join(output_dir, "alpha.md")).read()
@@ -349,7 +349,7 @@ class TestBuildWikiLlm:
                        "justifications": [], "dependents": []},
         }
         groups = {"alpha": ["node-a"]}
-        with patch("reasons_lib.build_wiki.generate_wiki_page") as mock:
+        with patch("reasons.build_wiki.generate_wiki_page") as mock:
             build_wiki(details, groups, output_dir)
             mock.assert_not_called()
 
@@ -360,7 +360,7 @@ class TestBuildWikiLlm:
                        "justifications": [], "dependents": []},
         }
         groups = {"alpha": ["node-a"]}
-        with patch("reasons_lib.build_wiki.generate_wiki_page",
+        with patch("reasons.build_wiki.generate_wiki_page",
                     side_effect=RuntimeError("LLM failed")):
             build_wiki(details, groups, output_dir, model="claude")
         page = open(os.path.join(output_dir, "alpha.md")).read()
@@ -368,7 +368,7 @@ class TestBuildWikiLlm:
 
     def test_api_passes_model_through(self, db, tmp_path):
         output_dir = str(tmp_path / "wiki_llm")
-        with patch("reasons_lib.build_wiki.generate_wiki_page",
+        with patch("reasons.build_wiki.generate_wiki_page",
                     return_value="Generated page") as mock:
             result = api.build_wiki(output_dir=output_dir, model="claude",
                                     db_path=db)
@@ -384,7 +384,7 @@ class TestBuildWikiLlm:
                        "justifications": [], "dependents": []},
         }
         groups = {"alpha": ["node-a"], "beta": ["node-b"]}
-        with patch("reasons_lib.build_wiki.generate_wiki_page",
+        with patch("reasons.build_wiki.generate_wiki_page",
                     return_value="Parallel content"):
             result = build_wiki(details, groups, output_dir,
                                 model="claude", parallel=2)

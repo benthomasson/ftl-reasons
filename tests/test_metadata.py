@@ -5,11 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from reasons_lib import api, Justification
-from reasons_lib.metadata import build_meta, SCHEMA_VERSION
-from reasons_lib.network import Network
-from reasons_lib.export_markdown import export_markdown
-from reasons_lib.import_beliefs import strip_frontmatter, import_into_network
+from reasons import api, Justification
+from reasons.metadata import build_meta, SCHEMA_VERSION
+from reasons.network import Network
+from reasons.export_markdown import export_markdown
+from reasons.import_beliefs import strip_frontmatter, import_into_network
 
 
 class TestBuildMeta:

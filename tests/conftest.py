@@ -20,7 +20,7 @@ def pg_api():
     if not pg_available:
         pytest.skip("DATABASE_URL not set")
 
-    from reasons_lib.pg import PgApi
+    from reasons.pg import PgApi
 
     conninfo = os.environ["DATABASE_URL"]
     project_id = str(uuid.uuid4())

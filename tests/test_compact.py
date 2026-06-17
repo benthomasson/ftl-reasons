@@ -1,8 +1,8 @@
 """Tests for compact summary."""
 
-from reasons_lib import Justification
-from reasons_lib.network import Network
-from reasons_lib.compact import compact, estimate_tokens
+from reasons import Justification
+from reasons.network import Network
+from reasons.compact import compact, estimate_tokens
 
 
 class TestEstimateTokens:

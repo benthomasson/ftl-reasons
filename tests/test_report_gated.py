@@ -7,14 +7,14 @@ from unittest.mock import patch
 
 import pytest
 
-from reasons_lib import api
-from reasons_lib.report_gated import (
+from reasons import api
+from reasons.report_gated import (
     _build_structured_report, _format_data_for_prompt, report_gated,
 )
 
 
 def run_cli(*args, db_path=None):
-    from reasons_lib.cli import main
+    from reasons.cli import main
     argv = ["reasons"]
     if db_path:
         argv += ["--db", db_path]
@@ -205,7 +205,7 @@ class TestReportGatedLlm:
             "blockers": {"b1": {"text": "T", "gated": [{"id": "g1", "text": "G"}]}},
             "blocker_count": 1, "gated_count": 1,
         }
-        with patch("reasons_lib.llm.invoke_model",
+        with patch("reasons.llm.invoke_model",
                     return_value="LLM narrative") as mock:
             result = report_gated(gated, [], {}, 10, 5, model="claude")
             mock.assert_called_once()
@@ -213,20 +213,20 @@ class TestReportGatedLlm:
 
     def test_no_model_no_invoke(self):
         gated = {"blockers": {}, "blocker_count": 0, "gated_count": 0}
-        with patch("reasons_lib.llm.invoke_model") as mock:
+        with patch("reasons.llm.invoke_model") as mock:
             report_gated(gated, [], {}, 10, 5)
             mock.assert_not_called()
 
     def test_llm_includes_title_and_stats(self):
         gated = {"blockers": {}, "blocker_count": 0, "gated_count": 0}
-        with patch("reasons_lib.llm.invoke_model",
+        with patch("reasons.llm.invoke_model",
                     return_value="Some content"):
             result = report_gated(gated, [], {}, 10, 5, model="claude")
             assert "# Gated Beliefs Report" in result
             assert "10 IN / 5 OUT" in result
 
     def test_api_passes_model_through(self, db):
-        with patch("reasons_lib.llm.invoke_model",
+        with patch("reasons.llm.invoke_model",
                     return_value="Generated report") as mock:
             result = api.report_gated(model="claude", db_path=db)
         assert mock.call_count == 1

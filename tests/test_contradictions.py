@@ -6,14 +6,14 @@ from unittest.mock import patch
 
 import pytest
 
-from reasons_lib.contradictions import (
+from reasons.contradictions import (
     format_beliefs_for_contradiction_check,
     parse_contradiction_response,
     detect_contradictions,
     CONTRADICTION_BATCH_SIZE,
 )
-from reasons_lib import api
-from reasons_lib.cli import main
+from reasons import api
+from reasons.cli import main
 
 
 def run_cli(*args, db_path=None):
@@ -186,8 +186,8 @@ class TestDetectContradictions:
             "stdout": "No contradictions detected.",
             "stderr": "",
         })()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result) as mock_run:
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result) as mock_run:
             detect_contradictions(nodes, batch_size=2)
         # 3 IN beliefs, batch_size=2 → 2 batches
         assert mock_run.call_count == 2
@@ -210,16 +210,16 @@ class TestDetectContradictions:
             "stdout": "No contradictions detected.",
             "stderr": "",
         })()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result) as mock_run:
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result) as mock_run:
             detect_contradictions(nodes, belief_ids=["premise-a", "premise-b"],
                                   timeout=600)
         assert mock_run.call_args[1]["timeout"] == 600
 
     def test_batch_failure_continues(self):
         nodes = _make_nodes()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run",
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run",
                    side_effect=RuntimeError("LLM failed")):
             results = detect_contradictions(nodes)
         assert results == []
@@ -231,8 +231,8 @@ class TestDetectContradictions:
             "stdout": "No contradictions detected.",
             "stderr": "",
         })()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result) as mock_run:
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result) as mock_run:
             detect_contradictions(nodes, batch_size=100)
         # Only 3 IN beliefs (premise-a, premise-b, premise-c), out-node excluded
         prompt = mock_run.call_args[1]["input"]
@@ -245,8 +245,8 @@ class TestDetectContradictions:
             "stdout": "No contradictions detected.",
             "stderr": "",
         })()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result) as mock_run:
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result) as mock_run:
             detect_contradictions(nodes,
                                   belief_ids=["premise-a", "out-node"],
                                   batch_size=100)
@@ -278,8 +278,8 @@ class TestDetectContradictionsApi:
         mock_result = type("R", (), {
             "returncode": 0, "stdout": nogood_response, "stderr": ""
         })()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             result = api.detect_contradictions(db_path=db_path)
         assert result["checked"] == 2
         assert result["found"] == 1
@@ -290,8 +290,8 @@ class TestDetectContradictionsApi:
             "stdout": "No contradictions detected.",
             "stderr": "",
         })()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             result = api.detect_contradictions(sample=2, db_path=db_path)
         assert result["checked"] == 2
 
@@ -305,8 +305,8 @@ class TestDetectContradictionsApi:
         mock_result = type("R", (), {
             "returncode": 0, "stdout": nogood_response, "stderr": ""
         })()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             result = api.detect_contradictions(auto_apply=True, db_path=db_path)
         assert result["applied"] >= 1
 
@@ -328,8 +328,8 @@ class TestCmdContradictions:
 
     def test_no_contradictions_message(self, db_path):
         mock_result = self._mock_response("No contradictions detected.")
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             stdout, stderr, code = run_cli(
                 "contradictions", db_path=db_path)
         assert "No contradictions detected" in stdout
@@ -343,8 +343,8 @@ class TestCmdContradictions:
         )
         mock_result = self._mock_response(nogood_response)
         output_file = str(tmp_path / "plan.md")
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             stdout, stderr, code = run_cli(
                 "contradictions", "-o", output_file, db_path=db_path)
         assert "[NOGOOD] x-conflict (High)" in stdout
@@ -360,8 +360,8 @@ class TestCmdContradictions:
             "- Severity: High\n"
         )
         mock_result = self._mock_response(nogood_response)
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             stdout, stderr, code = run_cli(
                 "contradictions", "-o", output_file, db_path=db_path)
         assert "--accept" in stdout
@@ -373,7 +373,7 @@ class TestCmdContradictions:
 
 
 try:
-    from reasons_lib.cluster import HAS_CLUSTER_DEPS
+    from reasons.cluster import HAS_CLUSTER_DEPS
 except ImportError:
     HAS_CLUSTER_DEPS = False
 
@@ -409,9 +409,9 @@ class TestDetectContradictionsSemantic:
             "stdout": "No contradictions detected.",
             "stderr": "",
         })()
-        from reasons_lib.contradictions import detect_contradictions_semantic
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result) as mock_run:
+        from reasons.contradictions import detect_contradictions_semantic
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result) as mock_run:
             detect_contradictions_semantic(nodes)
         assert mock_run.call_count >= 1
         all_prompts = " ".join(
@@ -449,24 +449,24 @@ class TestDetectContradictionsSemantic:
             "stdout": nogood_response,
             "stderr": "",
         })()
-        from reasons_lib.contradictions import detect_contradictions_semantic
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        from reasons.contradictions import detect_contradictions_semantic
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             results = detect_contradictions_semantic(nodes)
         assert len(results) == 1
         assert results[0]["id"] == "auth-contradiction"
         assert set(results[0]["claims"]) == {"auth-login-validates", "auth-login-skips-validation"}
 
     def test_semantic_empty_network(self):
-        from reasons_lib.contradictions import detect_contradictions_semantic
+        from reasons.contradictions import detect_contradictions_semantic
         nodes = {"out-only": {"text": "x", "truth_value": "OUT", "justifications": []}}
         results = detect_contradictions_semantic(nodes)
         assert results == []
 
     def test_semantic_single_belief_skips_llm(self):
-        from reasons_lib.contradictions import detect_contradictions_semantic
+        from reasons.contradictions import detect_contradictions_semantic
         nodes = {"only-one": {"text": "Single belief", "truth_value": "IN", "justifications": []}}
-        with patch("reasons_lib.llm.subprocess.run") as mock_run:
+        with patch("reasons.llm.subprocess.run") as mock_run:
             results = detect_contradictions_semantic(nodes)
         assert results == []
         mock_run.assert_not_called()

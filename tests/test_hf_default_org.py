@@ -7,8 +7,8 @@ from urllib.error import HTTPError
 
 import pytest
 
-from reasons_lib import api
-from reasons_lib.hf import (
+from reasons import api
+from reasons.hf import (
     DEFAULT_HF_ORG,
     create_repo,
     resolve_repo_id,
@@ -68,7 +68,7 @@ class TestResolveRepoId:
 
 
 class TestCreateRepo:
-    @patch("reasons_lib.hf.urlopen")
+    @patch("reasons.hf.urlopen")
     def test_creates_repo(self, mock_urlopen):
         mock_urlopen.return_value = _mock_response()
         result = create_repo("test-eem", token="tok")
@@ -81,7 +81,7 @@ class TestCreateRepo:
         assert body["organization"] == "EEM-Hub"
         assert body["private"] is False
 
-    @patch("reasons_lib.hf.urlopen")
+    @patch("reasons.hf.urlopen")
     def test_private_repo(self, mock_urlopen):
         mock_urlopen.return_value = _mock_response()
         create_repo("org/repo", token="tok", private=True)
@@ -89,19 +89,19 @@ class TestCreateRepo:
         body = json.loads(req.data)
         assert body["private"] is True
 
-    @patch("reasons_lib.hf.urlopen")
+    @patch("reasons.hf.urlopen")
     def test_already_exists_ignored(self, mock_urlopen):
         mock_urlopen.side_effect = HTTPError("url", 409, "Conflict", {}, BytesIO(b""))
         result = create_repo("org/repo", token="tok")
         assert result == "org/repo"
 
-    @patch("reasons_lib.hf.urlopen")
+    @patch("reasons.hf.urlopen")
     def test_auth_failure_raises(self, mock_urlopen):
         mock_urlopen.side_effect = HTTPError("url", 401, "Unauthorized", {}, BytesIO(b""))
         with pytest.raises(RuntimeError, match="Authentication failed"):
             create_repo("org/repo", token="bad-tok")
 
-    @patch("reasons_lib.hf.urlopen")
+    @patch("reasons.hf.urlopen")
     def test_other_error_raises(self, mock_urlopen):
         mock_urlopen.side_effect = HTTPError("url", 500, "Server Error", {}, BytesIO(b""))
         with pytest.raises(RuntimeError, match="HTTP 500"):
@@ -109,7 +109,7 @@ class TestCreateRepo:
 
 
 class TestUploadFile:
-    @patch("reasons_lib.hf.urlopen")
+    @patch("reasons.hf.urlopen")
     def test_uploads_to_correct_url(self, mock_urlopen):
         mock_urlopen.return_value = _mock_response()
         upload_file("EEM-Hub/test-eem", "network.json", b'{"nodes":{}}', "tok")
@@ -118,20 +118,20 @@ class TestUploadFile:
         assert req.get_method() == "PUT"
         assert req.data == b'{"nodes":{}}'
 
-    @patch("reasons_lib.hf.urlopen")
+    @patch("reasons.hf.urlopen")
     def test_auth_header(self, mock_urlopen):
         mock_urlopen.return_value = _mock_response()
         upload_file("org/repo", "file.txt", b"data", "my-token")
         req = mock_urlopen.call_args[0][0]
         assert req.get_header("Authorization") == "Bearer my-token"
 
-    @patch("reasons_lib.hf.urlopen")
+    @patch("reasons.hf.urlopen")
     def test_auth_failure_raises(self, mock_urlopen):
         mock_urlopen.side_effect = HTTPError("url", 401, "Unauthorized", {}, BytesIO(b""))
         with pytest.raises(RuntimeError, match="Authentication failed"):
             upload_file("org/repo", "file.txt", b"data", "bad-tok")
 
-    @patch("reasons_lib.hf.urlopen")
+    @patch("reasons.hf.urlopen")
     def test_upload_failure_raises(self, mock_urlopen):
         mock_urlopen.side_effect = HTTPError("url", 500, "Error", {}, BytesIO(b""))
         with pytest.raises(RuntimeError, match="Failed to upload"):
@@ -147,7 +147,7 @@ def db(tmp_path):
 
 
 class TestPublishHf:
-    @patch("reasons_lib.hf.urlopen")
+    @patch("reasons.hf.urlopen")
     def test_publishes_three_files(self, mock_urlopen, db):
         mock_urlopen.return_value = _mock_response()
         result = api.publish_hf("test-eem", token="tok", db_path=db)
@@ -155,21 +155,21 @@ class TestPublishHf:
         assert result["url"] == "https://huggingface.co/EEM-Hub/test-eem"
         assert set(result["files_uploaded"]) == {"network.json", "beliefs.md", "README.md"}
 
-    @patch("reasons_lib.hf.urlopen")
+    @patch("reasons.hf.urlopen")
     def test_upload_calls(self, mock_urlopen, db):
         mock_urlopen.return_value = _mock_response()
         api.publish_hf("test-eem", token="tok", db_path=db)
         # 1 create_repo + 3 upload_file = 4 calls
         assert mock_urlopen.call_count == 4
 
-    @patch("reasons_lib.hf.urlopen")
+    @patch("reasons.hf.urlopen")
     def test_explicit_org(self, mock_urlopen, db):
         mock_urlopen.return_value = _mock_response()
         result = api.publish_hf("myuser/my-eem", token="tok", db_path=db)
         assert result["repo_id"] == "myuser/my-eem"
         assert result["url"] == "https://huggingface.co/myuser/my-eem"
 
-    @patch("reasons_lib.hf.urlopen")
+    @patch("reasons.hf.urlopen")
     def test_private_repo(self, mock_urlopen, db):
         mock_urlopen.return_value = _mock_response()
         api.publish_hf("test-eem", token="tok", private=True, db_path=db)
@@ -179,13 +179,13 @@ class TestPublishHf:
 
     def test_no_token_raises(self, db, monkeypatch):
         monkeypatch.delenv("HF_TOKEN", raising=False)
-        with patch("reasons_lib.hf.Path.home", return_value=pytest.importorskip("pathlib").Path("/nonexistent")):
+        with patch("reasons.hf.Path.home", return_value=pytest.importorskip("pathlib").Path("/nonexistent")):
             with pytest.raises(RuntimeError, match="token required"):
                 api.publish_hf("test-eem", db_path=db)
 
 
 class TestPullCommand:
-    @patch("reasons_lib.hf.urlopen")
+    @patch("reasons.hf.urlopen")
     def test_pull_with_bare_name(self, mock_urlopen, tmp_path):
         mock_urlopen.return_value = _mock_response(SAMPLE_NETWORK)
         db = str(tmp_path / "test.db")
@@ -193,14 +193,14 @@ class TestPullCommand:
         assert result["repo_id"] == "EEM-Hub/ddia-expert"
         assert result["nodes_imported"] == 1
 
-    @patch("reasons_lib.hf.urlopen")
+    @patch("reasons.hf.urlopen")
     def test_pull_with_explicit_org(self, mock_urlopen, tmp_path):
         mock_urlopen.return_value = _mock_response(SAMPLE_NETWORK)
         db = str(tmp_path / "test.db")
         result = api.import_hf("myuser/my-eem", init=True, token="tok", db_path=db)
         assert result["repo_id"] == "myuser/my-eem"
 
-    @patch("reasons_lib.hf.urlopen")
+    @patch("reasons.hf.urlopen")
     def test_import_hf_bare_name_resolves(self, mock_urlopen, tmp_path):
         """Existing import-hf command also gets default org resolution."""
         mock_urlopen.return_value = _mock_response(SAMPLE_NETWORK)
@@ -212,20 +212,20 @@ class TestPullCommand:
 
 class TestCLIDispatch:
     def test_pull_dispatches(self):
-        from reasons_lib.cli import cmd_pull, cmd_import_hf
+        from reasons.cli import cmd_pull, cmd_import_hf
         # cmd_pull delegates to cmd_import_hf — verify it's callable
         assert callable(cmd_pull)
 
     def test_publish_dispatches(self):
-        from reasons_lib.cli import cmd_publish
+        from reasons.cli import cmd_publish
         assert callable(cmd_publish)
 
     def test_commands_registered(self):
         """pull and publish are in the CLI dispatch table."""
         import argparse
-        from reasons_lib.cli import main
+        from reasons.cli import main
         # Just verify the subparser accepts the commands
-        from reasons_lib import cli
+        from reasons import cli
         parser = argparse.ArgumentParser()
         sub = parser.add_subparsers(dest="command")
         # Smoke test: the commands exist by checking the dispatch dict

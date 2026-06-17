@@ -6,10 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from reasons_lib import api
-from reasons_lib.export_markdown import export_markdown
-from reasons_lib.import_beliefs import parse_beliefs, import_into_network
-from reasons_lib.network import Network
+from reasons import api
+from reasons.export_markdown import export_markdown
+from reasons.import_beliefs import parse_beliefs, import_into_network
+from reasons.network import Network
 
 
 @pytest.fixture
@@ -51,7 +51,7 @@ class TestAddNodeSourceType:
 class TestShowSourceType:
     def test_show_displays_source_type(self, db, capsys):
         api.add_node("n1", "Code obs.", source_type="code", db_path=db)
-        from reasons_lib.cli import cmd_show
+        from reasons.cli import cmd_show
         import argparse
         args = argparse.Namespace(
             node_id="n1", db=db, visible_to=None,
@@ -63,7 +63,7 @@ class TestShowSourceType:
 
     def test_show_omits_when_absent(self, db, capsys):
         api.add_node("n1", "No type.", db_path=db)
-        from reasons_lib.cli import cmd_show
+        from reasons.cli import cmd_show
         import argparse
         args = argparse.Namespace(
             node_id="n1", db=db, visible_to=None,
@@ -92,7 +92,7 @@ class TestExportMarkdown:
     def test_exports_source_type(self, db):
         api.add_node("n1", "Code obs.", source="repo/file.py",
                       source_type="code", db_path=db)
-        from reasons_lib.storage import Storage
+        from reasons.storage import Storage
         storage = Storage(db)
         net = storage.load()
         storage.close()
@@ -101,7 +101,7 @@ class TestExportMarkdown:
 
     def test_omits_when_absent(self, db):
         api.add_node("n1", "No type.", source="repo/file.py", db_path=db)
-        from reasons_lib.storage import Storage
+        from reasons.storage import Storage
         storage = Storage(db)
         net = storage.load()
         storage.close()
@@ -154,7 +154,7 @@ The API uses REST endpoints.
     def test_roundtrip_export_import(self, db):
         api.add_node("n1", "Code obs.", source="repo/file.py",
                       source_type="code", db_path=db)
-        from reasons_lib.storage import Storage
+        from reasons.storage import Storage
         storage = Storage(db)
         net = storage.load()
         storage.close()
@@ -171,7 +171,7 @@ class TestDeriveAutoSourceType:
         api.add_node("p1", "Premise one.", db_path=db)
         api.add_node("p2", "Premise two.", db_path=db)
 
-        from reasons_lib.derive import apply_proposals
+        from reasons.derive import apply_proposals
         proposals = [{
             "id": "d1",
             "text": "Derived from p1 and p2.",

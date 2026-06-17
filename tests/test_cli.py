@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from reasons_lib.cli import main
+from reasons.cli import main
 
 
 @pytest.fixture
@@ -732,7 +732,7 @@ class TestDeduplicate:
 
 
 try:
-    from reasons_lib.cluster import HAS_CLUSTER_DEPS
+    from reasons.cluster import HAS_CLUSTER_DEPS
 except ImportError:
     HAS_CLUSTER_DEPS = False
 
@@ -1072,7 +1072,7 @@ class TestPropagateWithChanges:
         run_cli("add", "a", "A", db_path=db_path)
         run_cli("add", "b", "B", "--sl", "a", db_path=db_path)
         # Directly set b's truth_value to OUT without proper retraction
-        from reasons_lib.storage import Storage
+        from reasons.storage import Storage
         store = Storage(db_path)
         net = store.load()
         net.nodes["b"].truth_value = "OUT"

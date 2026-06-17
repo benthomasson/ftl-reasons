@@ -4,8 +4,8 @@ Validates that propagation skips dangling dependent references with a warning
 instead of crashing with KeyError.
 """
 
-from reasons_lib import Justification, Node
-from reasons_lib.network import Network
+from reasons import Justification, Node
+from reasons.network import Network
 
 
 class TestDanglingDependentNoCrash:

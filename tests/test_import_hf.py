@@ -9,8 +9,8 @@ from urllib.error import HTTPError
 
 import pytest
 
-from reasons_lib import api
-from reasons_lib.hf import _parse_repo_id, _resolve_token, download_network
+from reasons import api
+from reasons.hf import _parse_repo_id, _resolve_token, download_network
 
 
 SAMPLE_NETWORK = {
@@ -69,12 +69,12 @@ class TestResolveToken:
         token_file = tmp_path / ".cache" / "huggingface" / "token"
         token_file.parent.mkdir(parents=True)
         token_file.write_text("file-token\n")
-        with patch("reasons_lib.hf.Path.home", return_value=tmp_path):
+        with patch("reasons.hf.Path.home", return_value=tmp_path):
             assert _resolve_token() == "file-token"
 
     def test_no_token_returns_none(self, monkeypatch):
         monkeypatch.delenv("HF_TOKEN", raising=False)
-        with patch("reasons_lib.hf.Path.home", return_value=Path("/nonexistent")):
+        with patch("reasons.hf.Path.home", return_value=Path("/nonexistent")):
             assert _resolve_token() is None
 
     def test_explicit_over_env(self, monkeypatch):
@@ -84,50 +84,50 @@ class TestResolveToken:
 
 class TestDownloadNetwork:
 
-    @patch("reasons_lib.hf.urlopen")
+    @patch("reasons.hf.urlopen")
     def test_success(self, mock_urlopen):
         mock_urlopen.return_value = _mock_response(SAMPLE_NETWORK)
         result = download_network("user/repo", token="tok")
         data = json.loads(result)
         assert data["nodes"]["a"]["text"] == "Node A"
 
-    @patch("reasons_lib.hf.urlopen")
+    @patch("reasons.hf.urlopen")
     def test_correct_url(self, mock_urlopen):
         mock_urlopen.return_value = _mock_response(SAMPLE_NETWORK)
         download_network("user/my-eem", token="tok")
         req = mock_urlopen.call_args[0][0]
         assert req.full_url == "https://huggingface.co/user/my-eem/resolve/main/network.json"
 
-    @patch("reasons_lib.hf.urlopen")
+    @patch("reasons.hf.urlopen")
     def test_auth_header_present(self, mock_urlopen):
         mock_urlopen.return_value = _mock_response(SAMPLE_NETWORK)
         download_network("user/repo", token="secret-tok")
         req = mock_urlopen.call_args[0][0]
         assert req.get_header("Authorization") == "Bearer secret-tok"
 
-    @patch("reasons_lib.hf._resolve_token", return_value=None)
-    @patch("reasons_lib.hf.urlopen")
+    @patch("reasons.hf._resolve_token", return_value=None)
+    @patch("reasons.hf.urlopen")
     def test_no_auth_header_without_token(self, mock_urlopen, mock_resolve):
         mock_urlopen.return_value = _mock_response(SAMPLE_NETWORK)
         download_network("user/repo")
         req = mock_urlopen.call_args[0][0]
         assert not req.has_header("Authorization")
 
-    @patch("reasons_lib.hf.urlopen")
+    @patch("reasons.hf.urlopen")
     def test_401_raises_auth_error(self, mock_urlopen):
         mock_urlopen.side_effect = HTTPError(
             "url", 401, "Unauthorized", {}, BytesIO(b""))
         with pytest.raises(RuntimeError, match="Authentication required"):
             download_network("user/private-repo")
 
-    @patch("reasons_lib.hf.urlopen")
+    @patch("reasons.hf.urlopen")
     def test_404_raises_not_found(self, mock_urlopen):
         mock_urlopen.side_effect = HTTPError(
             "url", 404, "Not Found", {}, BytesIO(b""))
         with pytest.raises(RuntimeError, match="not found"):
             download_network("user/missing-repo")
 
-    @patch("reasons_lib.hf.urlopen")
+    @patch("reasons.hf.urlopen")
     def test_url_input(self, mock_urlopen):
         mock_urlopen.return_value = _mock_response(SAMPLE_NETWORK)
         download_network("https://huggingface.co/user/repo", token="tok")
@@ -137,7 +137,7 @@ class TestDownloadNetwork:
 
 class TestImportHfApi:
 
-    @patch("reasons_lib.hf.urlopen")
+    @patch("reasons.hf.urlopen")
     def test_import_with_init(self, mock_urlopen, tmp_path):
         mock_urlopen.return_value = _mock_response(SAMPLE_NETWORK)
         db = str(tmp_path / "test.db")
@@ -147,7 +147,7 @@ class TestImportHfApi:
         assert result["repo_id"] == "user/repo"
         assert Path(db).exists()
 
-    @patch("reasons_lib.hf.urlopen")
+    @patch("reasons.hf.urlopen")
     def test_auto_init_sets_project_name(self, mock_urlopen, tmp_path):
         mock_urlopen.return_value = _mock_response(SAMPLE_NETWORK)
         db = str(tmp_path / "test.db")
@@ -156,7 +156,7 @@ class TestImportHfApi:
         data = api.export_network(db_path=db)
         assert data["meta"]["project_name"] == "test-eem"
 
-    @patch("reasons_lib.hf.urlopen")
+    @patch("reasons.hf.urlopen")
     def test_import_into_existing_db(self, mock_urlopen, tmp_path):
         mock_urlopen.return_value = _mock_response(SAMPLE_NETWORK)
         db = str(tmp_path / "test.db")
@@ -164,7 +164,7 @@ class TestImportHfApi:
         result = api.import_hf("user/repo", token="tok", db_path=db)
         assert result["nodes_imported"] == 2
 
-    @patch("reasons_lib.hf.urlopen")
+    @patch("reasons.hf.urlopen")
     def test_init_flag_with_existing_db(self, mock_urlopen, tmp_path):
         mock_urlopen.return_value = _mock_response(SAMPLE_NETWORK)
         db = str(tmp_path / "test.db")
@@ -172,7 +172,7 @@ class TestImportHfApi:
         result = api.import_hf("user/repo", init=True, token="tok", db_path=db)
         assert result["nodes_imported"] == 2
 
-    @patch("reasons_lib.hf.urlopen")
+    @patch("reasons.hf.urlopen")
     def test_import_hf_with_url(self, mock_urlopen, tmp_path):
         mock_urlopen.return_value = _mock_response(SAMPLE_NETWORK)
         db = str(tmp_path / "test.db")

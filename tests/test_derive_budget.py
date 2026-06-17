@@ -9,8 +9,8 @@ import re
 
 import pytest
 
-from reasons_lib import api
-from reasons_lib.derive import _build_beliefs_section, build_prompt
+from reasons import api
+from reasons.derive import _build_beliefs_section, build_prompt
 
 
 @pytest.fixture

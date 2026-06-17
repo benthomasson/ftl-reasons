@@ -7,8 +7,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-import reasons_lib.llm as llm_module
-from reasons_lib.llm import (
+import reasons.llm as llm_module
+from reasons.llm import (
     _get_langfuse_handler,
     _invoke_api,
     _parse_cli_json,
@@ -59,15 +59,15 @@ class TestResolveModelCmd:
 class TestInvokeModel:
 
     def test_missing_binary_raises(self):
-        with patch("reasons_lib.llm.shutil.which", return_value=None):
+        with patch("reasons.llm.shutil.which", return_value=None):
             with pytest.raises(FileNotFoundError, match="not found in PATH"):
                 invoke_model("hello", model="claude")
 
     def test_invokes_subprocess(self):
         json_out = json.dumps({"result": "response", "usage": {}, "total_cost_usd": 0.0})
         mock_result = type("Result", (), {"returncode": 0, "stdout": json_out, "stderr": ""})()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result) as mock_run:
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result) as mock_run:
             result = invoke_model("hello", model="claude", timeout=60)
             assert result == "response"
             mock_run.assert_called_once()
@@ -78,15 +78,15 @@ class TestInvokeModel:
 
     def test_nonzero_exit_raises(self):
         mock_result = type("Result", (), {"returncode": 1, "stdout": "", "stderr": "error msg"})()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             with pytest.raises(RuntimeError, match="claude failed"):
                 invoke_model("hello", model="claude")
 
     def test_ollama_command(self):
         mock_result = type("Result", (), {"returncode": 0, "stdout": "ollama response", "stderr": ""})()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/ollama"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result) as mock_run:
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/ollama"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result) as mock_run:
             result = invoke_model("hello", model="ollama:gemma3:4b")
             assert result == "ollama response"
             args = mock_run.call_args
@@ -95,24 +95,24 @@ class TestInvokeModel:
     def test_ollama_strips_thinking_output(self):
         thinking = "Thinking...\nsome internal reasoning\n...done thinking.\nThe actual answer."
         mock_result = type("Result", (), {"returncode": 0, "stdout": thinking, "stderr": ""})()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/ollama"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/ollama"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             result = invoke_model("hello", model="ollama:qwen3:4b")
             assert result == "The actual answer."
 
     def test_ollama_no_thinking_markers_unchanged(self):
         output = "Just a normal response."
         mock_result = type("Result", (), {"returncode": 0, "stdout": output, "stderr": ""})()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/ollama"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/ollama"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             result = invoke_model("hello", model="ollama:qwen3:4b")
             assert result == "Just a normal response."
 
     def test_ollama_incomplete_thinking_unchanged(self):
         output = "Thinking...\nsome reasoning but no end marker"
         mock_result = type("Result", (), {"returncode": 0, "stdout": output, "stderr": ""})()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/ollama"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/ollama"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             result = invoke_model("hello", model="ollama:qwen3:4b")
             assert result == output
 
@@ -120,16 +120,16 @@ class TestInvokeModel:
         output = "Thinking...\nsome reasoning\n...done thinking.\nAnswer."
         json_out = json.dumps({"result": output, "usage": {}, "total_cost_usd": 0.0})
         mock_result = type("Result", (), {"returncode": 0, "stdout": json_out, "stderr": ""})()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             result = invoke_model("hello", model="claude")
             assert result == output
 
     def test_strips_claudecode_env(self):
         json_out = json.dumps({"result": "ok", "usage": {}, "total_cost_usd": 0.0})
         mock_result = type("Result", (), {"returncode": 0, "stdout": json_out, "stderr": ""})()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result) as mock_run, \
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result) as mock_run, \
              patch.dict("os.environ", {"CLAUDECODE": "1", "HOME": "/home/test"}):
             invoke_model("hello", model="claude")
             env = mock_run.call_args[1]["env"]
@@ -157,13 +157,13 @@ class TestResolveModelCmdApiModels:
 class TestInvokeModelApiDispatch:
 
     def test_api_prefix_dispatches(self):
-        with patch("reasons_lib.llm._invoke_api", return_value="api response") as mock:
+        with patch("reasons.llm._invoke_api", return_value="api response") as mock:
             result = invoke_model("hello", model="api:claude-sonnet-4-20250514")
             assert result == "api response"
             mock.assert_called_once_with("hello", "api:claude-sonnet-4-20250514", 300)
 
     def test_vertex_prefix_dispatches(self):
-        with patch("reasons_lib.llm._invoke_api", return_value="vertex response") as mock:
+        with patch("reasons.llm._invoke_api", return_value="vertex response") as mock:
             result = invoke_model("hello", model="vertex:claude-sonnet-4-20250514", timeout=60)
             assert result == "vertex response"
             mock.assert_called_once_with("hello", "vertex:claude-sonnet-4-20250514", 60)
@@ -171,8 +171,8 @@ class TestInvokeModelApiDispatch:
     def test_claude_still_uses_subprocess(self):
         json_out = json.dumps({"result": "cli response", "usage": {}, "total_cost_usd": 0.0})
         mock_result = type("Result", (), {"returncode": 0, "stdout": json_out, "stderr": ""})()
-        with patch("reasons_lib.llm.shutil.which", return_value="/usr/bin/claude"), \
-             patch("reasons_lib.llm.subprocess.run", return_value=mock_result):
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
             result = invoke_model("hello", model="claude")
             assert result == "cli response"
 

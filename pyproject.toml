@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ftl-reasons"
-version = "0.47.0"
+version = "0.48.0"
 description = "Reasons — automatic belief retraction and dependency-directed backtracking"
 readme = "README.md"
 license = "MIT"
@@ -23,11 +23,11 @@ langfuse = ["langfuse>=2.0"]
 llm = ["langchain-anthropic>=0.3", "langchain-google-vertexai>=2.0", "langfuse>=2.0"]
 
 [project.scripts]
-reasons = "reasons_lib.cli:main"
-reasons-mcp = "reasons_lib.mcp_server:main"
+reasons = "reasons.cli:main"
+reasons-mcp = "reasons.mcp_server:main"
 
 [tool.setuptools]
-packages = ["reasons_lib"]
+packages = ["reasons", "reasons_lib"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

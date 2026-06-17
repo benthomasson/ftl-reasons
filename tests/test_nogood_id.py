@@ -9,9 +9,9 @@ import json
 
 import pytest
 
-from reasons_lib import api, Nogood
-from reasons_lib.network import Network
-from reasons_lib.storage import Storage
+from reasons import api, Nogood
+from reasons.network import Network
+from reasons.storage import Storage
 
 
 @pytest.fixture
@@ -176,8 +176,8 @@ class TestImportBeliefs:
 - Affects: a, b
 - Discovered: 2026-01-01
 """
-        from reasons_lib.import_beliefs import import_into_network
-        from reasons_lib.storage import Storage
+        from reasons.import_beliefs import import_into_network
+        from reasons.storage import Storage
 
         storage = Storage(db)
         net = storage.load()
