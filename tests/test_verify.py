@@ -148,6 +148,25 @@ class TestApiVerifyBelief:
         assert result["stale"] == []
         assert result["results"]["p1"]["verdict"] == "CONFIRMED"
 
+    def test_verified_at_stamped(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        source_file = tmp_path / "doc.md"
+        source_file.write_text("PostgreSQL is the primary database.")
+        api.add_node("p1", "PostgreSQL is the primary database",
+                     source=str(source_file), db_path=db)
+
+        llm_resp = json.dumps({
+            "p1": {"verdict": "CONFIRMED", "reason": "exact match",
+                   "quote": "PostgreSQL is the primary database."},
+        })
+        mock = _mock_result(llm_resp)
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock):
+            api.verify_belief("p1", db_path=db)
+
+        node = api.show_node("p1", db_path=db)
+        assert node["verified_at"] is not None
+
     def test_stale_detected(self, tmp_path):
         db = str(tmp_path / "test.db")
         source_file = tmp_path / "doc.md"

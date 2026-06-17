@@ -2696,6 +2696,8 @@ def verify_belief(
 
     verified = []
     stale = []
+    retract_failed = []
+    stamp_failed = []
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     for b, _ in beliefs_with_sources:
@@ -2712,7 +2714,7 @@ def verify_belief(
                     reason = verdict.get("reason", "stale per verify")
                     retract_node(bid, reason=f"verify: {reason}", **backend)
                 except Exception:
-                    pass
+                    retract_failed.append(bid)
 
     if not pg_conninfo and verified:
         try:
@@ -2721,10 +2723,12 @@ def verify_belief(
                     if bid in net.nodes:
                         net.nodes[bid].verified_at = now
                         net.nodes[bid].updated_at = now
+                    else:
+                        stamp_failed.append(bid)
         except Exception:
-            pass
+            stamp_failed = list(verified)
 
-    return {
+    result = {
         "results": verdicts,
         "verified": verified,
         "stale": stale,
@@ -2732,6 +2736,11 @@ def verify_belief(
         "is_derived": has_justifications,
         "dry_run": False,
     }
+    if retract_failed:
+        result["retract_failed"] = retract_failed
+    if stamp_failed:
+        result["stamp_failed"] = stamp_failed
+    return result
 
 
 NEGATIVE_BATCH_SIZE = 50
