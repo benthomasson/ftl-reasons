@@ -2705,11 +2705,6 @@ def verify_belief(
 
         if v == "CONFIRMED":
             verified.append(bid)
-            try:
-                set_metadata(bid, "verified_at", now, **backend)
-            except Exception:
-                pass
-
         elif v == "STALE":
             stale.append(bid)
             if retract:
@@ -2718,6 +2713,16 @@ def verify_belief(
                     retract_node(bid, reason=f"verify: {reason}", **backend)
                 except Exception:
                     pass
+
+    if not pg_conninfo and verified:
+        try:
+            with _with_network(db_path, write=True) as net:
+                for bid in verified:
+                    if bid in net.nodes:
+                        net.nodes[bid].verified_at = now
+                        net.nodes[bid].updated_at = now
+        except Exception:
+            pass
 
     return {
         "results": verdicts,

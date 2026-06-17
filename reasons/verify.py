@@ -105,8 +105,11 @@ def parse_verify_response(response):
     for k, v in data.items():
         if not isinstance(v, dict) or "verdict" not in v:
             continue
+        raw_verdict = v["verdict"]
+        if not isinstance(raw_verdict, str):
+            continue
         results[k] = {
-            "verdict": v["verdict"].upper(),
+            "verdict": raw_verdict.upper(),
             "reason": v.get("reason", ""),
             "quote": v.get("quote"),
         }
