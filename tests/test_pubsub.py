@@ -302,6 +302,35 @@ class TestApiIntegration:
         assert len(global_received) == 1
         assert len(scoped_received) == 1
 
+    def test_defend_emits_events(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        api.add_node("target", "A belief", db_path=db)
+        api.challenge("target", reason="disputed",
+                      challenge_id="ch-1", db_path=db)
+
+        received = []
+        subscribe(lambda events: received.extend(events))
+        api.defend("target", "ch-1", reason="evidence",
+                   db_path=db)
+
+        changed_ids = {e.node_id for e in received}
+        assert "target" in changed_ids
+        target_events = [e for e in received if e.node_id == "target"]
+        assert target_events[0].new_truth_value == "IN"
+
+    def test_add_nogood_emits_events(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        api.add_node("a", "Premise A", db_path=db)
+        api.add_node("b", "Premise B", db_path=db)
+
+        received = []
+        subscribe(lambda events: received.extend(events))
+        api.add_nogood(["a", "b"], db_path=db)
+
+        changed_ids = {e.node_id for e in received}
+        # add_nogood backtracks by retracting one of the conflicting nodes
+        assert len(changed_ids) >= 1
+
     def test_no_events_on_exception(self, tmp_path):
         db = str(tmp_path / "test.db")
         api.init_db(db_path=db)
@@ -309,6 +338,8 @@ class TestApiIntegration:
         received = []
         subscribe(lambda events: received.extend(events))
 
+        # retract_node raises KeyError for nonexistent nodes;
+        # the exception must prevent both save and event emission
         with pytest.raises(KeyError):
             api.retract_node("nonexistent", db_path=db)
 

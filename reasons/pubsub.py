@@ -3,6 +3,10 @@
 Subscribers receive batched events after each _with_network write
 transaction completes (after save). Events are never emitted for
 intermediate cascade states -- only the final stable state is visible.
+
+Events carry what changed (old/new truth values) but not why — the
+_with_network hook sees only before/after snapshots, so cause and
+cascade_root metadata are not available at this level.
 """
 
 import logging
@@ -14,7 +18,11 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class ChangeEvent:
-    """A single truth-value change observed during a write transaction."""
+    """A single truth-value change observed during a write transaction.
+
+    Does not include cause or cascade_root — the _with_network hook only
+    sees before/after snapshots, not which operation triggered the change.
+    """
     type: str
     node_id: str
     old_truth_value: str | None
