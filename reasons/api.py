@@ -18,6 +18,7 @@ from itertools import combinations
 from pathlib import Path
 
 from . import Justification
+from . import pubsub
 from .metadata import build_meta
 from .network import Network
 from .storage import Storage
@@ -58,13 +59,28 @@ def _with_network(db_path: str, write: bool = False):
         def __init__(self):
             self.store = Storage(db_path)
             self.network = self.store.load()
+            self._before: dict[str, str] | None = None
 
         def __enter__(self):
+            if write and pubsub.has_subscribers(db_path):
+                self._before = {
+                    nid: n.truth_value
+                    for nid, n in self.network.nodes.items()
+                }
             return self.network
 
         def __exit__(self, exc_type, exc_val, exc_tb):
             if write and exc_type is None:
                 self.store.save(self.network)
+                if self._before is not None:
+                    after = {
+                        nid: n.truth_value
+                        for nid, n in self.network.nodes.items()
+                    }
+                    events = pubsub.compute_changes(
+                        self._before, after, db_path
+                    )
+                    pubsub.publish(events, db_path)
             self.store.close()
             return False
 
