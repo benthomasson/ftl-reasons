@@ -51,12 +51,21 @@ Given the existing beliefs and derived conclusions below, propose NEW derived co
 
 - Each proposed conclusion must have at least 2 antecedents
 - Antecedents must be existing belief IDs from the list below
+- **Only include load-bearing antecedents** — if a belief was in scope during your reasoning \
+  but is not essential to the conclusion, do not list it as an antecedent
 - Prefer combining existing derived beliefs (deeper chains) over just grouping base beliefs
 - For outlist-gated beliefs: the antecedent should be a positive claim, the unless should be \
   a negative claim (bug, gap, issue, fragility)
 - Don't propose conclusions that merely restate a single antecedent
 - Don't propose conclusions whose antecedents are unrelated (no forced connections)
 - Each conclusion should represent a genuine emergent property or insight
+- **Classify each derivation as ALL or ANY**:
+  - **ALL**: The conclusion requires all antecedents together (a logical chain where each \
+    step depends on the previous). Retracting any single antecedent should retract the conclusion.
+  - **ANY**: Each antecedent independently supports the conclusion (convergent evidence). \
+    The conclusion should survive as long as at least one antecedent holds.
+  - Most cross-cutting conclusions and convergent observations should be ANY. \
+    Multi-step logical arguments should be ALL.
 
 ## Output Format
 
@@ -65,6 +74,7 @@ For each proposed conclusion, output EXACTLY this format:
 ### DERIVE <belief-id-in-kebab-case>
 <one-line claim text>
 - Antecedents: <comma-separated list of existing belief IDs>
+- Mode: ALL or ANY
 - Label: <brief justification rationale>
 
 For outlist-gated conclusions:
@@ -73,6 +83,7 @@ For outlist-gated conclusions:
 <one-line claim text>
 - Antecedents: <comma-separated list of existing belief IDs>
 - Unless: <comma-separated list of belief IDs that must be OUT>
+- Mode: ALL or ANY
 - Label: <brief justification rationale>
 
 ---
@@ -371,9 +382,11 @@ def parse_proposals(response):
         r"(.+?)\n"
         r"- Antecedents: (.+?)\n"
         r"(?:- Unless: (.+?)\n)?"
+        r"(?:- Mode: (ALL|ANY)\n)?"
         r"- Label: (.+?)(?:\n|$)",
     )
     for match in new_pattern.finditer(response):
+        mode_raw = match.group(6)
         proposal = {
             "kind": match.group(1).lower(),
             "id": match.group(2).strip("`"),
@@ -381,7 +394,8 @@ def parse_proposals(response):
             "antecedents": [a.strip().strip("`") for a in match.group(4).split(",")],
             "unless": [u.strip().strip("`") for u in match.group(5).split(",")]
                       if match.group(5) else [],
-            "label": match.group(6).strip(),
+            "mode": mode_raw.lower() if mode_raw else "all",
+            "label": match.group(7).strip(),
         }
         proposals.append(proposal)
 
@@ -637,6 +651,7 @@ def apply_proposals(valid, db_path="reasons.db"):
                 unless=unless,
                 label=p["label"],
                 source_type="derived",
+                any_mode=p.get("mode") == "any",
                 db_path=db_path,
             )
             results.append((p, result))
@@ -659,11 +674,13 @@ def write_proposals_file(valid, output_path):
 
         for p in valid:
             kind = "DERIVE" if p["kind"] == "derive" else "GATE"
+            mode = p.get("mode", "all").upper()
             f.write(f"### {kind} {p['id']}\n")
             f.write(f"{p['text']}\n")
             f.write(f"- Antecedents: {', '.join(p['antecedents'])}\n")
             if p["unless"]:
                 f.write(f"- Unless: {', '.join(p['unless'])}\n")
+            f.write(f"- Mode: {mode}\n")
             f.write(f"- Label: {p['label']}\n\n")
 
     return output_path
