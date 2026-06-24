@@ -93,6 +93,20 @@ class TestParseJustificationReview:
         results = parse_justification_review(response)
         assert results[0]["classification"] == "ANY"
 
+    def test_parse_null_fields(self):
+        response = json.dumps([{
+            "id": "x",
+            "classification": None,
+            "required_antecedents": None,
+            "independent_antecedents": None,
+            "comment": None,
+        }])
+        results = parse_justification_review(response)
+        assert results[0]["classification"] == "ALL"
+        assert results[0]["required_antecedents"] == []
+        assert results[0]["independent_antecedents"] == []
+        assert results[0]["comment"] == ""
+
 
 class TestHasMultiAntecedentSl:
 

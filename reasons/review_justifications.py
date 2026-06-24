@@ -80,12 +80,15 @@ def parse_justification_review(response):
         for item in items:
             if not isinstance(item, dict) or "id" not in item:
                 continue
+            cls = item.get("classification")
+            req = item.get("required_antecedents")
+            ind = item.get("independent_antecedents")
             results.append({
                 "id": item["id"],
-                "classification": item.get("classification", "ALL").upper(),
-                "required_antecedents": item.get("required_antecedents", []),
-                "independent_antecedents": item.get("independent_antecedents", []),
-                "comment": item.get("comment", ""),
+                "classification": cls.upper() if isinstance(cls, str) else "ALL",
+                "required_antecedents": req if isinstance(req, list) else [],
+                "independent_antecedents": ind if isinstance(ind, list) else [],
+                "comment": item.get("comment") or "",
             })
         if results:
             return results
