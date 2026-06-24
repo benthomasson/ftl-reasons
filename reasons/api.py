@@ -3014,6 +3014,57 @@ def review_beliefs(
     }
 
 
+def review_justifications(
+    belief_ids: list[str] | None = None,
+    model: str = "claude",
+    timeout: int = 300,
+    min_antecedents: int = 2,
+    on_batch: Callable | None = None,
+    db_path: str = DEFAULT_DB,
+) -> dict:
+    """Review SL justifications for ALL vs ANY misclassification.
+
+    Uses an LLM to evaluate whether each multi-antecedent SL justification
+    should be conjunctive (ALL) or disjunctive (ANY). Read-only — does not
+    modify the database.
+
+    Returns: {"results": [...], "reviewed": int, "convert_any": int,
+              "convert_mixed": int, "keep_all": int, "total_candidates": int}
+    """
+    from .review_justifications import (
+        review_justifications as _review,
+        _has_multi_antecedent_sl,
+    )
+
+    result = export_network(db_path=db_path)
+    nodes = result.get("nodes", {})
+
+    candidates = {
+        nid: node for nid, node in nodes.items()
+        if node.get("truth_value") == "IN"
+        and _has_multi_antecedent_sl(node, min_antecedents)
+    }
+    if belief_ids:
+        candidates = {k: v for k, v in candidates.items() if k in belief_ids}
+    total_candidates = len(candidates)
+
+    results = _review(nodes, belief_ids=belief_ids, model=model, timeout=timeout,
+                      min_antecedents=min_antecedents, on_batch=on_batch)
+
+    convert_any = sum(1 for r in results if r.get("classification") == "ANY")
+    convert_mixed = sum(1 for r in results if r.get("classification") == "MIXED")
+    keep_all = sum(1 for r in results if r.get("classification") == "ALL")
+
+    return {
+        "results": results,
+        "reviewed": len(results),
+        "convert_any": convert_any,
+        "convert_mixed": convert_mixed,
+        "keep_all": keep_all,
+        "total_candidates": total_candidates,
+    }
+
+
 def review_premises(
     belief_ids: list[str] | None = None,
     model: str = "claude",
