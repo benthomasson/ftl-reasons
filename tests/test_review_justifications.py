@@ -167,6 +167,35 @@ class TestReviewJustifications:
         assert len(results) == 1
         assert results[0]["id"] == "multi"
 
+    def test_parallel(self):
+        nodes = {
+            "d1": {
+                "truth_value": "IN",
+                "justifications": [{"type": "SL", "antecedents": ["a", "b"]}],
+                "text": "derived 1",
+            },
+            "d2": {
+                "truth_value": "IN",
+                "justifications": [{"type": "SL", "antecedents": ["a", "c"]}],
+                "text": "derived 2",
+            },
+            "a": {"truth_value": "IN", "text": "A", "justifications": []},
+            "b": {"truth_value": "IN", "text": "B", "justifications": []},
+            "c": {"truth_value": "IN", "text": "C", "justifications": []},
+        }
+
+        def mock_invoke(prompt, model=None, timeout=None):
+            if "derived 1" in prompt:
+                return json.dumps([{"id": "d1", "classification": "ANY"}])
+            return json.dumps([{"id": "d2", "classification": "ALL"}])
+
+        with patch("reasons.review_justifications.invoke_model",
+                   side_effect=mock_invoke):
+            results = review_justifications(nodes, batch_size=1, parallel=2)
+        ids = {r["id"] for r in results}
+        assert ids == {"d1", "d2"}
+        assert len(results) == 2
+
     def test_respects_min_antecedents(self):
         nodes = {
             "two-ant": {
