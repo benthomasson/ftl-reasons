@@ -205,6 +205,50 @@ Feature X is production-ready
     assert p["unless"] == ["fact-c"]
 
 
+def test_parse_proposals_with_mode_any():
+    response = """
+### DERIVE resilient-conclusion
+Multiple independent observations support this claim
+- Antecedents: obs-a, obs-b, obs-c
+- Mode: ANY
+- Label: convergent evidence from independent observations
+"""
+    proposals = parse_proposals(response)
+    assert len(proposals) == 1
+    p = proposals[0]
+    assert p["mode"] == "any"
+    assert p["antecedents"] == ["obs-a", "obs-b", "obs-c"]
+
+
+def test_parse_proposals_mode_defaults_all():
+    response = """
+### DERIVE chained-conclusion
+This requires all steps in the logical chain
+- Antecedents: step-a, step-b
+- Label: sequential dependency
+"""
+    proposals = parse_proposals(response)
+    assert len(proposals) == 1
+    assert proposals[0]["mode"] == "all"
+
+
+def test_parse_proposals_gate_with_mode():
+    response = """
+### GATE feature-stable
+Feature is stable when supported by any evidence and no blockers
+- Antecedents: evidence-a, evidence-b
+- Unless: blocker-x
+- Mode: ANY
+- Label: gated on blocker resolution
+"""
+    proposals = parse_proposals(response)
+    assert len(proposals) == 1
+    p = proposals[0]
+    assert p["kind"] == "gate"
+    assert p["mode"] == "any"
+    assert p["unless"] == ["blocker-x"]
+
+
 def test_parse_proposals_multiple():
     response = """
 ### DERIVE first-one
@@ -296,6 +340,25 @@ def test_apply_proposals_with_gate(simple_network):
     # Retract fact-c — gated belief should come back IN
     api.retract_node("fact-c", db_path=simple_network)
     node = api.show_node("gated-belief", db_path=simple_network)
+    assert node["truth_value"] == "IN"
+
+
+def test_apply_proposals_any_mode(simple_network):
+    proposals = [
+        {"id": "any-derived", "text": "Supported by either a or c",
+         "antecedents": ["fact-a", "fact-c"], "unless": [],
+         "kind": "derive", "label": "convergent", "mode": "any"},
+    ]
+    results = apply_proposals(proposals, db_path=simple_network)
+    p, result = results[0]
+    assert result["truth_value"] == "IN"
+
+    node = api.show_node("any-derived", db_path=simple_network)
+    assert len(node["justifications"]) == 2
+    assert all(len(j["antecedents"]) == 1 for j in node["justifications"])
+
+    api.retract_node("fact-a", db_path=simple_network)
+    node = api.show_node("any-derived", db_path=simple_network)
     assert node["truth_value"] == "IN"
 
 
@@ -474,9 +537,11 @@ def test_write_proposals_file_roundtrip(tmp_path):
     """Proposals file can be parsed back by parse_proposals."""
     proposals = [
         {"id": "derived-1", "text": "First conclusion", "kind": "derive",
-         "antecedents": ["fact-a", "fact-b"], "unless": [], "label": "test"},
+         "antecedents": ["fact-a", "fact-b"], "unless": [], "label": "test",
+         "mode": "all"},
         {"id": "gated-1", "text": "Gated conclusion", "kind": "gate",
-         "antecedents": ["fact-a"], "unless": ["fact-c"], "label": "test gate"},
+         "antecedents": ["fact-a"], "unless": ["fact-c"], "label": "test gate",
+         "mode": "any"},
     ]
     out = tmp_path / "proposals.md"
     write_proposals_file(proposals, out)
@@ -486,8 +551,10 @@ def test_write_proposals_file_roundtrip(tmp_path):
     assert len(parsed) == 2
     assert parsed[0]["id"] == "derived-1"
     assert parsed[0]["antecedents"] == ["fact-a", "fact-b"]
+    assert parsed[0]["mode"] == "all"
     assert parsed[1]["id"] == "gated-1"
     assert parsed[1]["unless"] == ["fact-c"]
+    assert parsed[1]["mode"] == "any"
 
 
 def test_accept_applies_proposals(simple_network, tmp_path):
