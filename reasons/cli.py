@@ -1781,6 +1781,70 @@ def cmd_review_beliefs(args):
         print(f"  {cost}", file=sys.stderr)
 
 
+def cmd_review_justifications(args):
+    _require_sqlite(args, "review-justifications")
+    from .llm import reset_cost_tracker, format_cost_summary
+    reset_cost_tracker()
+
+    model = getattr(args, "model", None) or "claude"
+
+    result = api.review_justifications(
+        belief_ids=[args.node] if args.node else None,
+        model=model,
+        timeout=args.timeout,
+        min_antecedents=args.min_antecedents,
+        db_path=args.db,
+    )
+
+    reviews = result["results"]
+    if not reviews:
+        print("No multi-antecedent SL justifications to review.")
+        return
+
+    for r in reviews:
+        cls = r.get("classification", "ALL")
+        if cls in ("ANY", "MIXED"):
+            print(f"  [{cls}] {r['id']}")
+            if r.get("comment"):
+                print(f"    {r['comment']}")
+            if cls == "ANY":
+                indep = r.get("independent_antecedents", [])
+                if indep:
+                    sl = ",".join(indep)
+                    print(f"    Fix: reasons add-justification {r['id']} --sl {sl} --any")
+            elif cls == "MIXED":
+                req = r.get("required_antecedents", [])
+                indep = r.get("independent_antecedents", [])
+                if req:
+                    print(f"    Required together: {', '.join(req)}")
+                if indep:
+                    print(f"    Independent: {', '.join(indep)}")
+
+    print(f"\nReviewed {result['reviewed']} justifications")
+    print(f"  Keep ALL: {result['keep_all']}  Convert ANY: {result['convert_any']}"
+          f"  Mixed: {result['convert_mixed']}")
+
+    if args.output:
+        with open(args.output, "w") as f:
+            f.write("# Justification Review\n\n")
+            for r in reviews:
+                cls = r.get("classification", "ALL")
+                f.write(f"### {r['id']}\n")
+                f.write(f"- Classification: {cls}\n")
+                if r.get("required_antecedents"):
+                    f.write(f"- Required: {', '.join(r['required_antecedents'])}\n")
+                if r.get("independent_antecedents"):
+                    f.write(f"- Independent: {', '.join(r['independent_antecedents'])}\n")
+                if r.get("comment"):
+                    f.write(f"- Comment: {r['comment']}\n")
+                f.write("\n")
+        print(f"\nWrote findings to {args.output}")
+
+    cost = format_cost_summary()
+    if cost:
+        print(f"  {cost}", file=sys.stderr)
+
+
 def cmd_review_premises(args):
     _require_sqlite(args, "review-premises")
     import json
@@ -2736,6 +2800,19 @@ def main():
     p.add_argument("--no-report", action="store_true",
                    help="Skip JSON report generation")
 
+    # review-justifications
+    p = sub.add_parser("review-justifications",
+                       help="Review SL justifications for ALL vs ANY misclassification")
+    p.add_argument("--node", default=None, help="Review a specific belief")
+    p.add_argument("--min-antecedents", type=int, default=2,
+                   help="Only review justifications with at least N antecedents (default: 2)")
+    p.add_argument("-m", "--model", default=None,
+                   help="Model to use (default: claude)")
+    p.add_argument("--timeout", type=int, default=600,
+                   help="LLM timeout in seconds (default: 600)")
+    p.add_argument("-o", "--output", default=None,
+                   help="Write findings to markdown file")
+
     # review-premises
     p = sub.add_parser("review-premises", help="Review premises against source material for factual accuracy")
     p.add_argument("ids", nargs="*", help="Specific premise IDs to review (default: all IN premises)")
@@ -2942,6 +3019,7 @@ def main():
         "topics": cmd_topics,
         "build-wiki": cmd_build_wiki,
         "review-beliefs": cmd_review_beliefs,
+        "review-justifications": cmd_review_justifications,
         "review-premises": cmd_review_premises,
         "repair-premises": cmd_repair_premises,
         "propose-update": cmd_propose_update,
