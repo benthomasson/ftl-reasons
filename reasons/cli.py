@@ -1793,6 +1793,7 @@ def cmd_review_justifications(args):
         model=model,
         timeout=args.timeout,
         min_antecedents=args.min_antecedents,
+        parallel=args.parallel,
         db_path=args.db,
     )
 
@@ -2810,6 +2811,8 @@ def main():
                    help="Model to use (default: claude)")
     p.add_argument("--timeout", type=int, default=600,
                    help="LLM timeout in seconds (default: 600)")
+    p.add_argument("--parallel", type=int, default=0,
+                   help="Number of concurrent LLM workers (default: 0 = sequential)")
     p.add_argument("-o", "--output", default=None,
                    help="Write findings to markdown file")
 

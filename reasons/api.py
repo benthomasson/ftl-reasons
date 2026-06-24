@@ -3020,6 +3020,7 @@ def review_justifications(
     timeout: int = 300,
     min_antecedents: int = 2,
     on_batch: Callable | None = None,
+    parallel: int = 0,
     db_path: str = DEFAULT_DB,
 ) -> dict:
     """Review SL justifications for ALL vs ANY misclassification.
@@ -3049,7 +3050,8 @@ def review_justifications(
     total_candidates = len(candidates)
 
     results = _review(nodes, belief_ids=belief_ids, model=model, timeout=timeout,
-                      min_antecedents=min_antecedents, on_batch=on_batch)
+                      min_antecedents=min_antecedents, on_batch=on_batch,
+                      parallel=parallel)
 
     convert_any = sum(1 for r in results if r.get("classification") == "ANY")
     convert_mixed = sum(1 for r in results if r.get("classification") == "MIXED")
