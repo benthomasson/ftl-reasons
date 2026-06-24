@@ -118,6 +118,7 @@ def review_justifications(nodes, belief_ids=None, model="claude", timeout=300,
         belief_ids = [
             nid for nid in belief_ids
             if nid in nodes
+            and nodes[nid].get("truth_value") == "IN"
             and _has_multi_antecedent_sl(nodes[nid], min_antecedents)
         ]
 
@@ -141,6 +142,9 @@ def review_justifications(nodes, belief_ids=None, model="claude", timeout=300,
         try:
             response = invoke_model(prompt, model=model, timeout=timeout)
             results = parse_justification_review(response)
+            if not results and batch:
+                print(f"  WARN: batch {batch_num} returned no parseable results",
+                      file=sys.stderr)
             all_results.extend(results)
             if on_batch is not None:
                 on_batch(all_results)

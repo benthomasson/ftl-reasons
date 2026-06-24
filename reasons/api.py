@@ -3031,16 +3031,25 @@ def review_justifications(
     Returns: {"results": [...], "reviewed": int, "convert_any": int,
               "convert_mixed": int, "keep_all": int, "total_candidates": int}
     """
-    from .review_justifications import review_justifications as _review
+    from .review_justifications import (
+        review_justifications as _review,
+        _has_multi_antecedent_sl,
+    )
 
     result = export_network(db_path=db_path)
     nodes = result.get("nodes", {})
 
-    review_ids = belief_ids
-    results = _review(nodes, belief_ids=review_ids, model=model, timeout=timeout,
-                      min_antecedents=min_antecedents, on_batch=on_batch)
+    candidates = {
+        nid: node for nid, node in nodes.items()
+        if node.get("truth_value") == "IN"
+        and _has_multi_antecedent_sl(node, min_antecedents)
+    }
+    if belief_ids:
+        candidates = {k: v for k, v in candidates.items() if k in belief_ids}
+    total_candidates = len(candidates)
 
-    reviewed_ids = [r["id"] for r in results]
+    results = _review(nodes, belief_ids=belief_ids, model=model, timeout=timeout,
+                      min_antecedents=min_antecedents, on_batch=on_batch)
 
     convert_any = sum(1 for r in results if r.get("classification") == "ANY")
     convert_mixed = sum(1 for r in results if r.get("classification") == "MIXED")
@@ -3048,11 +3057,11 @@ def review_justifications(
 
     return {
         "results": results,
-        "reviewed": len(reviewed_ids),
+        "reviewed": len(results),
         "convert_any": convert_any,
         "convert_mixed": convert_mixed,
         "keep_all": keep_all,
-        "total_candidates": len(reviewed_ids),
+        "total_candidates": total_candidates,
     }
 
 
