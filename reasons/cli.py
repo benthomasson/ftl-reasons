@@ -409,16 +409,15 @@ def cmd_set_metadata(args):
 def cmd_get_metadata(args):
     try:
         node = api.show_node(args.node_id, **_backend_kwargs(args))
-    except KeyError as e:
+    except (KeyError, PermissionError) as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
     metadata = node.get("metadata", {})
     if args.key:
-        val = metadata.get(args.key)
-        if val is None:
+        if args.key not in metadata:
             print(f"No metadata key '{args.key}' on {args.node_id}", file=sys.stderr)
             sys.exit(1)
-        print(val)
+        print(metadata[args.key])
     else:
         if not metadata:
             print(f"No metadata on {args.node_id}")
