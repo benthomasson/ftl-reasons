@@ -412,7 +412,7 @@ def cmd_get_metadata(args):
     except (KeyError, PermissionError) as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
-    metadata = node.get("metadata", {})
+    metadata = node.get("metadata") or {}
     if args.key:
         if args.key not in metadata:
             print(f"No metadata key '{args.key}' on {args.node_id}", file=sys.stderr)
