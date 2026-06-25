@@ -406,6 +406,27 @@ def cmd_set_metadata(args):
     print(f"Set {result['key']} on {result['node_id']}")
 
 
+def cmd_get_metadata(args):
+    try:
+        node = api.show_node(args.node_id, **_backend_kwargs(args))
+    except KeyError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    metadata = node.get("metadata", {})
+    if args.key:
+        val = metadata.get(args.key)
+        if val is None:
+            print(f"No metadata key '{args.key}' on {args.node_id}", file=sys.stderr)
+            sys.exit(1)
+        print(val)
+    else:
+        if not metadata:
+            print(f"No metadata on {args.node_id}")
+            return
+        for k, v in sorted(metadata.items()):
+            print(f"{k}: {v}")
+
+
 def cmd_challenge(args):
     try:
         result = api.challenge(
@@ -2420,6 +2441,11 @@ def main():
     p.add_argument("key", help="Metadata key")
     p.add_argument("value", help="Metadata value")
 
+    # get-metadata
+    p = sub.add_parser("get-metadata", help="Show metadata for a belief")
+    p.add_argument("node_id", help="Belief to inspect")
+    p.add_argument("key", nargs="?", default=None, help="Specific key to show (default: all)")
+
     # challenge
     p = sub.add_parser("challenge", help="Challenge a node — target goes OUT")
     p.add_argument("target_id", help="Node to challenge")
@@ -3002,6 +3028,7 @@ def main():
         "summarize": cmd_summarize,
         "supersede": cmd_supersede,
         "update": cmd_update,
+        "get-metadata": cmd_get_metadata,
         "set-metadata": cmd_set_metadata,
         "challenge": cmd_challenge,
         "defend": cmd_defend,
