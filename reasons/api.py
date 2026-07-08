@@ -1023,6 +1023,109 @@ def defeat_justification(
         }
 
 
+def migrate_retract_to_defeaters(
+    node_ids: list[str] | None = None,
+    dry_run: bool = True,
+    db_path: str = DEFAULT_DB,
+) -> dict:
+    """Convert string-based retract_reason entries to graph-native defeaters.
+
+    Finds OUT nodes with retract_reason metadata whose justifications would
+    be satisfied if not for the _retracted flag. For each, creates a defeater
+    node on the first satisfied justification and clears the retract metadata.
+
+    Returns: {"migrated": [...], "skipped": [...], "errors": [...]}
+    """
+    with _with_network(db_path, write=not dry_run) as net:
+        candidates = node_ids or list(net.nodes.keys())
+        migrated = []
+        skipped = []
+        errors = []
+
+        for nid in candidates:
+            if nid not in net.nodes:
+                errors.append({"id": nid, "reason": "not found"})
+                continue
+
+            node = net.nodes[nid]
+            if node.truth_value != "OUT":
+                continue
+            retract_reason = (node.metadata or {}).get("retract_reason")
+            if not retract_reason:
+                continue
+            if not node.justifications:
+                skipped.append({"id": nid, "reason": "premise (no justifications)"})
+                continue
+
+            # Find first justification that would be satisfied
+            satisfied_idx = None
+            for i, j in enumerate(node.justifications):
+                inlist_ok = all(
+                    a in net.nodes and net.nodes[a].truth_value == "IN"
+                    for a in j.antecedents
+                )
+                outlist_ok = all(
+                    o not in net.nodes or net.nodes[o].truth_value == "OUT"
+                    for o in j.outlist
+                )
+                if inlist_ok and outlist_ok:
+                    satisfied_idx = i
+                    break
+
+            if satisfied_idx is None:
+                skipped.append({"id": nid, "reason": "no satisfied justification"})
+                continue
+
+            if dry_run:
+                migrated.append({
+                    "id": nid,
+                    "retract_reason": retract_reason,
+                    "justification_index": satisfied_idx,
+                })
+                continue
+
+            # Apply: inline defeat logic (can't call defeat_justification
+            # because it opens its own _with_network context)
+            defeater_id = f"migrated-retraction-{nid}-j{satisfied_idx}"
+            defeater_text = (
+                f"{retract_reason} (defeats {nid} justification {satisfied_idx})"
+            )
+
+            defeater = net.add_node(
+                id=defeater_id,
+                text=defeater_text,
+                metadata={
+                    "defeater_type": "migrated-retraction",
+                    "defeats_node": nid,
+                    "defeats_justification": satisfied_idx,
+                },
+            )
+
+            justification = node.justifications[satisfied_idx]
+            if defeater_id not in justification.outlist:
+                justification.outlist.append(defeater_id)
+            defeater.dependents.add(nid)
+            node.updated_at = datetime.now(timezone.utc).isoformat(
+                timespec="seconds"
+            )
+
+            # Clear the string-based retract metadata
+            node.metadata.pop("retract_reason", None)
+            node.metadata.pop("_retracted", None)
+
+            migrated.append({
+                "id": nid,
+                "defeater_id": defeater_id,
+                "retract_reason": retract_reason,
+                "justification_index": satisfied_idx,
+            })
+
+        if not dry_run and migrated:
+            net.recompute_all()
+
+        return {"migrated": migrated, "skipped": skipped, "errors": errors}
+
+
 def challenge(
     target_id: str,
     reason: str,

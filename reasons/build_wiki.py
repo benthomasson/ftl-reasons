@@ -50,7 +50,7 @@ def _page_name(label):
     return safe or "other"
 
 
-def _format_node(node_id, node_detail, node_to_page):
+def _format_node(node_id, node_detail, node_to_page, all_details=None):
     """Render one node as markdown with cross-reference links."""
     lines = []
     lines.append(f"### {node_id}")
@@ -78,6 +78,27 @@ def _format_node(node_id, node_detail, node_to_page):
             link = new_id
         lines.append(f"**Superseded by:** {link}")
         lines.append("")
+
+    # Render defeaters from outlist
+    if all_details:
+        defeaters = []
+        for j in node_detail.get("justifications", []):
+            for o in j.get("outlist", []):
+                o_detail = all_details.get(o)
+                if o_detail:
+                    o_meta = o_detail.get("metadata") or {}
+                    if o_meta.get("defeats_node") == node_id:
+                        defeaters.append((o, o_meta, o_detail.get("text", "")))
+        if defeaters:
+            for d_id, d_meta, d_text in defeaters:
+                d_type = d_meta.get("defeater_type", "defeater")
+                page = node_to_page.get(d_id)
+                if page:
+                    link = f"[{d_id}]({page}#{d_id})"
+                else:
+                    link = d_id
+                lines.append(f"**Defeated by:** {link} ({d_type})")
+            lines.append("")
 
     lines.append(node_detail["text"])
     lines.append("")
@@ -288,7 +309,7 @@ def build_wiki(node_details, groups, output_dir, model="", timeout=300,
             for nid in sorted(nids):
                 detail = node_details.get(nid)
                 if detail:
-                    page_lines.append(_format_node(nid, detail, node_to_page))
+                    page_lines.append(_format_node(nid, detail, node_to_page, all_details=node_details))
         page_text = "\n".join(page_lines)
         page_text = _linkify(page_text, page_file, node_to_page,
                              node_details.keys())
