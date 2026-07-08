@@ -197,6 +197,9 @@ def cmd_mark_superseded(args):
 
 
 def cmd_defeat_justification(args):
+    if getattr(args, "pg", None) or os.environ.get("REASONS_PG_CONNINFO"):
+        print("Error: defeat-justification is not supported with --pg (no PgApi implementation)", file=sys.stderr)
+        sys.exit(1)
     try:
         result = api.defeat_justification(
             args.node_id,
@@ -204,7 +207,7 @@ def cmd_defeat_justification(args):
             args.reason,
             defeater_type=args.type or "invalid-inference",
             defeater_id=getattr(args, "defeater_id", None),
-            **_backend_kwargs(args),
+            db_path=args.db,
         )
     except (KeyError, ValueError, IndexError) as e:
         print(f"Error: {e}", file=sys.stderr)

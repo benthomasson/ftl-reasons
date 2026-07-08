@@ -946,7 +946,6 @@ def defeat_justification(
     defeater_type: str = "invalid-inference",
     defeater_id: str | None = None,
     db_path: str = DEFAULT_DB,
-    pg_conninfo=None, project_id=None,
 ) -> dict:
     """Defeat a justification by adding a defeater belief to its outlist.
 
@@ -970,12 +969,6 @@ def defeat_justification(
         "changed": list[str]
     }
     """
-    if pg_conninfo:
-        return _pg_dispatch(pg_conninfo, project_id, "defeat_justification",
-                            node_id=node_id, justification_index=justification_index,
-                            reason=reason, defeater_type=defeater_type,
-                            defeater_id=defeater_id)
-
     with _with_network(db_path, write=True) as net:
         if node_id not in net.nodes:
             raise KeyError(f"Node '{node_id}' not found")
@@ -1009,7 +1002,8 @@ def defeat_justification(
 
         before = {nid: n.truth_value for nid, n in net.nodes.items()}
 
-        justification.outlist.append(defeater_id)
+        if defeater_id not in justification.outlist:
+            justification.outlist.append(defeater_id)
         defeater.dependents.add(node_id)
         node.updated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
