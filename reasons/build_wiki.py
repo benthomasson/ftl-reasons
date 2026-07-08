@@ -56,6 +56,29 @@ def _format_node(node_id, node_detail, node_to_page):
     lines.append(f"### {node_id}")
     lines.append(f"**Status:** {node_detail['truth_value']}")
     lines.append("")
+
+    # Render duplicate-of or superseded-by relationships
+    metadata = node_detail.get("metadata", {})
+    if "duplicate_of" in metadata:
+        canonical_id = metadata["duplicate_of"]
+        page = node_to_page.get(canonical_id)
+        if page:
+            link = f"[{canonical_id}]({page}#{canonical_id})"
+        else:
+            link = canonical_id
+        lines.append(f"**Duplicate of:** {link}")
+        lines.append("")
+
+    if "superseded_by" in metadata:
+        new_id = metadata["superseded_by"]
+        page = node_to_page.get(new_id)
+        if page:
+            link = f"[{new_id}]({page}#{new_id})"
+        else:
+            link = new_id
+        lines.append(f"**Superseded by:** {link}")
+        lines.append("")
+
     lines.append(node_detail["text"])
     lines.append("")
 

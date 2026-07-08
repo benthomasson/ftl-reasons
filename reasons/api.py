@@ -857,6 +857,94 @@ def set_metadata(
         return {"node_id": node_id, "key": key}
 
 
+def mark_duplicate(
+    source_id: str,
+    canonical_id: str,
+    db_path: str = DEFAULT_DB,
+    pg_conninfo=None, project_id=None,
+) -> dict:
+    """Mark a node as a duplicate of a canonical version.
+
+    Retracts the source node and stores the duplicate-of relationship.
+
+    Args:
+        source_id: The duplicate node to retract
+        canonical_id: The canonical node to reference
+        db_path: Path to database
+
+    Returns: {"source_id": str, "canonical_id": str, "changed": list[str]}
+    """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "mark_duplicate",
+                            source_id=source_id, canonical_id=canonical_id)
+
+    with _with_network(db_path, write=True) as net:
+        if source_id not in net.nodes:
+            raise KeyError(f"Node '{source_id}' not found")
+        if canonical_id not in net.nodes:
+            raise KeyError(f"Canonical node '{canonical_id}' not found")
+
+        # Set duplicate-of metadata
+        node = net.nodes[source_id]
+        meta = node.metadata or {}
+        meta["duplicate_of"] = canonical_id
+        node.metadata = meta
+
+        # Retract with structured reason
+        reason = f"Duplicate of {canonical_id}"
+        changed = net.retract(source_id, reason=reason)
+
+        return {
+            "source_id": source_id,
+            "canonical_id": canonical_id,
+            "changed": changed,
+        }
+
+
+def mark_superseded(
+    old_id: str,
+    new_id: str,
+    db_path: str = DEFAULT_DB,
+    pg_conninfo=None, project_id=None,
+) -> dict:
+    """Mark a node as superseded by a newer/better version.
+
+    Retracts the old node and stores the superseded-by relationship.
+
+    Args:
+        old_id: The obsolete node to retract
+        new_id: The replacement node
+        db_path: Path to database
+
+    Returns: {"old_id": str, "new_id": str, "changed": list[str]}
+    """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "mark_superseded",
+                            old_id=old_id, new_id=new_id)
+
+    with _with_network(db_path, write=True) as net:
+        if old_id not in net.nodes:
+            raise KeyError(f"Node '{old_id}' not found")
+        if new_id not in net.nodes:
+            raise KeyError(f"Replacement node '{new_id}' not found")
+
+        # Set superseded-by metadata
+        node = net.nodes[old_id]
+        meta = node.metadata or {}
+        meta["superseded_by"] = new_id
+        node.metadata = meta
+
+        # Retract with structured reason
+        reason = f"Superseded by {new_id}"
+        changed = net.retract(old_id, reason=reason)
+
+        return {
+            "old_id": old_id,
+            "new_id": new_id,
+            "changed": changed,
+        }
+
+
 def challenge(
     target_id: str,
     reason: str,
