@@ -2915,6 +2915,7 @@ def review_beliefs(
     visible_to: list[str] | None = None,
     dry_run: bool = False,
     on_batch: Callable | None = None,
+    include_out: bool = False,
     db_path: str = DEFAULT_DB,
 ) -> dict:
     """Review derived beliefs for validity, sufficiency, and necessity.
@@ -2941,7 +2942,14 @@ def review_beliefs(
     }
     total_derived = len(all_derived)
 
-    candidates = dict(all_derived)
+    if include_out:
+        candidates = {
+            k: v for k, v in nodes.items()
+            if v.get("justifications")
+            and len(v["justifications"]) > 0
+        }
+    else:
+        candidates = dict(all_derived)
 
     if belief_ids:
         candidates = {k: v for k, v in candidates.items() if k in belief_ids}

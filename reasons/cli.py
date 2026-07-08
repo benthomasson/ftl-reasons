@@ -1731,6 +1731,7 @@ def cmd_review_beliefs(args):
         visible_to=_parse_visible_to(args),
         dry_run=args.dry_run,
         on_batch=on_batch,
+        include_out=args.include_out,
         db_path=args.db,
     )
 
@@ -1790,9 +1791,15 @@ def cmd_review_beliefs(args):
     if args.auto_retract and not args.dry_run and invalid:
         print(f"\nRetracting {len(invalid)} invalid belief(s)...")
         for r in invalid:
+            reason = f"review-beliefs: {r.get('comment', 'invalid')}"
             try:
-                api.retract_node(r["id"], reason=f"review-beliefs: {r.get('comment', 'invalid')}", db_path=args.db)
-                print(f"  RETRACTED {r['id']}")
+                node_data = api.export_network(db_path=args.db)["nodes"].get(r["id"], {})
+                if node_data.get("truth_value") == "OUT":
+                    api.set_metadata(r["id"], "retract_reason", reason, db_path=args.db)
+                    print(f"  UPDATED reason for {r['id']}")
+                else:
+                    api.retract_node(r["id"], reason=reason, db_path=args.db)
+                    print(f"  RETRACTED {r['id']}")
             except Exception as e:
                 print(f"  ERROR retracting {r['id']}: {e}", file=sys.stderr)
 
@@ -2825,6 +2832,8 @@ def main():
                    help="Directory for JSON reports (default: reviews/)")
     p.add_argument("--no-report", action="store_true",
                    help="Skip JSON report generation")
+    p.add_argument("--include-out", action="store_true",
+                   help="Include OUT beliefs (e.g. to re-review previously retracted beliefs)")
 
     # review-justifications
     p = sub.add_parser("review-justifications",
