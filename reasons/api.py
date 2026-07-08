@@ -939,6 +939,96 @@ def mark_superseded(
         }
 
 
+def defeat_justification(
+    node_id: str,
+    justification_index: int,
+    reason: str,
+    defeater_type: str = "invalid-inference",
+    defeater_id: str | None = None,
+    db_path: str = DEFAULT_DB,
+    pg_conninfo=None, project_id=None,
+) -> dict:
+    """Defeat a justification by adding a defeater belief to its outlist.
+
+    Creates a defeater belief (premise node) and adds it to the specified
+    justification's outlist, causing the belief to go OUT via graph-native
+    TMS semantics rather than metadata strings.
+
+    Args:
+        node_id: The belief whose justification should be defeated
+        justification_index: Index of the justification to defeat (0-based)
+        reason: Explanation of why the justification is invalid
+        defeater_type: Type of defeater (invalid-inference, over-generalizes, etc.)
+        defeater_id: Custom defeater ID (default: {type}-{node_id}-j{index})
+        db_path: Path to database
+
+    Returns: {
+        "node_id": str,
+        "justification_index": int,
+        "defeater_id": str,
+        "defeater_type": str,
+        "changed": list[str]
+    }
+    """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "defeat_justification",
+                            node_id=node_id, justification_index=justification_index,
+                            reason=reason, defeater_type=defeater_type,
+                            defeater_id=defeater_id)
+
+    with _with_network(db_path, write=True) as net:
+        if node_id not in net.nodes:
+            raise KeyError(f"Node '{node_id}' not found")
+
+        node = net.nodes[node_id]
+        if not node.justifications:
+            raise ValueError(f"Node '{node_id}' has no justifications to defeat")
+
+        if justification_index < 0 or justification_index >= len(node.justifications):
+            raise IndexError(
+                f"Justification index {justification_index} out of range "
+                f"(node has {len(node.justifications)} justifications)"
+            )
+
+        justification = node.justifications[justification_index]
+
+        if not defeater_id:
+            defeater_id = f"{defeater_type}-{node_id}-j{justification_index}"
+
+        defeater_text = f"{reason} (defeats {node_id} justification {justification_index})"
+
+        defeater = net.add_node(
+            id=defeater_id,
+            text=defeater_text,
+            metadata={
+                "defeater_type": defeater_type,
+                "defeats_node": node_id,
+                "defeats_justification": justification_index,
+            },
+        )
+
+        before = {nid: n.truth_value for nid, n in net.nodes.items()}
+
+        justification.outlist.append(defeater_id)
+        defeater.dependents.add(node_id)
+        node.updated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+        changed = net.recompute_all()
+
+        actually_changed = [
+            nid for nid in changed
+            if before.get(nid) != net.nodes[nid].truth_value
+        ]
+
+        return {
+            "node_id": node_id,
+            "justification_index": justification_index,
+            "defeater_id": defeater_id,
+            "defeater_type": defeater_type,
+            "changed": actually_changed,
+        }
+
+
 def challenge(
     target_id: str,
     reason: str,
