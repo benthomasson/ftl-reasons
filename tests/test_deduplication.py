@@ -208,6 +208,7 @@ def test_mark_duplicate_already_out(tmp_path):
     node = api.show_node("duplicate", db_path=str(db))
     assert node["truth_value"] == "OUT"
     assert node["metadata"]["duplicate_of"] == "canonical"
+    assert node["metadata"]["retract_reason"] == "Duplicate of canonical"
 
 
 def test_mark_superseded_already_out(tmp_path):
@@ -225,3 +226,4 @@ def test_mark_superseded_already_out(tmp_path):
     node = api.show_node("old", db_path=str(db))
     assert node["truth_value"] == "OUT"
     assert node["metadata"]["superseded_by"] == "new"
+    assert node["metadata"]["retract_reason"] == "Superseded by new"

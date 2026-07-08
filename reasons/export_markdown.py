@@ -92,6 +92,8 @@ def export_markdown(network: Network, repos: dict[str, str] | None = None) -> st
         retract_reason = node.metadata.get("retract_reason") or node.metadata.get("stale_reason")
         if status in ("STALE", "OUT") and retract_reason:
             lines.append(f"- Stale reason: {retract_reason}")
+        if node.metadata.get("duplicate_of"):
+            lines.append(f"- Duplicate of: {node.metadata['duplicate_of']}")
         if node.metadata.get("superseded_by"):
             lines.append(f"- Superseded by: {node.metadata['superseded_by']}")
         if node.metadata.get("accepted_pr"):

@@ -153,6 +153,9 @@ def cmd_retract(args):
 
 
 def cmd_mark_duplicate(args):
+    if getattr(args, "pg", None) or os.environ.get("REASONS_PG_CONNINFO"):
+        print("Error: mark-duplicate is not supported with --pg (no PgApi implementation)", file=sys.stderr)
+        sys.exit(1)
     try:
         result = api.mark_duplicate(
             args.source_id,
@@ -172,6 +175,9 @@ def cmd_mark_duplicate(args):
 
 
 def cmd_mark_superseded(args):
+    if getattr(args, "pg", None) or os.environ.get("REASONS_PG_CONNINFO"):
+        print("Error: mark-superseded is not supported with --pg (no PgApi implementation)", file=sys.stderr)
+        sys.exit(1)
     try:
         result = api.mark_superseded(
             args.old_id,
@@ -2435,7 +2441,7 @@ def main():
     p.add_argument("--of", dest="canonical_id", required=True, help="Canonical node ID")
 
     # mark-superseded
-    p = sub.add_parser("mark-superseded", help="Permanently retract a node as superseded (irreversible; see 'supersede' for reversible)")
+    p = sub.add_parser("mark-superseded", help="Retract a node as superseded with metadata (hard retract; see 'supersede' for outlist-based)")
     p.add_argument("old_id", help="Obsolete node to retract")
     p.add_argument("--by", dest="new_id", required=True, help="Replacement node ID")
 

@@ -882,14 +882,13 @@ def mark_duplicate(
         if canonical_id not in net.nodes:
             raise KeyError(f"Canonical node '{canonical_id}' not found")
 
-        # Set duplicate-of metadata
         node = net.nodes[source_id]
         meta = node.metadata or {}
         meta["duplicate_of"] = canonical_id
+        reason = f"Duplicate of {canonical_id}"
+        meta["retract_reason"] = reason
         node.metadata = meta
 
-        # Retract with structured reason
-        reason = f"Duplicate of {canonical_id}"
         changed = net.retract(source_id, reason=reason)
 
         return {
@@ -924,14 +923,13 @@ def mark_superseded(
         if new_id not in net.nodes:
             raise KeyError(f"Replacement node '{new_id}' not found")
 
-        # Set superseded-by metadata
         node = net.nodes[old_id]
         meta = node.metadata or {}
         meta["superseded_by"] = new_id
+        reason = f"Superseded by {new_id}"
+        meta["retract_reason"] = reason
         node.metadata = meta
 
-        # Retract with structured reason
-        reason = f"Superseded by {new_id}"
         changed = net.retract(old_id, reason=reason)
 
         return {
