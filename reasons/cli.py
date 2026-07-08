@@ -217,7 +217,6 @@ def cmd_defeat_justification(args):
     print(f"  Defeater: {result['defeater_id']} ({result['defeater_type']})")
     if result["changed"]:
         went_out = [nid for nid in result["changed"] if nid != result["node_id"]]
-        went_in = []  # Defeating a justification shouldn't restore anything
         if result["node_id"] in result["changed"]:
             print(f"  {result['node_id']} went OUT")
         if went_out:

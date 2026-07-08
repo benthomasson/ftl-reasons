@@ -990,6 +990,8 @@ def defeat_justification(
 
         defeater_text = f"{reason} (defeats {node_id} justification {justification_index})"
 
+        before = {nid: n.truth_value for nid, n in net.nodes.items()}
+
         defeater = net.add_node(
             id=defeater_id,
             text=defeater_text,
@@ -999,8 +1001,6 @@ def defeat_justification(
                 "defeats_justification": justification_index,
             },
         )
-
-        before = {nid: n.truth_value for nid, n in net.nodes.items()}
 
         if defeater_id not in justification.outlist:
             justification.outlist.append(defeater_id)
