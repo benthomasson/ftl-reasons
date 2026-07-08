@@ -157,7 +157,7 @@ def cmd_mark_duplicate(args):
         result = api.mark_duplicate(
             args.source_id,
             args.canonical_id,
-            **_backend_kwargs(args),
+            db_path=args.db,
         )
     except (KeyError, ValueError) as e:
         print(f"Error: {e}", file=sys.stderr)
@@ -176,7 +176,7 @@ def cmd_mark_superseded(args):
         result = api.mark_superseded(
             args.old_id,
             args.new_id,
-            **_backend_kwargs(args),
+            db_path=args.db,
         )
     except (KeyError, ValueError) as e:
         print(f"Error: {e}", file=sys.stderr)

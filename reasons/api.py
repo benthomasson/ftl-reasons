@@ -861,7 +861,6 @@ def mark_duplicate(
     source_id: str,
     canonical_id: str,
     db_path: str = DEFAULT_DB,
-    pg_conninfo=None, project_id=None,
 ) -> dict:
     """Mark a node as a duplicate of a canonical version.
 
@@ -904,7 +903,6 @@ def mark_superseded(
     old_id: str,
     new_id: str,
     db_path: str = DEFAULT_DB,
-    pg_conninfo=None, project_id=None,
 ) -> dict:
     """Mark a node as superseded by a newer/better version.
 

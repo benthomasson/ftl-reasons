@@ -77,6 +77,25 @@ def test_mark_duplicate_with_cascade(tmp_path):
     assert dep["truth_value"] == "OUT"
 
 
+def test_mark_superseded_with_cascade(tmp_path):
+    """Test that marking superseded cascades to dependents."""
+    db = tmp_path / "test.db"
+    api.init_db(str(db))
+
+    api.add_node("old", "Old belief", db_path=str(db))
+    api.add_node("new", "New belief", db_path=str(db))
+    api.add_node("dependent", "Depends on old", sl="old", db_path=str(db))
+
+    dep = api.show_node("dependent", db_path=str(db))
+    assert dep["truth_value"] == "IN"
+
+    result = api.mark_superseded("old", "new", db_path=str(db))
+    assert "dependent" in result["changed"]
+
+    dep = api.show_node("dependent", db_path=str(db))
+    assert dep["truth_value"] == "OUT"
+
+
 def test_mark_duplicate_errors(tmp_path):
     """Test error handling for mark_duplicate."""
     db = tmp_path / "test.db"
@@ -91,6 +110,20 @@ def test_mark_duplicate_errors(tmp_path):
     # Canonical doesn't exist
     with pytest.raises(KeyError, match="not found"):
         api.mark_duplicate("exists", "missing", db_path=str(db))
+
+
+def test_mark_superseded_errors(tmp_path):
+    """Test error handling for mark_superseded."""
+    db = tmp_path / "test.db"
+    api.init_db(str(db))
+
+    api.add_node("exists", "This exists", db_path=str(db))
+
+    with pytest.raises(KeyError, match="not found"):
+        api.mark_superseded("missing", "exists", db_path=str(db))
+
+    with pytest.raises(KeyError, match="not found"):
+        api.mark_superseded("exists", "missing", db_path=str(db))
 
 
 def test_metadata_in_export(tmp_path):
@@ -175,3 +208,20 @@ def test_mark_duplicate_already_out(tmp_path):
     node = api.show_node("duplicate", db_path=str(db))
     assert node["truth_value"] == "OUT"
     assert node["metadata"]["duplicate_of"] == "canonical"
+
+
+def test_mark_superseded_already_out(tmp_path):
+    """Test marking an already-OUT node as superseded."""
+    db = tmp_path / "test.db"
+    api.init_db(str(db))
+
+    api.add_node("old", "Old belief", db_path=str(db))
+    api.add_node("new", "New belief", db_path=str(db))
+    api.retract_node("old", reason="Initially retracted", db_path=str(db))
+
+    result = api.mark_superseded("old", "new", db_path=str(db))
+    assert result["old_id"] == "old"
+
+    node = api.show_node("old", db_path=str(db))
+    assert node["truth_value"] == "OUT"
+    assert node["metadata"]["superseded_by"] == "new"

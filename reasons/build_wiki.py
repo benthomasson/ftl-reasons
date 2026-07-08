@@ -58,7 +58,7 @@ def _format_node(node_id, node_detail, node_to_page):
     lines.append("")
 
     # Render duplicate-of or superseded-by relationships
-    metadata = node_detail.get("metadata", {})
+    metadata = node_detail.get("metadata") or {}
     if "duplicate_of" in metadata:
         canonical_id = metadata["duplicate_of"]
         page = node_to_page.get(canonical_id)

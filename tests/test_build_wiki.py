@@ -162,6 +162,19 @@ class TestFormatNode:
         result = _format_node("old-belief", detail, node_to_page)
         assert "**Superseded by:** [new-belief](updates.md#new-belief)" in result
 
+    def test_none_metadata(self):
+        detail = {
+            "text": "Node with None metadata",
+            "truth_value": "IN",
+            "justifications": [],
+            "dependents": [],
+            "metadata": None,
+        }
+        result = _format_node("none-meta", detail, {})
+        assert "### none-meta" in result
+        assert "Duplicate of" not in result
+        assert "Superseded by" not in result
+
 
 class TestBuildWiki:
 
