@@ -152,6 +152,50 @@ def cmd_retract(args):
             _print_restoration_hints(result["restoration_hints"])
 
 
+def cmd_mark_duplicate(args):
+    if getattr(args, "pg", None) or os.environ.get("REASONS_PG_CONNINFO"):
+        print("Error: mark-duplicate is not supported with --pg (no PgApi implementation)", file=sys.stderr)
+        sys.exit(1)
+    try:
+        result = api.mark_duplicate(
+            args.source_id,
+            args.canonical_id,
+            db_path=args.db,
+        )
+    except (KeyError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Marked {result['source_id']} as duplicate of {result['canonical_id']}")
+    print(f"  Status: Retracted with metadata duplicate_of={result['canonical_id']}")
+    if result["changed"]:
+        went_out = [nid for nid in result["changed"] if nid != args.source_id]
+        if went_out:
+            print(f"  Cascade: {len(went_out)} dependent belief(s) went OUT")
+
+
+def cmd_mark_superseded(args):
+    if getattr(args, "pg", None) or os.environ.get("REASONS_PG_CONNINFO"):
+        print("Error: mark-superseded is not supported with --pg (no PgApi implementation)", file=sys.stderr)
+        sys.exit(1)
+    try:
+        result = api.mark_superseded(
+            args.old_id,
+            args.new_id,
+            db_path=args.db,
+        )
+    except (KeyError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Marked {result['old_id']} as superseded by {result['new_id']}")
+    print(f"  Status: Retracted with metadata superseded_by={result['new_id']}")
+    if result["changed"]:
+        went_out = [nid for nid in result["changed"] if nid != args.old_id]
+        if went_out:
+            print(f"  Cascade: {len(went_out)} dependent belief(s) went OUT")
+
+
 def cmd_assert(args):
     try:
         result = api.assert_node(args.node_id, **_backend_kwargs(args))
@@ -2398,6 +2442,16 @@ def main():
     p = sub.add_parser("assert", help="Assert a node (mark IN + cascade)")
     p.add_argument("node_id", help="Node to assert")
 
+    # mark-duplicate
+    p = sub.add_parser("mark-duplicate", help="Mark a node as duplicate of a canonical version")
+    p.add_argument("source_id", help="Duplicate node to retract")
+    p.add_argument("--of", dest="canonical_id", required=True, help="Canonical node ID")
+
+    # mark-superseded
+    p = sub.add_parser("mark-superseded", help="Retract a node as superseded with metadata (hard retract; see 'supersede' for outlist-based)")
+    p.add_argument("old_id", help="Obsolete node to retract")
+    p.add_argument("--by", dest="new_id", required=True, help="Replacement node ID")
+
     # what-if
     p = sub.add_parser("what-if", help="Simulate retracting or asserting a node (read-only)")
     p.add_argument("action", choices=["retract", "assert"], help="Action to simulate")
@@ -2429,7 +2483,7 @@ def main():
     p.add_argument("--source", help="Provenance (repo:path)")
 
     # supersede
-    p = sub.add_parser("supersede", help="Mark a belief as superseded by another")
+    p = sub.add_parser("supersede", help="Reversible supersession via outlist (old comes back if new is retracted)")
     p.add_argument("old_id", help="Belief being superseded")
     p.add_argument("new_id", help="Belief that supersedes it")
 
@@ -3003,6 +3057,8 @@ def main():
         "remove-justification": cmd_remove_justification,
         "retract": cmd_retract,
         "assert": cmd_assert,
+        "mark-duplicate": cmd_mark_duplicate,
+        "mark-superseded": cmd_mark_superseded,
         "what-if": cmd_what_if,
         "status": cmd_status,
         "show": cmd_show,
