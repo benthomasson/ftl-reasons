@@ -126,6 +126,42 @@ class TestFormatNode:
         assert "unknown-node" in result
         assert "[unknown-node]" not in result
 
+    def test_duplicate_of_metadata(self):
+        detail = {
+            "text": "Duplicate belief",
+            "truth_value": "OUT",
+            "justifications": [],
+            "dependents": [],
+            "metadata": {"duplicate_of": "canonical-node"},
+        }
+        node_to_page = {"canonical-node": "core.md"}
+        result = _format_node("dup-node", detail, node_to_page)
+        assert "**Duplicate of:** [canonical-node](core.md#canonical-node)" in result
+
+    def test_duplicate_of_no_page(self):
+        detail = {
+            "text": "Duplicate belief",
+            "truth_value": "OUT",
+            "justifications": [],
+            "dependents": [],
+            "metadata": {"duplicate_of": "unknown-canonical"},
+        }
+        result = _format_node("dup-node", detail, {})
+        assert "**Duplicate of:** unknown-canonical" in result
+        assert "[unknown-canonical]" not in result
+
+    def test_superseded_by_metadata(self):
+        detail = {
+            "text": "Old belief",
+            "truth_value": "OUT",
+            "justifications": [],
+            "dependents": [],
+            "metadata": {"superseded_by": "new-belief"},
+        }
+        node_to_page = {"new-belief": "updates.md"}
+        result = _format_node("old-belief", detail, node_to_page)
+        assert "**Superseded by:** [new-belief](updates.md#new-belief)" in result
+
 
 class TestBuildWiki:
 

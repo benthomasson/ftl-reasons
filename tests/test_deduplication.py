@@ -132,3 +132,46 @@ def test_metadata_in_show_output(tmp_path):
     assert "duplicate_of" in node["metadata"]
     assert node["metadata"]["duplicate_of"] == "canonical"
     assert "retract_reason" in node["metadata"]
+
+
+def test_mark_duplicate_self_reference(tmp_path):
+    """Test that marking a node as duplicate of itself is rejected."""
+    db = tmp_path / "test.db"
+    api.init_db(str(db))
+    api.add_node("node-a", "Some belief", db_path=str(db))
+
+    with pytest.raises(ValueError, match="cannot be marked as a duplicate of itself"):
+        api.mark_duplicate("node-a", "node-a", db_path=str(db))
+
+    node = api.show_node("node-a", db_path=str(db))
+    assert node["truth_value"] == "IN"
+
+
+def test_mark_superseded_self_reference(tmp_path):
+    """Test that marking a node as superseded by itself is rejected."""
+    db = tmp_path / "test.db"
+    api.init_db(str(db))
+    api.add_node("node-a", "Some belief", db_path=str(db))
+
+    with pytest.raises(ValueError, match="cannot be marked as superseded by itself"):
+        api.mark_superseded("node-a", "node-a", db_path=str(db))
+
+    node = api.show_node("node-a", db_path=str(db))
+    assert node["truth_value"] == "IN"
+
+
+def test_mark_duplicate_already_out(tmp_path):
+    """Test marking an already-OUT node as duplicate."""
+    db = tmp_path / "test.db"
+    api.init_db(str(db))
+
+    api.add_node("canonical", "Canonical", db_path=str(db))
+    api.add_node("duplicate", "Duplicate", db_path=str(db))
+    api.retract_node("duplicate", reason="Initially retracted", db_path=str(db))
+
+    result = api.mark_duplicate("duplicate", "canonical", db_path=str(db))
+    assert result["source_id"] == "duplicate"
+
+    node = api.show_node("duplicate", db_path=str(db))
+    assert node["truth_value"] == "OUT"
+    assert node["metadata"]["duplicate_of"] == "canonical"

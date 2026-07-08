@@ -874,9 +874,8 @@ def mark_duplicate(
 
     Returns: {"source_id": str, "canonical_id": str, "changed": list[str]}
     """
-    if pg_conninfo:
-        return _pg_dispatch(pg_conninfo, project_id, "mark_duplicate",
-                            source_id=source_id, canonical_id=canonical_id)
+    if source_id == canonical_id:
+        raise ValueError("A node cannot be marked as a duplicate of itself")
 
     with _with_network(db_path, write=True) as net:
         if source_id not in net.nodes:
@@ -918,9 +917,8 @@ def mark_superseded(
 
     Returns: {"old_id": str, "new_id": str, "changed": list[str]}
     """
-    if pg_conninfo:
-        return _pg_dispatch(pg_conninfo, project_id, "mark_superseded",
-                            old_id=old_id, new_id=new_id)
+    if old_id == new_id:
+        raise ValueError("A node cannot be marked as superseded by itself")
 
     with _with_network(db_path, write=True) as net:
         if old_id not in net.nodes:

@@ -159,7 +159,7 @@ def cmd_mark_duplicate(args):
             args.canonical_id,
             **_backend_kwargs(args),
         )
-    except KeyError as e:
+    except (KeyError, ValueError) as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
@@ -178,7 +178,7 @@ def cmd_mark_superseded(args):
             args.new_id,
             **_backend_kwargs(args),
         )
-    except KeyError as e:
+    except (KeyError, ValueError) as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
@@ -2435,7 +2435,7 @@ def main():
     p.add_argument("--of", dest="canonical_id", required=True, help="Canonical node ID")
 
     # mark-superseded
-    p = sub.add_parser("mark-superseded", help="Mark a node as superseded by a newer version")
+    p = sub.add_parser("mark-superseded", help="Permanently retract a node as superseded (irreversible; see 'supersede' for reversible)")
     p.add_argument("old_id", help="Obsolete node to retract")
     p.add_argument("--by", dest="new_id", required=True, help="Replacement node ID")
 
@@ -2470,7 +2470,7 @@ def main():
     p.add_argument("--source", help="Provenance (repo:path)")
 
     # supersede
-    p = sub.add_parser("supersede", help="Mark a belief as superseded by another")
+    p = sub.add_parser("supersede", help="Reversible supersession via outlist (old comes back if new is retracted)")
     p.add_argument("old_id", help="Belief being superseded")
     p.add_argument("new_id", help="Belief that supersedes it")
 
