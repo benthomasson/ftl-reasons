@@ -81,3 +81,35 @@ class TestExportMarkdown:
         ])
         md = export_markdown(net)
         assert "- Depends on: a, b" in md
+
+    def test_defeater_in_outlist(self):
+        net = Network()
+        net.add_node("base", "Base premise")
+        net.add_node("derived", "Derived belief", justifications=[
+            Justification(type="SL", antecedents=["base"], outlist=["defeater-1"])
+        ])
+        net.add_node("defeater-1", "Defeats derived", metadata={
+            "defeater_type": "invalid-inference",
+            "defeats_node": "derived",
+        })
+        net.recompute_all()
+        md = export_markdown(net)
+        assert "- Defeated by: defeater-1 (invalid-inference)" in md
+        assert "Unless" not in md
+
+    def test_mixed_outlist_defeater_and_regular(self):
+        net = Network()
+        net.add_node("base", "Base premise")
+        net.add_node("blocker", "Regular outlist node")
+        net.add_node("derived", "Derived belief", justifications=[
+            Justification(type="SL", antecedents=["base"],
+                          outlist=["defeater-1", "blocker"])
+        ])
+        net.add_node("defeater-1", "Defeats derived", metadata={
+            "defeater_type": "rebuttal",
+            "defeats_node": "derived",
+        })
+        net.recompute_all()
+        md = export_markdown(net)
+        assert "- Defeated by: defeater-1 (rebuttal)" in md
+        assert "- Unless: blocker" in md

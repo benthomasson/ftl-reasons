@@ -196,6 +196,70 @@ def cmd_mark_superseded(args):
             print(f"  Cascade: {len(went_out)} dependent belief(s) went OUT")
 
 
+def cmd_defeat_justification(args):
+    if getattr(args, "pg", None) or os.environ.get("REASONS_PG_CONNINFO"):
+        print("Error: defeat-justification is not supported with --pg (no PgApi implementation)", file=sys.stderr)
+        sys.exit(1)
+    try:
+        result = api.defeat_justification(
+            args.node_id,
+            args.justification_index,
+            args.reason,
+            defeater_type=args.type or "invalid-inference",
+            defeater_id=getattr(args, "defeater_id", None),
+            db_path=args.db,
+        )
+    except (KeyError, ValueError, IndexError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Defeated justification {result['justification_index']} of {result['node_id']}")
+    print(f"  Defeater: {result['defeater_id']} ({result['defeater_type']})")
+    if result["changed"]:
+        went_out = [nid for nid in result["changed"] if nid != result["node_id"]]
+        if result["node_id"] in result["changed"]:
+            print(f"  {result['node_id']} went OUT")
+        if went_out:
+            print(f"  Cascade: {len(went_out)} dependent belief(s) affected")
+
+
+def cmd_migrate_defeaters(args):
+    if getattr(args, "pg", None) or os.environ.get("REASONS_PG_CONNINFO"):
+        print("Error: migrate-defeaters is not supported with --pg (no PgApi implementation)", file=sys.stderr)
+        sys.exit(1)
+
+    node_ids = getattr(args, "node_ids", None) or None
+    dry_run = not args.apply
+
+    result = api.migrate_retract_to_defeaters(
+        node_ids=node_ids, dry_run=dry_run, db_path=args.db,
+    )
+
+    if dry_run:
+        print("Dry run — no changes applied")
+        print()
+
+    if result["migrated"]:
+        print(f"{'Would migrate' if dry_run else 'Migrated'}: {len(result['migrated'])}")
+        for m in result["migrated"]:
+            defeater = m.get("defeater_id", f"migrated-retraction-{m['id']}-j{m['justification_index']}")
+            print(f"  {m['id']} j{m['justification_index']} -> {defeater}")
+            print(f"    Reason: {m['retract_reason']}")
+
+    if result["skipped"]:
+        print(f"Skipped: {len(result['skipped'])}")
+        for s in result["skipped"]:
+            print(f"  {s['id']}: {s['reason']}")
+
+    if result["errors"]:
+        print(f"Errors: {len(result['errors'])}")
+        for e in result["errors"]:
+            print(f"  {e['id']}: {e['reason']}")
+
+    if not result["migrated"] and not result["skipped"] and not result["errors"]:
+        print("No candidates found")
+
+
 def cmd_assert(args):
     try:
         result = api.assert_node(args.node_id, **_backend_kwargs(args))
@@ -2452,6 +2516,20 @@ def main():
     p.add_argument("old_id", help="Obsolete node to retract")
     p.add_argument("--by", dest="new_id", required=True, help="Replacement node ID")
 
+    # defeat-justification
+    p = sub.add_parser("defeat-justification", help="Defeat a justification by adding a defeater to its outlist")
+    p.add_argument("node_id", help="Node whose justification to defeat")
+    p.add_argument("justification_index", type=int, help="Justification index (0-based)")
+    p.add_argument("reason", help="Why this justification is invalid")
+    p.add_argument("--type", choices=["invalid-inference", "over-generalizes", "duplicate-of", "superseded-by"],
+                   help="Type of defeater (default: invalid-inference)")
+    p.add_argument("--defeater-id", help="Custom defeater belief ID")
+
+    # migrate-defeaters
+    p = sub.add_parser("migrate-defeaters", help="Convert string-based retract_reason to graph-native defeaters")
+    p.add_argument("node_ids", nargs="*", help="Specific nodes to migrate (default: all candidates)")
+    p.add_argument("--apply", action="store_true", help="Apply changes (default is dry-run)")
+
     # what-if
     p = sub.add_parser("what-if", help="Simulate retracting or asserting a node (read-only)")
     p.add_argument("action", choices=["retract", "assert"], help="Action to simulate")
@@ -3059,6 +3137,8 @@ def main():
         "assert": cmd_assert,
         "mark-duplicate": cmd_mark_duplicate,
         "mark-superseded": cmd_mark_superseded,
+        "defeat-justification": cmd_defeat_justification,
+        "migrate-defeaters": cmd_migrate_defeaters,
         "what-if": cmd_what_if,
         "status": cmd_status,
         "show": cmd_show,

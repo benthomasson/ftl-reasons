@@ -76,17 +76,26 @@ def export_markdown(network: Network, repos: dict[str, str] | None = None) -> st
         # Collect all antecedents across justifications as depends_on
         all_deps = []
         all_unless = []
+        all_defeaters = []
         for j in node.justifications:
             for a in j.antecedents:
                 if a not in all_deps:
                     all_deps.append(a)
             for o in j.outlist:
-                if o not in all_unless:
+                o_node = network.nodes.get(o)
+                if o_node and o_node.metadata.get("defeats_node") == node.id:
+                    dtype = o_node.metadata.get("defeater_type", "defeater")
+                    if o not in [d[0] for d in all_defeaters]:
+                        all_defeaters.append((o, dtype))
+                elif o not in all_unless:
                     all_unless.append(o)
         if all_deps:
             lines.append(f"- Depends on: {', '.join(all_deps)}")
         if all_unless:
             lines.append(f"- Unless: {', '.join(all_unless)}")
+        if all_defeaters:
+            for d_id, d_type in all_defeaters:
+                lines.append(f"- Defeated by: {d_id} ({d_type})")
 
         # Retraction reason — from retract --reason or imported stale_reason
         retract_reason = node.metadata.get("retract_reason") or node.metadata.get("stale_reason")
