@@ -639,8 +639,10 @@ def show_node(node_id: str, visible_to: list[str] | None = None, db_path: str = 
             "source": node.source,
             "source_url": node.source_url,
             "source_hash": node.source_hash,
+            "text_hash": node.text_hash,
             "justifications": [
-                {"type": j.type, "antecedents": j.antecedents, "outlist": j.outlist, "label": j.label}
+                {"type": j.type, "antecedents": j.antecedents, "outlist": j.outlist,
+                 "label": j.label, "content_hash": j.content_hash}
                 for j in node.justifications
             ],
             "dependents": sorted(node.dependents),
@@ -818,7 +820,16 @@ def update_node(
         node = net.nodes[node_id]
         updated = []
         if text is not None:
+            if text != node.text and node.dependents:
+                print(
+                    f"WARNING: {node_id} has {len(node.dependents)} dependent(s). "
+                    f"Mutating text invalidates their Merkle hashes. "
+                    f"Consider using mark-superseded + a new node instead.",
+                    file=sys.stderr,
+                )
             node.text = text
+            from .merkle import compute_text_hash
+            node.text_hash = compute_text_hash(text)
             updated.append("text")
         if source is not None:
             node.source = source
@@ -1365,12 +1376,14 @@ def export_network(visible_to: list[str] | None = None, db_path: str = DEFAULT_D
                 "truth_value": n.truth_value,
                 "supporting_justification": n.supporting_justification,
                 "justifications": [
-                    {"type": j.type, "antecedents": j.antecedents, "outlist": j.outlist, "label": j.label}
+                    {"type": j.type, "antecedents": j.antecedents, "outlist": j.outlist,
+                     "label": j.label, "content_hash": j.content_hash}
                     for j in n.justifications
                 ],
                 "source": n.source,
                 "source_url": n.source_url,
                 "source_hash": n.source_hash,
+                "text_hash": n.text_hash,
                 "date": n.date,
                 "metadata": {k: v for k, v in n.metadata.items() if not k.startswith("_")},
                 "created_at": n.created_at,
@@ -1674,6 +1687,7 @@ def import_json(json_file: str, db_path: str = DEFAULT_DB,
                                 antecedents=j.get("antecedents", []),
                                 outlist=j.get("outlist", []),
                                 label=j.get("label", ""),
+                                content_hash=j.get("content_hash", ""),
                             )
                             for j in jlist
                         ]
@@ -1719,6 +1733,7 @@ def import_json(json_file: str, db_path: str = DEFAULT_DB,
                                 antecedents=j.get("antecedents", []),
                                 outlist=j.get("outlist", []),
                                 label=j.get("label", ""),
+                                content_hash=j.get("content_hash", ""),
                             )
                             for j in jlist
                         ]
@@ -2206,6 +2221,30 @@ def check_stale(
             "upgraded": upgraded,
             "sha_bumped": sha_bumped,
         }
+
+
+def check_integrity(db_path: str = DEFAULT_DB) -> dict:
+    """Verify Merkle hashes for all nodes and justifications.
+
+    Returns: {"text_mutations": [...], "chain_mutations": [...], "missing_hashes": int}
+    """
+    from .merkle import verify_all
+    with _with_network(db_path, write=False) as net:
+        result = verify_all(net)
+    text_mutations = [f for f in result["findings"] if f["type"] == "text_mutation"]
+    chain_mutations = [f for f in result["findings"] if f["type"] == "chain_mutation"]
+    return {
+        "text_mutations": text_mutations,
+        "chain_mutations": chain_mutations,
+        "missing_hashes": result["missing_hashes"],
+    }
+
+
+def backfill_hashes(db_path: str = DEFAULT_DB) -> dict:
+    """Compute and store hashes for nodes/justifications missing them."""
+    from .merkle import backfill_hashes as _backfill
+    with _with_network(db_path, write=True) as net:
+        return _backfill(net)
 
 
 def hash_sources(

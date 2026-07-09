@@ -969,6 +969,41 @@ def cmd_check_stale(args):
         sys.exit(1)
 
 
+def cmd_check_integrity(args):
+    _require_sqlite(args, "check-integrity")
+    result = api.check_integrity(db_path=args.db)
+
+    if result["text_mutations"]:
+        print(f"Text mutations: {len(result['text_mutations'])}")
+        for f in result["text_mutations"]:
+            print(f"  {f['node_id']}: text changed since creation")
+        print()
+
+    if result["chain_mutations"]:
+        print(f"Chain mutations: {len(result['chain_mutations'])}")
+        for f in result["chain_mutations"]:
+            print(f"  {f['node_id']} j{f['justification_index']}: antecedent text changed")
+        print()
+
+    if result["missing_hashes"]:
+        print(f"Missing hashes: {result['missing_hashes']} (run 'reasons backfill-hashes' to compute)")
+        print()
+
+    total = len(result["text_mutations"]) + len(result["chain_mutations"])
+    if total:
+        print(f"{total} integrity issue(s) found")
+        sys.exit(1)
+    else:
+        print("All Merkle hashes verified — no mutations detected")
+
+
+def cmd_backfill_hashes(args):
+    _require_sqlite(args, "backfill-hashes")
+    result = api.backfill_hashes(db_path=args.db)
+    print(f"Nodes updated: {result['nodes_updated']}")
+    print(f"Justifications updated: {result['justifications_updated']}")
+
+
 def cmd_pin_sources(args):
     _require_sqlite(args, "pin-sources")
     result = api.pin_sources(
@@ -2853,6 +2888,12 @@ def main():
     p.add_argument("--git", action="store_true",
                    help="Use git commit SHA for faster staleness detection")
 
+    # check-integrity
+    p = sub.add_parser("check-integrity", help="Verify Merkle hashes for text mutation detection")
+
+    # backfill-hashes
+    p = sub.add_parser("backfill-hashes", help="Compute Merkle hashes for nodes/justifications missing them")
+
     # pin-sources
     p = sub.add_parser("pin-sources", help="Pin source links to git commit SHA")
     p.add_argument("--force", action="store_true",
@@ -3245,6 +3286,8 @@ def main():
         "export-card": cmd_export_card,
         "hash-sources": cmd_hash_sources,
         "check-stale": cmd_check_stale,
+        "check-integrity": cmd_check_integrity,
+        "backfill-hashes": cmd_backfill_hashes,
         "pin-sources": cmd_pin_sources,
         "pin-update": cmd_pin_update,
         "pin-lines": cmd_pin_lines,
