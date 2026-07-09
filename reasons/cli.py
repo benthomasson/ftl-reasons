@@ -223,6 +223,55 @@ def cmd_defeat_justification(args):
             print(f"  Cascade: {len(went_out)} dependent belief(s) affected")
 
 
+def cmd_defeat_with_scope(args):
+    if getattr(args, "pg", None) or os.environ.get("REASONS_PG_CONNINFO"):
+        print("Error: defeat-with-scope is not supported with --pg", file=sys.stderr)
+        sys.exit(1)
+
+    import json as json_mod
+    scope_path = Path(args.scope_file)
+    if not scope_path.exists():
+        print(f"Error: file not found: {args.scope_file}", file=sys.stderr)
+        sys.exit(1)
+
+    data = json_mod.loads(scope_path.read_text())
+    scope_findings = data.get("scope_findings", [])
+    missing_property = data.get("missing_property", "")
+
+    if not scope_findings:
+        print("Error: scope_findings is empty in the provided file", file=sys.stderr)
+        sys.exit(1)
+    if not missing_property:
+        print("Error: missing_property is empty in the provided file", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        result = api.defeat_with_scope(
+            args.node_id,
+            args.justification_index,
+            scope_findings,
+            missing_property,
+            defeater_type=args.type or "invalid-inference",
+            defeater_id=getattr(args, "defeater_id", None),
+            db_path=args.db,
+        )
+    except (KeyError, ValueError, IndexError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Defeated justification {result['justification_index']} of {result['node_id']}")
+    print(f"  Defeater: {result['defeater_id']} ({result['defeater_type']})")
+    print(f"  Scope beliefs: {len(result['scope_belief_ids'])}")
+    for sid in result["scope_belief_ids"]:
+        print(f"    - {sid}")
+    if result["changed"]:
+        went_out = [nid for nid in result["changed"] if nid != result["node_id"]]
+        if result["node_id"] in result["changed"]:
+            print(f"  {result['node_id']} went OUT")
+        if went_out:
+            print(f"  Cascade: {len(went_out)} dependent belief(s) affected")
+
+
 def cmd_migrate_defeaters(args):
     if getattr(args, "pg", None) or os.environ.get("REASONS_PG_CONNINFO"):
         print("Error: migrate-defeaters is not supported with --pg (no PgApi implementation)", file=sys.stderr)
@@ -1911,6 +1960,25 @@ def cmd_review_beliefs(args):
             except Exception as e:
                 print(f"  ERROR retracting {r['id']}: {e}", file=sys.stderr)
 
+    if args.auto_defeat and not args.dry_run and invalid:
+        print(f"\nDefeating {len(invalid)} invalid belief(s) with scope beliefs...")
+        for r in invalid:
+            scope_findings = r.get("scope_findings", [])
+            missing_property = r.get("missing_property", r.get("comment", "invalid"))
+            try:
+                if scope_findings:
+                    result = api.defeat_with_scope(
+                        r["id"], 0, scope_findings, missing_property,
+                        defeater_type="invalid-inference", db_path=args.db)
+                    print(f"  DEFEATED {r['id']} with {len(result['scope_belief_ids'])} scope belief(s)")
+                else:
+                    api.defeat_justification(
+                        r["id"], 0, r.get("comment", "invalid"),
+                        defeater_type="invalid-inference", db_path=args.db)
+                    print(f"  DEFEATED {r['id']} (bare defeater, no scope findings)")
+            except Exception as e:
+                print(f"  ERROR defeating {r['id']}: {e}", file=sys.stderr)
+
     cost = format_cost_summary()
     if cost:
         print(f"  {cost}", file=sys.stderr)
@@ -2525,6 +2593,16 @@ def main():
                    help="Type of defeater (default: invalid-inference)")
     p.add_argument("--defeater-id", help="Custom defeater belief ID")
 
+    # defeat-with-scope
+    p = sub.add_parser("defeat-with-scope", help="Defeat a justification with scope beliefs as antecedents")
+    p.add_argument("node_id", help="Node whose justification to defeat")
+    p.add_argument("justification_index", type=int, help="Justification index (0-based)")
+    p.add_argument("--scope-file", required=True,
+                   help="JSON file with scope_findings and missing_property")
+    p.add_argument("--type", choices=["invalid-inference", "over-generalizes", "duplicate-of", "superseded-by"],
+                   help="Type of defeater (default: invalid-inference)")
+    p.add_argument("--defeater-id", help="Custom defeater belief ID")
+
     # migrate-defeaters
     p = sub.add_parser("migrate-defeaters", help="Convert string-based retract_reason to graph-native defeaters")
     p.add_argument("node_ids", nargs="*", help="Specific nodes to migrate (default: all candidates)")
@@ -2956,6 +3034,8 @@ def main():
                    help="Report findings without taking action")
     p.add_argument("--auto-retract", action="store_true",
                    help="Retract beliefs found invalid")
+    p.add_argument("--auto-defeat", action="store_true",
+                   help="Defeat invalid beliefs with justified scope defeaters")
     p.add_argument("-o", "--output", default=None,
                    help="Write findings to markdown file")
     p.add_argument("--visible-to", metavar="TAG,TAG",
@@ -3138,6 +3218,7 @@ def main():
         "mark-duplicate": cmd_mark_duplicate,
         "mark-superseded": cmd_mark_superseded,
         "defeat-justification": cmd_defeat_justification,
+        "defeat-with-scope": cmd_defeat_with_scope,
         "migrate-defeaters": cmd_migrate_defeaters,
         "what-if": cmd_what_if,
         "status": cmd_status,

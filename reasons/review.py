@@ -41,7 +41,9 @@ Return ONLY a JSON array. For each belief, one object:
     "sufficient": true,
     "necessary": false,
     "unnecessary_antecedents": ["ant-id-1"],
-    "comment": "brief explanation"
+    "comment": "brief explanation",
+    "scope_findings": [],
+    "missing_property": ""
   }}
 ]
 ```
@@ -54,6 +56,16 @@ Rules:
 - "comment" should be a single sentence explaining the most important finding.
 - Be rigorous: a conclusion that sounds reasonable but doesn't follow
   strictly from the antecedents is NOT valid.
+- When "valid" is false, you MUST populate "scope_findings" and
+  "missing_property". For each antecedent you examined, add an entry to
+  "scope_findings" with:
+    - "antecedent": the antecedent belief ID
+    - "establishes": what that antecedent actually establishes
+    - "does_not_establish": what the derived belief claims but this
+      antecedent does not cover
+  Set "missing_property" to the property the derived belief claims but
+  no antecedent establishes. These fields enable structured defeaters
+  that can be audited through the graph.
 
 ## Beliefs to review
 
@@ -129,6 +141,8 @@ def parse_review_response(response):
                 "necessary": item.get("necessary", True),
                 "unnecessary_antecedents": item.get("unnecessary_antecedents", []),
                 "comment": item.get("comment", ""),
+                "scope_findings": item.get("scope_findings", []),
+                "missing_property": item.get("missing_property", ""),
             })
         if results:
             return results
