@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS nodes (
     id TEXT PRIMARY KEY,
     text TEXT NOT NULL,
     truth_value TEXT NOT NULL DEFAULT 'IN',
+    supporting_justification INTEGER DEFAULT NULL,
     source TEXT DEFAULT '',
     source_url TEXT DEFAULT '',
     source_hash TEXT DEFAULT '',
@@ -90,6 +91,8 @@ class Storage:
         for col in ("created_at", "updated_at", "reviewed_at", "verified_at", "retracted_at"):
             if col not in cols:
                 self.conn.execute(f"ALTER TABLE nodes ADD COLUMN {col} TEXT DEFAULT ''")
+        if "supporting_justification" not in cols:
+            self.conn.execute("ALTER TABLE nodes ADD COLUMN supporting_justification INTEGER DEFAULT NULL")
         if self._is_new:
             now = datetime.now(timezone.utc).isoformat(timespec="seconds")
             project_name = self._project_name or self.db_path.stem
@@ -120,13 +123,15 @@ class Storage:
 
             for node in network.nodes.values():
                 self.conn.execute(
-                    "INSERT INTO nodes (id, text, truth_value, source, source_url, source_hash, date, metadata_json, "
+                    "INSERT INTO nodes (id, text, truth_value, supporting_justification, "
+                    "source, source_url, source_hash, date, metadata_json, "
                     "created_at, updated_at, reviewed_at, verified_at, retracted_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         node.id,
                         node.text,
                         node.truth_value,
+                        node.supporting_justification,
                         node.source,
                         node.source_url,
                         node.source_hash,
@@ -195,18 +200,29 @@ class Storage:
         cols = [c[1] for c in self.conn.execute("PRAGMA table_info(nodes)").fetchall()]
         has_source_url = "source_url" in cols
         has_timestamps = "created_at" in cols
+        has_supporting = "supporting_justification" in cols
         if has_timestamps:
-            cursor = self.conn.execute(
-                "SELECT id, text, truth_value, source, source_url, source_hash, date, metadata_json, "
-                "created_at, updated_at, reviewed_at, verified_at, retracted_at FROM nodes"
-            )
+            if has_supporting:
+                cursor = self.conn.execute(
+                    "SELECT id, text, truth_value, supporting_justification, "
+                    "source, source_url, source_hash, date, metadata_json, "
+                    "created_at, updated_at, reviewed_at, verified_at, retracted_at FROM nodes"
+                )
+            else:
+                cursor = self.conn.execute(
+                    "SELECT id, text, truth_value, NULL, "
+                    "source, source_url, source_hash, date, metadata_json, "
+                    "created_at, updated_at, reviewed_at, verified_at, retracted_at FROM nodes"
+                )
         elif has_source_url:
             cursor = self.conn.execute(
-                "SELECT id, text, truth_value, source, source_url, source_hash, date, metadata_json FROM nodes"
+                "SELECT id, text, truth_value, NULL, "
+                "source, source_url, source_hash, date, metadata_json FROM nodes"
             )
         else:
             cursor = self.conn.execute(
-                "SELECT id, text, truth_value, source, '', source_hash, date, metadata_json FROM nodes"
+                "SELECT id, text, truth_value, NULL, "
+                "source, '', source_hash, date, metadata_json FROM nodes"
             )
         node_rows = cursor.fetchall()
 
@@ -227,16 +243,19 @@ class Storage:
         # Build nodes directly (bypass add_node to preserve exact state)
         for row in node_rows:
             if has_timestamps:
-                nid, text, truth_value, source, source_url, source_hash, date, meta_json, \
-                    created_at, updated_at, reviewed_at, verified_at, retracted_at = row
+                nid, text, truth_value, supporting_j, source, source_url, source_hash, \
+                    date, meta_json, created_at, updated_at, reviewed_at, verified_at, \
+                    retracted_at = row
             else:
-                nid, text, truth_value, source, source_url, source_hash, date, meta_json = row
+                nid, text, truth_value, supporting_j, source, source_url, source_hash, \
+                    date, meta_json = row
                 created_at = updated_at = reviewed_at = verified_at = retracted_at = ""
             node = Node(
                 id=nid,
                 text=text,
                 truth_value=truth_value,
                 justifications=justifications_by_node.get(nid, []),
+                supporting_justification=supporting_j,
                 source=source,
                 source_url=source_url or "",
                 source_hash=source_hash,

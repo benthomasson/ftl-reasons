@@ -635,6 +635,7 @@ def show_node(node_id: str, visible_to: list[str] | None = None, db_path: str = 
             "id": node.id,
             "text": node.text,
             "truth_value": node.truth_value,
+            "supporting_justification": node.supporting_justification,
             "source": node.source,
             "source_url": node.source_url,
             "source_hash": node.source_hash,
@@ -1235,6 +1236,7 @@ def export_network(visible_to: list[str] | None = None, db_path: str = DEFAULT_D
             nid: {
                 "text": n.text,
                 "truth_value": n.truth_value,
+                "supporting_justification": n.supporting_justification,
                 "justifications": [
                     {"type": j.type, "antecedents": j.antecedents, "outlist": j.outlist, "label": j.label}
                     for j in n.justifications
@@ -2528,8 +2530,13 @@ def _node_depth(nid, net, memo=None):
         memo[nid] = 0
         return 0
     memo[nid] = 0  # cycle guard
+    si = node.supporting_justification
+    if si is not None and 0 <= si < len(node.justifications):
+        justifications = [node.justifications[si]]
+    else:
+        justifications = node.justifications
     max_d = 0
-    for j in node.justifications:
+    for j in justifications:
         for a in j.antecedents:
             max_d = max(max_d, _node_depth(a, net, memo))
     memo[nid] = max_d + 1

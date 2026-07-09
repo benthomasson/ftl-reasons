@@ -648,6 +648,7 @@ class Network:
                     self.nodes[out_id].dependents.discard(node_id)
 
         node.justifications = []
+        node.supporting_justification = None
 
         # A premise is IN by default
         changed = []
@@ -813,22 +814,31 @@ class Network:
             return steps
 
         if node.truth_value == "IN":
-            # Find the valid justification
-            for j in node.justifications:
-                if self._justification_valid(j):
-                    step = {
-                        "node": node_id,
-                        "truth_value": "IN",
-                        "reason": f"{j.type} justification valid",
-                        "antecedents": list(j.antecedents),
-                        "label": j.label,
-                    }
-                    if j.outlist:
-                        step["outlist"] = list(j.outlist)
-                    steps.append(step)
-                    for ant_id in j.antecedents:
-                        steps.extend(self.explain(ant_id, _visited, _path))
-                    break
+            # Use designated supporting justification when available
+            j = None
+            si = node.supporting_justification
+            if si is not None and 0 <= si < len(node.justifications):
+                candidate = node.justifications[si]
+                if self._justification_valid(candidate):
+                    j = candidate
+            if j is None:
+                for candidate in reversed(node.justifications):
+                    if self._justification_valid(candidate):
+                        j = candidate
+                        break
+            if j is not None:
+                step = {
+                    "node": node_id,
+                    "truth_value": "IN",
+                    "reason": f"{j.type} justification valid",
+                    "antecedents": list(j.antecedents),
+                    "label": j.label,
+                }
+                if j.outlist:
+                    step["outlist"] = list(j.outlist)
+                steps.append(step)
+                for ant_id in j.antecedents:
+                    steps.extend(self.explain(ant_id, _visited, _path))
         else:
             # All justifications invalid — explain why
             for j in node.justifications:
@@ -916,14 +926,17 @@ class Network:
     def _compute_truth(self, node: Node) -> str:
         """Compute truth value from justifications.
 
-        A node is IN if ANY justification is valid.
+        A node is IN if ANY justification is valid.  Prefers the newest
+        (last-added) valid justification as the designated support.
         """
         if not node.justifications:
             return node.truth_value  # premise — keep current value
 
-        for j in node.justifications:
-            if self._justification_valid(j):
+        for i in range(len(node.justifications) - 1, -1, -1):
+            if self._justification_valid(node.justifications[i]):
+                node.supporting_justification = i
                 return "IN"
+        node.supporting_justification = None
         return "OUT"
 
     def _justification_valid(self, j: Justification) -> bool:

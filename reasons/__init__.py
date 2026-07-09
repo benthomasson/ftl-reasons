@@ -33,6 +33,7 @@ class Node:
     text: str
     truth_value: str = "IN"  # IN or OUT
     justifications: list[Justification] = field(default_factory=list)
+    supporting_justification: int | None = None  # index into justifications list
     dependents: set[str] = field(default_factory=set)  # reverse index
     source: str = ""
     source_url: str = ""
