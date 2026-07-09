@@ -996,12 +996,10 @@ class TestRemoveJustification:
 
 class TestUpdateNode:
 
-    def test_update_text(self, pg_api):
+    def test_update_text_rejected(self, pg_api):
         pg_api.add_node("a", "Alpha")
-        result = pg_api.update_node("a", text="Alpha updated")
-        assert result["updated_fields"] == ["text"]
-        node = pg_api.show_node("a")
-        assert node["text"] == "Alpha updated"
+        with pytest.raises(ValueError, match="immutable"):
+            pg_api.update_node("a", text="Alpha updated")
 
     def test_update_source(self, pg_api):
         pg_api.add_node("a", "Alpha")
@@ -1019,7 +1017,7 @@ class TestUpdateNode:
 
     def test_update_not_found(self, pg_api):
         with pytest.raises(KeyError):
-            pg_api.update_node("nonexistent", text="test")
+            pg_api.update_node("nonexistent", source="test.py")
 
 
 class TestConvertToPremise:

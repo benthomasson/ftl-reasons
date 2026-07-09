@@ -519,9 +519,25 @@ def cmd_summarize(args):
 
 
 def cmd_supersede(args):
+    new_id = args.new_id
+    text = getattr(args, "text", None)
+    custom_id = getattr(args, "id", None)
+
+    if text and new_id:
+        print("Error: cannot specify both new_id and --text", file=sys.stderr)
+        sys.exit(1)
+    if not text and not new_id:
+        print("Error: either new_id or --text is required", file=sys.stderr)
+        sys.exit(1)
+
     try:
-        result = api.supersede(args.old_id, args.new_id, **_backend_kwargs(args))
-    except KeyError as e:
+        if text:
+            result = api.supersede_with_text(
+                args.old_id, text, new_id=custom_id, db_path=args.db,
+            )
+        else:
+            result = api.supersede(args.old_id, new_id, **_backend_kwargs(args))
+    except (KeyError, ValueError) as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
@@ -531,13 +547,13 @@ def cmd_supersede(args):
 
 
 def cmd_update(args):
-    if not any([args.text, args.source, args.source_url, args.example]):
-        print("Error: at least one of --text, --source, --source-url, or --example required",
+    if not any([args.source, args.source_url, args.example]):
+        print("Error: at least one of --source, --source-url, or --example required",
               file=sys.stderr)
         sys.exit(1)
     try:
         result = api.update_node(
-            args.node_id, text=args.text,
+            args.node_id,
             source=args.source,
             source_url=args.source_url,
             example=args.example,
@@ -2676,12 +2692,13 @@ def main():
     # supersede
     p = sub.add_parser("supersede", help="Reversible supersession via outlist (old comes back if new is retracted)")
     p.add_argument("old_id", help="Belief being superseded")
-    p.add_argument("new_id", help="Belief that supersedes it")
+    p.add_argument("new_id", nargs="?", default=None, help="Belief that supersedes it (omit when using --text)")
+    p.add_argument("--text", default=None, help="Create a successor node with this text and supersede")
+    p.add_argument("--id", default=None, help="Custom ID for the successor node (used with --text)")
 
     # update
-    p = sub.add_parser("update", help="Update a belief's text or source in place")
+    p = sub.add_parser("update", help="Update a belief's metadata (source, example)")
     p.add_argument("node_id", help="Belief to update")
-    p.add_argument("--text", default=None, help="New text for the belief")
     p.add_argument("--source", default=None, help="Update source path")
     p.add_argument("--source-url", default=None, help="Update source URL")
     p.add_argument("--example", default=None, help="Code example demonstrating the belief")

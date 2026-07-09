@@ -1270,18 +1270,16 @@ Also from nothing
 
 class TestCmdUpdate:
 
-    def test_update_text(self, db_path):
+    def test_update_text_removed(self, db_path):
         run_cli("add", "a", "Original text", db_path=db_path)
-        out, err, code = run_cli("update", "a", "--text", "New text", db_path=db_path)
+        out, err, code = run_cli("update", "a", "--source", "new.py", db_path=db_path)
         assert code == 0
         assert "Updated a" in out
-        assert "text" in out
-        out2, _, _ = run_cli("show", "a", db_path=db_path)
-        assert "New text" in out2
+        assert "source" in out
 
     def test_update_nonexistent(self, db_path):
         run_cli("init", db_path=db_path)
-        out, err, code = run_cli("update", "nope", "--text", "text", db_path=db_path)
+        out, err, code = run_cli("update", "nope", "--source", "test.py", db_path=db_path)
         assert code == 1
         assert "not found" in err
 

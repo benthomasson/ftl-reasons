@@ -615,13 +615,9 @@ class TestUpdateNode:
                       label="combined", db_path=db)
         return db
 
-    def test_updates_text(self, db_path):
-        result = api.update_node("a", text="Updated text", db_path=db_path)
-        assert result["node_id"] == "a"
-        assert "text" in result["updated_fields"]
-        node = api.show_node("a", db_path=db_path)
-        assert node["text"] == "Updated text"
-        assert node["truth_value"] == "IN"
+    def test_rejects_text_mutation(self, db_path):
+        with pytest.raises(ValueError, match="immutable"):
+            api.update_node("a", text="Updated text", db_path=db_path)
 
     def test_updates_source(self, db_path):
         result = api.update_node("a", source="new/source.md", db_path=db_path)
@@ -630,26 +626,25 @@ class TestUpdateNode:
         assert node["source"] == "new/source.md"
 
     def test_nonexistent_raises(self, db_path):
-        with pytest.raises(KeyError):
+        with pytest.raises(ValueError):
             api.update_node("nonexistent", text="x", db_path=db_path)
 
-    def test_preserves_justifications(self, db_path):
-        result = api.update_node("derived-ab", text="New derived text",
-                                  db_path=db_path)
-        assert "text" in result["updated_fields"]
-        node = api.show_node("derived-ab", db_path=db_path)
-        assert node["text"] == "New derived text"
-        assert node["truth_value"] == "IN"
-        assert len(node["justifications"]) == 1
+    def test_supersede_with_text(self, db_path):
+        result = api.supersede_with_text("a", "Updated text", db_path=db_path)
+        assert result["old_id"] == "a"
+        new_id = result["new_id"]
+        old = api.show_node("a", db_path=db_path)
+        new = api.show_node(new_id, db_path=db_path)
+        assert old["truth_value"] == "OUT"
+        assert new["text"] == "Updated text"
+        assert new["truth_value"] == "IN"
 
-    def test_updates_out_node(self, db_path):
-        api.retract_node("a", reason="testing", db_path=db_path)
-        result = api.update_node("a", text="Updated while OUT",
-                                  db_path=db_path)
-        assert "text" in result["updated_fields"]
-        node = api.show_node("a", db_path=db_path)
-        assert node["text"] == "Updated while OUT"
-        assert node["truth_value"] == "OUT"
+    def test_supersede_with_text_custom_id(self, db_path):
+        result = api.supersede_with_text("a", "New text", new_id="a-fixed",
+                                          db_path=db_path)
+        assert result["new_id"] == "a-fixed"
+        node = api.show_node("a-fixed", db_path=db_path)
+        assert node["text"] == "New text"
 
 
 class TestSetMetadata:
@@ -799,7 +794,7 @@ class TestLifecycleTimestamps:
     def test_update_node_sets_updated_at(self, db_path):
         api.add_node("ts-b", "Original", db_path=db_path)
         original = api.show_node("ts-b", db_path=db_path)
-        api.update_node("ts-b", text="Modified", db_path=db_path)
+        api.update_node("ts-b", source="new-source.py", db_path=db_path)
         updated = api.show_node("ts-b", db_path=db_path)
         assert updated["updated_at"] >= original["updated_at"]
 

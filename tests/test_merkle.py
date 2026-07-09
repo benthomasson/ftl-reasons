@@ -42,10 +42,17 @@ def test_content_hash_incorporates_antecedents(tmp_path):
     d1 = api.show_node("d1", db_path=str(db))
     original_hash = d1["justifications"][0]["content_hash"]
 
-    # Mutate an antecedent's text
-    api.update_node("p1", text="P1 CHANGED", db_path=str(db))
+    # Simulate unauthorized text mutation via Storage layer
+    from reasons.storage import Storage
+    from reasons.merkle import compute_text_hash
+    store = Storage(str(db))
+    net = store.load()
+    net.nodes["p1"].text = "P1 CHANGED"
+    net.nodes["p1"].text_hash = compute_text_hash("P1 CHANGED")
+    store.save(net)
+    store.close()
 
-    # Verify detects the mutation
+    # Verify detects the chain mutation
     result = api.check_integrity(db_path=str(db))
     chain_ids = [f["node_id"] for f in result["chain_mutations"]]
     assert "d1" in chain_ids
@@ -63,8 +70,15 @@ def test_merkle_transitive(tmp_path):
     assert len(result["text_mutations"]) == 0
     assert len(result["chain_mutations"]) == 0
 
-    # Mutate C's text
-    api.update_node("c", text="C CHANGED", db_path=str(db))
+    # Simulate unauthorized text mutation via Storage layer
+    from reasons.storage import Storage
+    from reasons.merkle import compute_text_hash
+    store = Storage(str(db))
+    net = store.load()
+    net.nodes["c"].text = "C CHANGED"
+    net.nodes["c"].text_hash = compute_text_hash("C CHANGED")
+    store.save(net)
+    store.close()
 
     result = api.check_integrity(db_path=str(db))
     chain_ids = [f["node_id"] for f in result["chain_mutations"]]
@@ -107,11 +121,18 @@ def test_verify_chain_mutation(tmp_path):
     api.add_node("p1", "P1", db_path=str(db))
     api.add_node("d1", "D1", sl="p1", db_path=str(db))
 
-    # Mutate p1's text through update_node (updates text_hash)
-    api.update_node("p1", text="P1 CHANGED", db_path=str(db))
+    # Simulate text mutation with updated text_hash (e.g. direct SQL)
+    from reasons.storage import Storage
+    from reasons.merkle import compute_text_hash
+    store = Storage(str(db))
+    net = store.load()
+    net.nodes["p1"].text = "P1 CHANGED"
+    net.nodes["p1"].text_hash = compute_text_hash("P1 CHANGED")
+    store.save(net)
+    store.close()
 
     result = api.check_integrity(db_path=str(db))
-    # p1's text_hash was updated by update_node, so no text_mutation
+    # text_hash matches text, so no text_mutation
     assert len(result["text_mutations"]) == 0
     # But d1's justification hash is stale
     assert len(result["chain_mutations"]) == 1
@@ -147,19 +168,14 @@ def test_backfill_hashes(tmp_path):
     assert len(result["chain_mutations"]) == 0
 
 
-def test_update_node_warns(tmp_path, capsys):
-    """update_node on node with dependents produces warning."""
+def test_update_node_rejects_text(tmp_path):
+    """update_node rejects text mutation — beliefs are immutable."""
     db = tmp_path / "test.db"
     api.init_db(str(db))
     api.add_node("p1", "P1", db_path=str(db))
-    api.add_node("d1", "D1", sl="p1", db_path=str(db))
 
-    api.update_node("p1", text="P1 CHANGED", db_path=str(db))
-
-    captured = capsys.readouterr()
-    assert "WARNING" in captured.err
-    assert "dependent" in captured.err
-    assert "mark-superseded" in captured.err
+    with pytest.raises(ValueError, match="immutable"):
+        api.update_node("p1", text="P1 CHANGED", db_path=str(db))
 
 
 def test_export_import_preserves_hashes(tmp_path):
@@ -205,21 +221,21 @@ def test_cycle_safety(tmp_path):
     assert isinstance(result, dict)
 
 
-def test_text_hash_updated_on_update(tmp_path):
-    """update_node should update text_hash to match new text."""
+def test_supersede_preserves_hashes(tmp_path):
+    """Superseding a node gives the successor its own hashes."""
     db = tmp_path / "test.db"
     api.init_db(str(db))
     api.add_node("p1", "Original", db_path=str(db))
 
-    original_hash = api.show_node("p1", db_path=str(db))["text_hash"]
-    api.update_node("p1", text="Updated", db_path=str(db))
-    new_hash = api.show_node("p1", db_path=str(db))["text_hash"]
+    result = api.supersede_with_text("p1", "Updated version", db_path=str(db))
+    new_id = result["new_id"]
 
-    assert new_hash != original_hash
-    assert new_hash == hashlib.sha256(b"Updated").hexdigest()
-    # No text_mutation since text_hash was updated
-    result = api.check_integrity(db_path=str(db))
-    assert len(result["text_mutations"]) == 0
+    new_node = api.show_node(new_id, db_path=str(db))
+    assert new_node["text_hash"] == hashlib.sha256(b"Updated version").hexdigest()
+
+    integrity = api.check_integrity(db_path=str(db))
+    assert len(integrity["text_mutations"]) == 0
+    assert len(integrity["chain_mutations"]) == 0
 
 
 def test_multiple_justifications_each_hashed(tmp_path):

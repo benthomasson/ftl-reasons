@@ -797,6 +797,42 @@ def supersede(old_id: str, new_id: str, db_path: str = DEFAULT_DB,
         return net.supersede(old_id, new_id)
 
 
+def supersede_with_text(
+    old_id: str,
+    new_text: str,
+    new_id: str | None = None,
+    db_path: str = DEFAULT_DB,
+) -> dict:
+    """Create a successor node with new text and supersede old_id.
+
+    The old node goes OUT via the outlist mechanism (reversible).
+    Auto-generates new_id as {old_id}-v{N} if not specified.
+
+    Returns: {"old_id": str, "new_id": str, "changed": list[str]}
+    """
+    with _with_network(db_path, write=True) as net:
+        if old_id not in net.nodes:
+            raise KeyError(f"Node '{old_id}' not found")
+
+        if not new_id:
+            base = f"{old_id}-v2"
+            new_id = base
+            suffix = 3
+            while new_id in net.nodes:
+                new_id = f"{old_id}-v{suffix}"
+                suffix += 1
+
+        old_node = net.nodes[old_id]
+        net.add_node(
+            id=new_id,
+            text=new_text,
+            source=old_node.source,
+            source_url=old_node.source_url,
+        )
+        result = net.supersede(old_id, new_id)
+        return result
+
+
 def update_node(
     node_id: str,
     text: str | None = None,
@@ -806,10 +842,17 @@ def update_node(
     db_path: str = DEFAULT_DB,
     pg_conninfo=None, project_id=None,
 ) -> dict:
-    """Update a node's text, source, source_url, or example in place.
+    """Update a node's source, source_url, or example metadata.
+
+    Text is immutable — use 'reasons supersede' to create a successor.
 
     Returns: {"node_id": str, "updated_fields": list[str]}
     """
+    if text is not None:
+        raise ValueError(
+            f"Text mutation is not allowed — beliefs are immutable propositions. "
+            f"Use 'reasons supersede {node_id} --text \"...\"' to create a successor."
+        )
     if pg_conninfo:
         return _pg_dispatch(pg_conninfo, project_id, "update_node",
                             node_id=node_id, text=text, source=source,
@@ -819,18 +862,6 @@ def update_node(
             raise KeyError(f"Node '{node_id}' not found")
         node = net.nodes[node_id]
         updated = []
-        if text is not None:
-            if text != node.text and node.dependents:
-                print(
-                    f"WARNING: {node_id} has {len(node.dependents)} dependent(s). "
-                    f"Mutating text invalidates their Merkle hashes. "
-                    f"Consider using mark-superseded + a new node instead.",
-                    file=sys.stderr,
-                )
-            node.text = text
-            from .merkle import compute_text_hash
-            node.text_hash = compute_text_hash(text)
-            updated.append("text")
         if source is not None:
             node.source = source
             updated.append("source")
@@ -3716,8 +3747,9 @@ def repair_premises(
             action = r.get("action")
             if action == "rewrite" and r.get("corrected_text"):
                 try:
-                    update_node(nid, text=r["corrected_text"], db_path=db_path)
-                    set_metadata(nid, "repair_action", "rewritten", db_path=db_path)
+                    sup = supersede_with_text(nid, r["corrected_text"], db_path=db_path)
+                    r["new_id"] = sup["new_id"]
+                    set_metadata(sup["new_id"], "repair_action", "rewritten", db_path=db_path)
                 except Exception as e:
                     print(f"  ERROR updating {nid}: {e}", file=sys.stderr)
                     r["action"] = "error"
