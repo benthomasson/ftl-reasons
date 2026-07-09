@@ -14,8 +14,13 @@ def _node_depth(nid, nodes, memo=None):
         memo[nid] = 0
         return 0
     memo[nid] = 0
+    si = node.supporting_justification
+    if si is not None and 0 <= si < len(node.justifications):
+        justifications = [node.justifications[si]]
+    else:
+        justifications = node.justifications
     max_d = 0
-    for j in node.justifications:
+    for j in justifications:
         for a in j.antecedents:
             max_d = max(max_d, _node_depth(a, nodes, memo))
     memo[nid] = max_d + 1

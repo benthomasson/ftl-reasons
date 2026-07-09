@@ -103,10 +103,23 @@ def _format_node(node_id, node_detail, node_to_page, all_details=None):
     lines.append(node_detail["text"])
     lines.append("")
 
-    antecedents = set()
-    for j in node_detail.get("justifications", []):
-        for a in j.get("antecedents", []):
-            antecedents.add(a)
+    justifications = node_detail.get("justifications", [])
+    si = node_detail.get("supporting_justification")
+    if si is not None and 0 <= si < len(justifications):
+        designated = justifications[si]
+        antecedents = set(designated.get("antecedents", []))
+        other_antecedents = set()
+        for idx, j in enumerate(justifications):
+            if idx != si:
+                for a in j.get("antecedents", []):
+                    if a not in antecedents:
+                        other_antecedents.add(a)
+    else:
+        antecedents = set()
+        other_antecedents = set()
+        for j in justifications:
+            for a in j.get("antecedents", []):
+                antecedents.add(a)
 
     if antecedents:
         links = []
@@ -116,7 +129,17 @@ def _format_node(node_id, node_detail, node_to_page, all_details=None):
                 links.append(f"[{a}]({page}#{a})")
             else:
                 links.append(a)
-        lines.append(f"**Depends on:** {', '.join(links)}")
+        label = "**Depends on (active):**" if other_antecedents else "**Depends on:**"
+        lines.append(f"{label} {', '.join(links)}")
+    if other_antecedents:
+        links = []
+        for a in sorted(other_antecedents):
+            page = node_to_page.get(a)
+            if page:
+                links.append(f"[{a}]({page}#{a})")
+            else:
+                links.append(a)
+        lines.append(f"**Depends on (other):** {', '.join(links)}")
 
     dependents = node_detail.get("dependents", [])
     if dependents:
@@ -171,10 +194,15 @@ def _format_beliefs_for_prompt(node_ids, node_details):
         lines.append(f"Status: {detail['truth_value']}")
         lines.append(f"Text: {detail['text']}")
 
-        antecedents = set()
-        for j in detail.get("justifications", []):
-            for a in j.get("antecedents", []):
-                antecedents.add(a)
+        justifications = detail.get("justifications", [])
+        si = detail.get("supporting_justification")
+        if si is not None and 0 <= si < len(justifications):
+            antecedents = set(justifications[si].get("antecedents", []))
+        else:
+            antecedents = set()
+            for j in justifications:
+                for a in j.get("antecedents", []):
+                    antecedents.add(a)
         if antecedents:
             lines.append(f"Depends on: {', '.join(sorted(antecedents))}")
 

@@ -121,8 +121,15 @@ def _get_depth(node_id, nodes, derived, memo=None):
         memo[node_id] = 0
         return 0
     memo[node_id] = 0  # cycle guard
+    node_data = derived[node_id]
+    all_justifications = node_data.get("justifications", [])
+    si = node_data.get("supporting_justification")
+    if si is not None and 0 <= si < len(all_justifications):
+        justifications = [all_justifications[si]]
+    else:
+        justifications = all_justifications
     max_d = 0
-    for j in derived[node_id].get("justifications", []):
+    for j in justifications:
         for a in j.get("antecedents", []):
             max_d = max(max_d, _get_depth(a, nodes, derived, memo))
     memo[node_id] = max_d + 1
