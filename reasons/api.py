@@ -1024,6 +1024,133 @@ def defeat_justification(
         }
 
 
+def defeat_with_scope(
+    node_id: str,
+    justification_index: int,
+    scope_findings: list[dict],
+    missing_property: str,
+    defeater_type: str = "invalid-inference",
+    defeater_id: str | None = None,
+    db_path: str = DEFAULT_DB,
+) -> dict:
+    """Defeat a justification with a derived defeater backed by scope beliefs.
+
+    Instead of a bare premise defeater, creates scope beliefs (premises
+    describing what each antecedent establishes) and a derived defeater
+    whose SL justification cites them. Challenging any scope belief
+    causes the defeater to go OUT, restoring the original belief.
+
+    Args:
+        node_id: The belief whose justification should be defeated
+        justification_index: Index of the justification to defeat (0-based)
+        scope_findings: List of dicts with keys: antecedent, establishes,
+            does_not_establish
+        missing_property: The property the derived belief claims but no
+            antecedent establishes
+        defeater_type: Type of defeater
+        defeater_id: Custom defeater ID
+        db_path: Path to database
+
+    Returns: {
+        "node_id": str,
+        "justification_index": int,
+        "defeater_id": str,
+        "defeater_type": str,
+        "scope_belief_ids": list[str],
+        "changed": list[str]
+    }
+    """
+    with _with_network(db_path, write=True) as net:
+        if node_id not in net.nodes:
+            raise KeyError(f"Node '{node_id}' not found")
+
+        node = net.nodes[node_id]
+        if not node.justifications:
+            raise ValueError(f"Node '{node_id}' has no justifications to defeat")
+
+        if justification_index < 0 or justification_index >= len(node.justifications):
+            raise IndexError(
+                f"Justification index {justification_index} out of range "
+                f"(node has {len(node.justifications)} justifications)"
+            )
+
+        justification = node.justifications[justification_index]
+
+        if not defeater_id:
+            defeater_id = f"{defeater_type}-{node_id}-j{justification_index}"
+
+        if not scope_findings:
+            raise ValueError("scope_findings must not be empty")
+
+        before = {nid: n.truth_value for nid, n in net.nodes.items()}
+
+        scope_belief_ids = []
+        for sf in scope_findings:
+            ant_id = sf["antecedent"]
+            establishes = sf.get("establishes", "")
+            does_not = sf.get("does_not_establish", "")
+            scope_id = f"scope-{ant_id}-for-{node_id}-j{justification_index}"
+            suffix = 1
+            while scope_id in net.nodes:
+                scope_id = f"scope-{ant_id}-for-{node_id}-j{justification_index}-{suffix}"
+                suffix += 1
+            scope_text = (
+                f"{ant_id} establishes {establishes}"
+                + (f", and does not establish {does_not}" if does_not else "")
+            )
+            net.add_node(
+                id=scope_id,
+                text=scope_text,
+                metadata={
+                    "scope_of": ant_id,
+                    "for_defeater": defeater_id,
+                },
+            )
+            scope_belief_ids.append(scope_id)
+
+        defeater_text = (
+            f"{node_id} claims {missing_property}, but no antecedent establishes it "
+            f"(defeats {node_id} justification {justification_index})"
+        )
+        defeater = net.add_node(
+            id=defeater_id,
+            text=defeater_text,
+            justifications=[
+                Justification(
+                    type="SL",
+                    antecedents=scope_belief_ids,
+                    label=f"scope-defeat of {node_id} j{justification_index}",
+                ),
+            ],
+            metadata={
+                "defeater_type": defeater_type,
+                "defeats_node": node_id,
+                "defeats_justification": justification_index,
+            },
+        )
+
+        if defeater_id not in justification.outlist:
+            justification.outlist.append(defeater_id)
+        defeater.dependents.add(node_id)
+        node.updated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+        changed = net.recompute_all()
+
+        actually_changed = [
+            nid for nid in changed
+            if before.get(nid) != net.nodes[nid].truth_value
+        ]
+
+        return {
+            "node_id": node_id,
+            "justification_index": justification_index,
+            "defeater_id": defeater_id,
+            "defeater_type": defeater_type,
+            "scope_belief_ids": scope_belief_ids,
+            "changed": actually_changed,
+        }
+
+
 def migrate_retract_to_defeaters(
     node_ids: list[str] | None = None,
     dry_run: bool = True,
