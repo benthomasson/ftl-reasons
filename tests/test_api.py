@@ -625,9 +625,13 @@ class TestUpdateNode:
         node = api.show_node("a", db_path=db_path)
         assert node["source"] == "new/source.md"
 
-    def test_nonexistent_raises(self, db_path):
+    def test_nonexistent_text_raises_valueerror(self, db_path):
         with pytest.raises(ValueError):
             api.update_node("nonexistent", text="x", db_path=db_path)
+
+    def test_nonexistent_source_raises_keyerror(self, db_path):
+        with pytest.raises(KeyError):
+            api.update_node("nonexistent", source="x.py", db_path=db_path)
 
     def test_supersede_with_text(self, db_path):
         result = api.supersede_with_text("a", "Updated text", db_path=db_path)
