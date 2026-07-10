@@ -500,6 +500,78 @@ class TestSupersede:
         assert code == 0
         assert "Superseded old by new" in out
 
+    def test_supersede_with_text(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "old", "Old belief", db_path=db_path)
+        out, err, code = run_cli("supersede", "old", "--text", "Corrected belief", db_path=db_path)
+        assert code == 0
+        assert "Superseded old by" in out
+
+    def test_supersede_with_text_and_id(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "old", "Old belief", db_path=db_path)
+        out, err, code = run_cli("supersede", "old", "--text", "Corrected", "--id", "old-fixed", db_path=db_path)
+        assert code == 0
+        assert "Superseded old by old-fixed" in out
+
+    def test_supersede_text_and_new_id_errors(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "old", "Old belief", db_path=db_path)
+        run_cli("add", "new", "New belief", db_path=db_path)
+        out, err, code = run_cli("supersede", "old", "new", "--text", "Both", db_path=db_path)
+        assert code == 1
+        assert "cannot specify both" in err
+
+    def test_supersede_neither_text_nor_id_errors(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "old", "Old belief", db_path=db_path)
+        out, err, code = run_cli("supersede", "old", db_path=db_path)
+        assert code == 1
+        assert "either new_id or --text is required" in err
+
+
+class TestCheckIntegrity:
+
+    def test_clean(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "p1", "Premise", db_path=db_path)
+        run_cli("add", "d1", "Derived", "--sl", "p1", db_path=db_path)
+        out, err, code = run_cli("check-integrity", db_path=db_path)
+        assert code == 0
+        assert "no mutations detected" in out
+
+    def test_detects_mutation(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "p1", "Premise", db_path=db_path)
+        run_cli("add", "d1", "Derived", "--sl", "p1", db_path=db_path)
+        # Simulate unauthorized text mutation via Storage
+        from reasons.storage import Storage
+        store = Storage(db_path)
+        net = store.load()
+        net.nodes["p1"].text = "Tampered"
+        store.save(net)
+        store.close()
+        out, err, code = run_cli("check-integrity", db_path=db_path)
+        assert code == 1
+        assert "p1" in out
+
+
+class TestBackfillHashes:
+
+    def test_backfill(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "p1", "Premise", db_path=db_path)
+        # Strip hashes to simulate pre-existing data
+        from reasons.storage import Storage
+        store = Storage(db_path)
+        net = store.load()
+        net.nodes["p1"].text_hash = ""
+        store.save(net)
+        store.close()
+        out, err, code = run_cli("backfill-hashes", db_path=db_path)
+        assert code == 0
+        assert "1" in out  # at least 1 node updated
+
 
 class TestConvertToPremise:
 
