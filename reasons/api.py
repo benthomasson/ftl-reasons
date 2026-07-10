@@ -848,11 +848,6 @@ def update_node(
 
     Returns: {"node_id": str, "updated_fields": list[str]}
     """
-    if text is not None:
-        raise ValueError(
-            f"Text mutation is not allowed — beliefs are immutable propositions. "
-            f"Use 'reasons supersede {node_id} --text \"...\"' to create a successor."
-        )
     if pg_conninfo:
         return _pg_dispatch(pg_conninfo, project_id, "update_node",
                             node_id=node_id, text=text, source=source,
@@ -860,6 +855,11 @@ def update_node(
     with _with_network(db_path, write=True) as net:
         if node_id not in net.nodes:
             raise KeyError(f"Node '{node_id}' not found")
+        if text is not None:
+            raise ValueError(
+                f"Text mutation is not allowed — beliefs are immutable propositions. "
+                f"Use 'reasons supersede {node_id} --text \"...\"' to create a successor."
+            )
         node = net.nodes[node_id]
         updated = []
         if source is not None:

@@ -625,8 +625,8 @@ class TestUpdateNode:
         node = api.show_node("a", db_path=db_path)
         assert node["source"] == "new/source.md"
 
-    def test_nonexistent_text_raises_valueerror(self, db_path):
-        with pytest.raises(ValueError):
+    def test_nonexistent_text_raises_keyerror(self, db_path):
+        with pytest.raises(KeyError):
             api.update_node("nonexistent", text="x", db_path=db_path)
 
     def test_nonexistent_source_raises_keyerror(self, db_path):
