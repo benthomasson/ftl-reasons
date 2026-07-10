@@ -223,8 +223,12 @@ class TestApiRepairPremises:
 
         assert result["rewritten"] >= 1
         net = api.export_network(db_path=db)
-        if "obs-1" in net["nodes"]:
-            assert net["nodes"]["obs-1"]["text"] == "PostgreSQL is used"
+        # obs-1 should be superseded (OUT), successor has the new text
+        assert net["nodes"]["obs-1"]["truth_value"] == "OUT"
+        rewritten_results = [r for r in result["results"] if r.get("action") == "rewrite"]
+        for r in rewritten_results:
+            if r["id"] == "obs-1" and "new_id" in r:
+                assert net["nodes"][r["new_id"]]["text"] == "PostgreSQL is used"
 
     def test_retract_removes_node(self, db_with_reviewed):
         db, review_file = db_with_reviewed
@@ -315,10 +319,17 @@ class TestRepairActionMetadata:
         mock = type("R", (), {"returncode": 0, "stdout": llm_resp, "stderr": ""})()
         with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
              patch("reasons.llm.subprocess.run", return_value=mock):
-            api.repair_premises(review_file=review_file, db_path=db)
+            result = api.repair_premises(review_file=review_file, db_path=db)
 
-        node = api.show_node("obs-1", db_path=db)
-        assert node["metadata"].get("repair_action") == "rewritten"
+        # Old node is superseded
+        old_node = api.show_node("obs-1", db_path=db)
+        assert old_node["truth_value"] == "OUT"
+        # Successor has the repair_action metadata
+        rewritten = [r for r in result["results"] if r.get("action") == "rewrite"]
+        assert len(rewritten) >= 1
+        new_id = rewritten[0]["new_id"]
+        new_node = api.show_node(new_id, db_path=db)
+        assert new_node["metadata"].get("repair_action") == "rewritten"
 
     def test_retract_sets_repair_action(self, db_with_reviewed):
         db, review_file = db_with_reviewed

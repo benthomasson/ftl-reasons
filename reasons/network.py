@@ -125,6 +125,15 @@ class Network:
                     self.nodes[out_id].dependents.add(id)
 
         self.nodes[id] = node
+
+        # Compute Merkle hashes
+        if not node.text_hash:
+            from .merkle import compute_text_hash, compute_content_hash
+            node.text_hash = compute_text_hash(node.text)
+            for j in node.justifications:
+                if not j.content_hash:
+                    j.content_hash = compute_content_hash(node, j, self)
+
         self._inherit_access_tags(node)
 
         # Compute initial truth value
@@ -483,6 +492,14 @@ class Network:
                 self.nodes[out_id].dependents.add(node_id)
 
         node.justifications.append(justification)
+
+        if not justification.content_hash:
+            from .merkle import compute_content_hash
+            if not node.text_hash:
+                from .merkle import compute_text_hash
+                node.text_hash = compute_text_hash(node.text)
+            justification.content_hash = compute_content_hash(node, justification, self)
+
         self._inherit_access_tags(node)
         self._propagate_access_tags(node_id)
 

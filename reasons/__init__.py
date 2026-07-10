@@ -20,6 +20,7 @@ class Justification:
     antecedents: list[str] = field(default_factory=list)  # inlist: must be IN
     outlist: list[str] = field(default_factory=list)  # must be OUT
     label: str = ""
+    content_hash: str = ""
 
 
 @dataclass
@@ -38,6 +39,7 @@ class Node:
     source: str = ""
     source_url: str = ""
     source_hash: str = ""
+    text_hash: str = ""
     date: str = ""
     metadata: dict = field(default_factory=dict)
     created_at: str = ""

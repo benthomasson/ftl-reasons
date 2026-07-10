@@ -1469,15 +1469,15 @@ class PgApi:
 
     def update_node(self, node_id, text=None, source=None, source_url=None,
                     example=None):
+        if text is not None:
+            raise ValueError(
+                f"Text mutation is not allowed — beliefs are immutable propositions. "
+                f"Use 'reasons supersede {node_id} --text \"...\"' to create a successor."
+            )
         pid = self.project_id
         updates = []
         params = []
         updated_fields = []
-
-        if text is not None:
-            updates.append("text = %s")
-            params.append(text)
-            updated_fields.append("text")
         if source is not None:
             updates.append("source = %s")
             params.append(source)

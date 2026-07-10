@@ -246,10 +246,11 @@ class TestResearchBeliefs:
             '{"softened_text": "The water likely boiled", "rationale": "weakened"}'
         )
 
+        mock_sup_result = {"old_id": "derived-boil", "new_id": "derived-boil-v2", "changed": []}
         with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
              patch("reasons.llm.subprocess.run",
                    side_effect=[triage_resp, soften_resp]), \
-             patch("reasons.api.update_node") as mock_update, \
+             patch("reasons.api.supersede_with_text", return_value=mock_sup_result) as mock_sup, \
              patch("reasons.api.set_metadata") as mock_meta:
             results = repair_beliefs(
                 review_results, nodes, db_path="test.db",
@@ -259,11 +260,11 @@ class TestResearchBeliefs:
         assert results[0]["pattern"] == "soften"
         assert results[0]["status"] == "softened"
         assert results[0]["softened_text"] == "The water likely boiled"
-        mock_update.assert_called_once_with(
-            "derived-boil", text="The water likely boiled", db_path="test.db",
+        mock_sup.assert_called_once_with(
+            "derived-boil", "The water likely boiled", db_path="test.db",
         )
         mock_meta.assert_called_once_with(
-            "derived-boil", "repair_action", "softened", db_path="test.db",
+            "derived-boil-v2", "repair_action", "softened", db_path="test.db",
         )
 
     def test_abandon(self):
@@ -425,10 +426,11 @@ class TestResearchBeliefs:
         soften1 = _mock_result('{"softened_text": "weaker", "rationale": "y"}')
         triage2 = _mock_result('{"pattern": "abandon", "rationale": "z"}')
 
+        mock_sup_result = {"old_id": "derived-boil", "new_id": "derived-boil-v2", "changed": []}
         with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
              patch("reasons.llm.subprocess.run",
                    side_effect=[triage1, soften1, triage2]), \
-             patch("reasons.api.update_node"), \
+             patch("reasons.api.supersede_with_text", return_value=mock_sup_result), \
              patch("reasons.api.retract_node"), \
              patch("reasons.api.set_metadata"):
             results = repair_beliefs(

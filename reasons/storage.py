@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS nodes (
     source TEXT DEFAULT '',
     source_url TEXT DEFAULT '',
     source_hash TEXT DEFAULT '',
+    text_hash TEXT DEFAULT '',
     date TEXT DEFAULT '',
     metadata_json TEXT DEFAULT '{}',
     created_at TEXT DEFAULT '',
@@ -38,7 +39,8 @@ CREATE TABLE IF NOT EXISTS justifications (
     type TEXT NOT NULL,
     antecedents_json TEXT NOT NULL DEFAULT '[]',
     outlist_json TEXT NOT NULL DEFAULT '[]',
-    label TEXT DEFAULT ''
+    label TEXT DEFAULT '',
+    content_hash TEXT DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS nogoods (
@@ -93,6 +95,11 @@ class Storage:
                 self.conn.execute(f"ALTER TABLE nodes ADD COLUMN {col} TEXT DEFAULT ''")
         if "supporting_justification" not in cols:
             self.conn.execute("ALTER TABLE nodes ADD COLUMN supporting_justification INTEGER DEFAULT NULL")
+        if "text_hash" not in cols:
+            self.conn.execute("ALTER TABLE nodes ADD COLUMN text_hash TEXT DEFAULT ''")
+        j_cols = [c[1] for c in self.conn.execute("PRAGMA table_info(justifications)").fetchall()]
+        if "content_hash" not in j_cols:
+            self.conn.execute("ALTER TABLE justifications ADD COLUMN content_hash TEXT DEFAULT ''")
         if self._is_new:
             now = datetime.now(timezone.utc).isoformat(timespec="seconds")
             project_name = self._project_name or self.db_path.stem
@@ -124,9 +131,9 @@ class Storage:
             for node in network.nodes.values():
                 self.conn.execute(
                     "INSERT INTO nodes (id, text, truth_value, supporting_justification, "
-                    "source, source_url, source_hash, date, metadata_json, "
+                    "source, source_url, source_hash, text_hash, date, metadata_json, "
                     "created_at, updated_at, reviewed_at, verified_at, retracted_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         node.id,
                         node.text,
@@ -135,6 +142,7 @@ class Storage:
                         node.source,
                         node.source_url,
                         node.source_hash,
+                        node.text_hash,
                         node.date,
                         json.dumps(node.metadata),
                         node.created_at,
@@ -150,9 +158,9 @@ class Storage:
                 )
                 for j in node.justifications:
                     self.conn.execute(
-                        "INSERT INTO justifications (node_id, type, antecedents_json, outlist_json, label) "
-                        "VALUES (?, ?, ?, ?, ?)",
-                        (node.id, j.type, json.dumps(j.antecedents), json.dumps(j.outlist), j.label),
+                        "INSERT INTO justifications (node_id, type, antecedents_json, outlist_json, label, content_hash) "
+                        "VALUES (?, ?, ?, ?, ?, ?)",
+                        (node.id, j.type, json.dumps(j.antecedents), json.dumps(j.outlist), j.label, j.content_hash),
                     )
 
             for nogood in network.nogoods:
@@ -201,55 +209,60 @@ class Storage:
         has_source_url = "source_url" in cols
         has_timestamps = "created_at" in cols
         has_supporting = "supporting_justification" in cols
+        has_text_hash = "text_hash" in cols
         if has_timestamps:
             if has_supporting:
                 cursor = self.conn.execute(
                     "SELECT id, text, truth_value, supporting_justification, "
                     "source, source_url, source_hash, date, metadata_json, "
-                    "created_at, updated_at, reviewed_at, verified_at, retracted_at FROM nodes"
+                    "created_at, updated_at, reviewed_at, verified_at, retracted_at"
+                    + (", text_hash" if has_text_hash else ", ''")
+                    + " FROM nodes"
                 )
             else:
                 cursor = self.conn.execute(
                     "SELECT id, text, truth_value, NULL, "
                     "source, source_url, source_hash, date, metadata_json, "
-                    "created_at, updated_at, reviewed_at, verified_at, retracted_at FROM nodes"
+                    "created_at, updated_at, reviewed_at, verified_at, retracted_at"
+                    + (", text_hash" if has_text_hash else ", ''")
+                    + " FROM nodes"
                 )
         elif has_source_url:
             cursor = self.conn.execute(
                 "SELECT id, text, truth_value, NULL, "
-                "source, source_url, source_hash, date, metadata_json FROM nodes"
+                "source, source_url, source_hash, date, metadata_json, '', '', '', '', '', '' FROM nodes"
             )
         else:
             cursor = self.conn.execute(
                 "SELECT id, text, truth_value, NULL, "
-                "source, '', source_hash, date, metadata_json FROM nodes"
+                "source, '', source_hash, date, metadata_json, '', '', '', '', '', '' FROM nodes"
             )
         node_rows = cursor.fetchall()
 
         # Load justifications keyed by node_id
+        j_cols = [c[1] for c in self.conn.execute("PRAGMA table_info(justifications)").fetchall()]
+        has_content_hash = "content_hash" in j_cols
         just_cursor = self.conn.execute(
-            "SELECT node_id, type, antecedents_json, outlist_json, label FROM justifications ORDER BY rowid"
+            "SELECT node_id, type, antecedents_json, outlist_json, label"
+            + (", content_hash" if has_content_hash else ", ''")
+            + " FROM justifications ORDER BY rowid"
         )
         justifications_by_node: dict[str, list[Justification]] = {}
-        for node_id, jtype, ant_json, out_json, label in just_cursor:
+        for node_id, jtype, ant_json, out_json, label, content_hash in just_cursor:
             j = Justification(
                 type=jtype,
                 antecedents=json.loads(ant_json),
                 outlist=json.loads(out_json),
                 label=label,
+                content_hash=content_hash or "",
             )
             justifications_by_node.setdefault(node_id, []).append(j)
 
         # Build nodes directly (bypass add_node to preserve exact state)
         for row in node_rows:
-            if has_timestamps:
-                nid, text, truth_value, supporting_j, source, source_url, source_hash, \
-                    date, meta_json, created_at, updated_at, reviewed_at, verified_at, \
-                    retracted_at = row
-            else:
-                nid, text, truth_value, supporting_j, source, source_url, source_hash, \
-                    date, meta_json = row
-                created_at = updated_at = reviewed_at = verified_at = retracted_at = ""
+            nid, text, truth_value, supporting_j, source, source_url, source_hash, \
+                date, meta_json, created_at, updated_at, reviewed_at, verified_at, \
+                retracted_at, text_hash = row
             node = Node(
                 id=nid,
                 text=text,
@@ -259,6 +272,7 @@ class Storage:
                 source=source,
                 source_url=source_url or "",
                 source_hash=source_hash,
+                text_hash=text_hash or "",
                 date=date,
                 metadata=json.loads(meta_json),
                 created_at=created_at or "",

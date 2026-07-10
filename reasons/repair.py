@@ -453,8 +453,9 @@ def repair_beliefs(review_results, nodes, model="claude",
                 result["softened_text"] = softened
                 result["rationale"] = soften_result.get("rationale", "")
                 if not dry_run:
-                    api.update_node(belief_id, text=softened, db_path=db_path)
-                    api.set_metadata(belief_id, "repair_action", "softened", db_path=db_path)
+                    sup = api.supersede_with_text(belief_id, softened, db_path=db_path)
+                    result["new_id"] = sup["new_id"]
+                    api.set_metadata(sup["new_id"], "repair_action", "softened", db_path=db_path)
                 result["status"] = "softened"
 
             elif pattern == "abandon":

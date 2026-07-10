@@ -30,6 +30,7 @@ reasons/                # importable as `import reasons` (also aliased as reason
   import_beliefs.py   # Parse beliefs.md into network
   export_markdown.py  # Generate beliefs.md from network
   check_stale.py      # Source hash comparison + hash_sources
+  merkle.py           # Per-justification Merkle hashes for mutation detection
   compact.py          # Token-budgeted summary with summary node support
 reasons_lib/            # backwards-compat shim — re-exports from reasons/
 tests/
@@ -44,6 +45,7 @@ tests/
   test_import_json.py # JSON round-trip
   test_export_markdown.py # Markdown export
   test_check_stale.py # Staleness + hash_sources
+  test_merkle.py      # Merkle hash integrity verification
   test_compact.py     # Token-budgeted summary
 ```
 
@@ -72,6 +74,8 @@ uv run reasons export-markdown                   # beliefs.md-compatible export
 uv run reasons check-stale                       # detect source file changes
 uv run reasons hash-sources                      # backfill source hashes
 uv run reasons compact --budget 500              # token-budgeted summary
+uv run reasons check-integrity                   # verify Merkle hashes (detect text mutations)
+uv run reasons backfill-hashes                   # compute hashes for nodes missing them
 uv run reasons propagate                         # recompute all truth values
 uv run reasons log                               # propagation history
 ```
