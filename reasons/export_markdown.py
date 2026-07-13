@@ -85,8 +85,9 @@ def export_markdown(network: Network, repos: dict[str, str] | None = None) -> st
                 o_node = network.nodes.get(o)
                 if o_node and o_node.metadata.get("defeats_node") == node.id:
                     dtype = o_node.metadata.get("defeater_type", "defeater")
+                    rtype = o_node.metadata.get("defeat_reason_type", "")
                     if o not in [d[0] for d in all_defeaters]:
-                        all_defeaters.append((o, dtype))
+                        all_defeaters.append((o, dtype, rtype))
                 elif o not in all_unless:
                     all_unless.append(o)
         if all_deps:
@@ -94,8 +95,9 @@ def export_markdown(network: Network, repos: dict[str, str] | None = None) -> st
         if all_unless:
             lines.append(f"- Unless: {', '.join(all_unless)}")
         if all_defeaters:
-            for d_id, d_type in all_defeaters:
-                lines.append(f"- Defeated by: {d_id} ({d_type})")
+            for d_id, d_type, r_type in all_defeaters:
+                label = f"{d_type}, {r_type}" if r_type else d_type
+                lines.append(f"- Defeated by: {d_id} ({label})")
 
         # Retraction reason — from retract --reason or imported stale_reason
         retract_reason = node.metadata.get("retract_reason") or node.metadata.get("stale_reason")
