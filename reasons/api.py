@@ -1312,6 +1312,74 @@ def migrate_retract_to_defeaters(
         return {"migrated": migrated, "skipped": skipped, "errors": errors}
 
 
+def classify_defeat_reason_types(
+    defeater_type_filter: str | None = None,
+    model: str = "claude",
+    timeout: int = 300,
+    dry_run: bool = True,
+    db_path: str = DEFAULT_DB,
+) -> dict:
+    """Classify unclassified defeaters by logical failure mode via LLM.
+
+    Finds defeater nodes (those with defeats_node metadata) that have no
+    defeat_reason_type, sends each to an LLM for classification, and
+    writes the result to metadata.
+
+    Args:
+        defeater_type_filter: Only classify defeaters with this defeater_type
+        model: LLM model for classification
+        timeout: LLM timeout in seconds
+        dry_run: If True, classify but don't write to db
+        db_path: Path to database
+
+    Returns: {"classified": [...], "skipped": [...], "errors": [...]}
+    """
+    from .review import classify_defeat_reason
+
+    network = export_network(db_path=db_path)
+    nodes = network.get("nodes", {})
+
+    candidates = []
+    skipped = []
+    for nid, node in nodes.items():
+        meta = node.get("metadata") or {}
+        if not meta.get("defeats_node"):
+            continue
+        if meta.get("defeat_reason_type"):
+            skipped.append({"id": nid, "reason": "already classified"})
+            continue
+        if defeater_type_filter and meta.get("defeater_type") != defeater_type_filter:
+            skipped.append({"id": nid, "reason": f"defeater_type '{meta.get('defeater_type')}' != '{defeater_type_filter}'"})
+            continue
+        candidates.append(nid)
+
+    classified = []
+    errors = []
+
+    for nid in candidates:
+        node = nodes[nid]
+        meta = node.get("metadata") or {}
+        defeated_id = meta.get("defeats_node", "")
+        defeated = nodes.get(defeated_id, {})
+
+        reason_type = classify_defeat_reason(
+            node.get("text", ""),
+            defeated.get("text", ""),
+            model, timeout,
+        )
+
+        if not reason_type:
+            errors.append({"id": nid, "reason": "classification returned empty"})
+            continue
+
+        classified.append({"id": nid, "defeat_reason_type": reason_type})
+
+        if not dry_run:
+            set_metadata(nid, "defeat_reason_type", reason_type, db_path=db_path)
+
+    return {"classified": classified, "skipped": skipped, "errors": errors}
+
+
 def challenge(
     target_id: str,
     reason: str,

@@ -82,6 +82,59 @@ Rules:
 {beliefs}"""
 
 
+DEFEAT_REASON_TYPES = [
+    "unsupported-conjunct",
+    "over-generalizes",
+    "false-causal-claim",
+    "internal-contradiction",
+    "circular-reasoning",
+    "missing-bridge",
+    "scope-mismatch",
+]
+
+CLASSIFY_DEFEAT_REASON_PROMPT = """\
+You are classifying the logical failure mode of a defeat verdict in a \
+Truth Maintenance System. The defeater explains why a derived belief's \
+justification is invalid.
+
+Classify the failure mode as exactly one of:
+- unsupported-conjunct: conclusion claims a property no antecedent establishes
+- over-generalizes: conclusion universalizes from bounded evidence
+- false-causal-claim: conclusion asserts causation from co-occurrence
+- internal-contradiction: conclusion contradicts its own antecedents
+- circular-reasoning: antecedent presupposes the conclusion
+- missing-bridge: gap between subsystems not connected by antecedents
+- scope-mismatch: antecedents cover a narrower scope than conclusion claims
+
+Defeater text: {defeater_text}
+Defeated belief: {defeated_text}
+
+Respond with exactly one type from the list above, nothing else."""
+
+
+def classify_defeat_reason(defeater_text, defeated_text, model, timeout):
+    """Classify a defeater's logical failure mode via LLM.
+
+    Returns one of the DEFEAT_REASON_TYPES or empty string on failure.
+    """
+    prompt = CLASSIFY_DEFEAT_REASON_PROMPT.format(
+        defeater_text=defeater_text,
+        defeated_text=defeated_text,
+    )
+    try:
+        result = invoke_model(prompt, model=model, timeout=timeout)
+    except Exception as e:
+        print(f"  WARN: classification failed: {e}", file=sys.stderr)
+        return ""
+    result = result.strip().lower()
+    if result in DEFEAT_REASON_TYPES:
+        return result
+    for t in DEFEAT_REASON_TYPES:
+        if t in result:
+            return t
+    return ""
+
+
 def format_belief_for_review(node_id, nodes):
     """Format one derived belief with antecedent texts for LLM review."""
     node = nodes.get(node_id)
