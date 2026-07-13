@@ -988,6 +988,7 @@ def defeat_justification(
     reason: str,
     defeater_type: str = "invalid-inference",
     defeater_id: str | None = None,
+    defeat_reason_type: str = "",
     db_path: str = DEFAULT_DB,
 ) -> dict:
     """Defeat a justification by adding a defeater belief to its outlist.
@@ -1002,6 +1003,7 @@ def defeat_justification(
         reason: Explanation of why the justification is invalid
         defeater_type: Type of defeater (invalid-inference, over-generalizes, etc.)
         defeater_id: Custom defeater ID (default: {type}-{node_id}-j{index})
+        defeat_reason_type: Logical failure mode classification
         db_path: Path to database
 
     Returns: {
@@ -1009,6 +1011,7 @@ def defeat_justification(
         "justification_index": int,
         "defeater_id": str,
         "defeater_type": str,
+        "defeat_reason_type": str,
         "changed": list[str]
     }
     """
@@ -1035,14 +1038,18 @@ def defeat_justification(
 
         before = {nid: n.truth_value for nid, n in net.nodes.items()}
 
+        meta = {
+            "defeater_type": defeater_type,
+            "defeats_node": node_id,
+            "defeats_justification": justification_index,
+        }
+        if defeat_reason_type:
+            meta["defeat_reason_type"] = defeat_reason_type
+
         defeater = net.add_node(
             id=defeater_id,
             text=defeater_text,
-            metadata={
-                "defeater_type": defeater_type,
-                "defeats_node": node_id,
-                "defeats_justification": justification_index,
-            },
+            metadata=meta,
         )
 
         if defeater_id not in justification.outlist:
@@ -1062,6 +1069,7 @@ def defeat_justification(
             "justification_index": justification_index,
             "defeater_id": defeater_id,
             "defeater_type": defeater_type,
+            "defeat_reason_type": defeat_reason_type,
             "changed": actually_changed,
         }
 
@@ -1073,6 +1081,7 @@ def defeat_with_scope(
     missing_property: str,
     defeater_type: str = "invalid-inference",
     defeater_id: str | None = None,
+    defeat_reason_type: str = "",
     db_path: str = DEFAULT_DB,
 ) -> dict:
     """Defeat a justification with a derived defeater backed by scope beliefs.
@@ -1091,6 +1100,7 @@ def defeat_with_scope(
             antecedent establishes
         defeater_type: Type of defeater
         defeater_id: Custom defeater ID
+        defeat_reason_type: Logical failure mode classification
         db_path: Path to database
 
     Returns: {
@@ -1098,6 +1108,7 @@ def defeat_with_scope(
         "justification_index": int,
         "defeater_id": str,
         "defeater_type": str,
+        "defeat_reason_type": str,
         "scope_belief_ids": list[str],
         "changed": list[str]
     }
@@ -1154,6 +1165,14 @@ def defeat_with_scope(
             f"{node_id} claims {missing_property}, but no antecedent establishes it "
             f"(defeats {node_id} justification {justification_index})"
         )
+        defeater_meta = {
+            "defeater_type": defeater_type,
+            "defeats_node": node_id,
+            "defeats_justification": justification_index,
+        }
+        if defeat_reason_type:
+            defeater_meta["defeat_reason_type"] = defeat_reason_type
+
         defeater = net.add_node(
             id=defeater_id,
             text=defeater_text,
@@ -1164,11 +1183,7 @@ def defeat_with_scope(
                     label=f"scope-defeat of {node_id} j{justification_index}",
                 ),
             ],
-            metadata={
-                "defeater_type": defeater_type,
-                "defeats_node": node_id,
-                "defeats_justification": justification_index,
-            },
+            metadata=defeater_meta,
         )
 
         if defeater_id not in justification.outlist:
@@ -1188,6 +1203,7 @@ def defeat_with_scope(
             "justification_index": justification_index,
             "defeater_id": defeater_id,
             "defeater_type": defeater_type,
+            "defeat_reason_type": defeat_reason_type,
             "scope_belief_ids": scope_belief_ids,
             "changed": actually_changed,
         }

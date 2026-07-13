@@ -239,3 +239,67 @@ def test_cascade_through_scope_defeat(tmp_path):
 
     assert api.show_node("d1", db_path=str(db))["truth_value"] == "OUT"
     assert api.show_node("d2", db_path=str(db))["truth_value"] == "OUT"
+
+
+def test_defeat_reason_type_stored(tmp_path):
+    """defeat_reason_type is stored in metadata and returned."""
+    db = tmp_path / "test.db"
+    api.init_db(str(db))
+
+    api.add_node("p1", "P1", db_path=str(db))
+    api.add_node("d1", "D1", sl="p1", db_path=str(db))
+
+    result = api.defeat_with_scope(
+        "d1", 0,
+        scope_findings=[
+            {"antecedent": "p1", "establishes": "X", "does_not_establish": "Y"},
+        ],
+        missing_property="Y",
+        defeat_reason_type="unsupported-conjunct",
+        db_path=str(db),
+    )
+
+    assert result["defeat_reason_type"] == "unsupported-conjunct"
+    defeater = api.show_node(result["defeater_id"], db_path=str(db))
+    assert defeater["metadata"]["defeat_reason_type"] == "unsupported-conjunct"
+
+
+def test_defeat_reason_type_omitted(tmp_path):
+    """defeat_reason_type defaults to empty and is not stored when empty."""
+    db = tmp_path / "test.db"
+    api.init_db(str(db))
+
+    api.add_node("p1", "P1", db_path=str(db))
+    api.add_node("d1", "D1", sl="p1", db_path=str(db))
+
+    result = api.defeat_with_scope(
+        "d1", 0,
+        scope_findings=[
+            {"antecedent": "p1", "establishes": "X", "does_not_establish": "Y"},
+        ],
+        missing_property="Y",
+        db_path=str(db),
+    )
+
+    assert result["defeat_reason_type"] == ""
+    defeater = api.show_node(result["defeater_id"], db_path=str(db))
+    assert "defeat_reason_type" not in defeater["metadata"]
+
+
+def test_defeat_justification_reason_type(tmp_path):
+    """defeat_justification stores defeat_reason_type in metadata."""
+    db = tmp_path / "test.db"
+    api.init_db(str(db))
+
+    api.add_node("p1", "P1", db_path=str(db))
+    api.add_node("d1", "D1", sl="p1", db_path=str(db))
+
+    result = api.defeat_justification(
+        "d1", 0, "overclaims scope",
+        defeat_reason_type="scope-mismatch",
+        db_path=str(db),
+    )
+
+    assert result["defeat_reason_type"] == "scope-mismatch"
+    defeater = api.show_node(result["defeater_id"], db_path=str(db))
+    assert defeater["metadata"]["defeat_reason_type"] == "scope-mismatch"

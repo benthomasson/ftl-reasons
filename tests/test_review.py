@@ -198,6 +198,23 @@ class TestParseReviewResponse:
         assert results[0]["necessary"] is True
         assert results[0]["unnecessary_antecedents"] == []
         assert results[0]["comment"] == ""
+        assert results[0]["defeat_reason_type"] == ""
+
+    def test_defeat_reason_type_parsed(self):
+        response = json.dumps([{
+            "id": "derived-ab",
+            "valid": False,
+            "sufficient": True,
+            "necessary": True,
+            "unnecessary_antecedents": [],
+            "comment": "overclaims",
+            "scope_findings": [{"antecedent": "p1", "establishes": "X"}],
+            "missing_property": "Y",
+            "defeat_reason_type": "unsupported-conjunct",
+        }])
+        results = parse_review_response(response)
+        assert len(results) == 1
+        assert results[0]["defeat_reason_type"] == "unsupported-conjunct"
 
     def test_skips_items_without_id(self):
         response = json.dumps([

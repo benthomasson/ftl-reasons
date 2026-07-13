@@ -43,7 +43,8 @@ Return ONLY a JSON array. For each belief, one object:
     "unnecessary_antecedents": ["ant-id-1"],
     "comment": "brief explanation",
     "scope_findings": [],
-    "missing_property": ""
+    "missing_property": "",
+    "defeat_reason_type": ""
   }}
 ]
 ```
@@ -66,6 +67,15 @@ Rules:
   Set "missing_property" to the property the derived belief claims but
   no antecedent establishes. These fields enable structured defeaters
   that can be audited through the graph.
+- When "valid" is false, also set "defeat_reason_type" to classify
+  the logical failure mode. Use exactly one of:
+    - "unsupported-conjunct": conclusion claims a property no antecedent establishes
+    - "over-generalizes": conclusion universalizes from bounded evidence
+    - "false-causal-claim": conclusion asserts causation from co-occurrence
+    - "internal-contradiction": conclusion contradicts its own antecedents
+    - "circular-reasoning": antecedent presupposes the conclusion
+    - "missing-bridge": gap between subsystems not connected by antecedents
+    - "scope-mismatch": antecedents cover a narrower scope than conclusion claims
 
 ## Beliefs to review
 
@@ -143,6 +153,7 @@ def parse_review_response(response):
                 "comment": item.get("comment", ""),
                 "scope_findings": item.get("scope_findings", []),
                 "missing_property": item.get("missing_property", ""),
+                "defeat_reason_type": item.get("defeat_reason_type", ""),
             })
         if results:
             return results

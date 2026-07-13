@@ -220,6 +220,33 @@ class TestFormatNode:
                               all_details=all_details)
         assert "**Defeated by:** def-1 (defeater)" in result
 
+    def test_defeated_by_with_reason_type(self):
+        defeater_detail = {
+            "text": "This defeats target-node",
+            "truth_value": "IN",
+            "justifications": [],
+            "dependents": [],
+            "metadata": {
+                "defeats_node": "target-node",
+                "defeater_type": "invalid-inference",
+                "defeat_reason_type": "scope-mismatch",
+            },
+        }
+        target_detail = {
+            "text": "A defeated belief",
+            "truth_value": "OUT",
+            "justifications": [{"antecedents": ["base"], "outlist": ["defeater-1"]}],
+            "dependents": [],
+        }
+        all_details = {
+            "target-node": target_detail,
+            "defeater-1": defeater_detail,
+        }
+        node_to_page = {"defeater-1": "misc.md"}
+        result = _format_node("target-node", target_detail, node_to_page,
+                              all_details=all_details)
+        assert "**Defeated by:** [defeater-1](misc.md#defeater-1) (invalid-inference, scope-mismatch)" in result
+
     def test_no_defeaters_without_all_details(self):
         detail = {
             "text": "A belief",

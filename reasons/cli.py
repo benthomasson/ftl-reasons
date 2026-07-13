@@ -207,14 +207,18 @@ def cmd_defeat_justification(args):
             args.reason,
             defeater_type=args.type or "invalid-inference",
             defeater_id=getattr(args, "defeater_id", None),
+            defeat_reason_type=getattr(args, "reason_type", None) or "",
             db_path=args.db,
         )
     except (KeyError, ValueError, IndexError) as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
+    dtype = result['defeater_type']
+    rtype = result.get('defeat_reason_type', '')
+    label = f"{dtype}, {rtype}" if rtype else dtype
     print(f"Defeated justification {result['justification_index']} of {result['node_id']}")
-    print(f"  Defeater: {result['defeater_id']} ({result['defeater_type']})")
+    print(f"  Defeater: {result['defeater_id']} ({label})")
     if result["changed"]:
         went_out = [nid for nid in result["changed"] if nid != result["node_id"]]
         if result["node_id"] in result["changed"]:
@@ -245,6 +249,8 @@ def cmd_defeat_with_scope(args):
         print("Error: missing_property is empty in the provided file", file=sys.stderr)
         sys.exit(1)
 
+    reason_type = getattr(args, "reason_type", None) or data.get("defeat_reason_type", "")
+
     try:
         result = api.defeat_with_scope(
             args.node_id,
@@ -253,6 +259,7 @@ def cmd_defeat_with_scope(args):
             missing_property,
             defeater_type=args.type or "invalid-inference",
             defeater_id=getattr(args, "defeater_id", None),
+            defeat_reason_type=reason_type,
             db_path=args.db,
         )
     except (KeyError, ValueError, IndexError) as e:
@@ -260,7 +267,10 @@ def cmd_defeat_with_scope(args):
         sys.exit(1)
 
     print(f"Defeated justification {result['justification_index']} of {result['node_id']}")
-    print(f"  Defeater: {result['defeater_id']} ({result['defeater_type']})")
+    dtype = result['defeater_type']
+    rtype = result.get('defeat_reason_type', '')
+    label = f"{dtype}, {rtype}" if rtype else dtype
+    print(f"  Defeater: {result['defeater_id']} ({label})")
     print(f"  Scope beliefs: {len(result['scope_belief_ids'])}")
     for sid in result["scope_belief_ids"]:
         print(f"    - {sid}")
@@ -2016,17 +2026,22 @@ def cmd_review_beliefs(args):
         for r in invalid:
             scope_findings = r.get("scope_findings", [])
             missing_property = r.get("missing_property", r.get("comment", "invalid"))
+            reason_type = r.get("defeat_reason_type", "")
             try:
                 if scope_findings:
                     result = api.defeat_with_scope(
                         r["id"], 0, scope_findings, missing_property,
-                        defeater_type="invalid-inference", db_path=args.db)
-                    print(f"  DEFEATED {r['id']} with {len(result['scope_belief_ids'])} scope belief(s)")
+                        defeater_type="invalid-inference",
+                        defeat_reason_type=reason_type, db_path=args.db)
+                    rt = f" [{reason_type}]" if reason_type else ""
+                    print(f"  DEFEATED {r['id']} with {len(result['scope_belief_ids'])} scope belief(s){rt}")
                 else:
                     api.defeat_justification(
                         r["id"], 0, r.get("comment", "invalid"),
-                        defeater_type="invalid-inference", db_path=args.db)
-                    print(f"  DEFEATED {r['id']} (bare defeater, no scope findings)")
+                        defeater_type="invalid-inference",
+                        defeat_reason_type=reason_type, db_path=args.db)
+                    rt = f" [{reason_type}]" if reason_type else ""
+                    print(f"  DEFEATED {r['id']} (bare defeater, no scope findings){rt}")
             except Exception as e:
                 print(f"  ERROR defeating {r['id']}: {e}", file=sys.stderr)
 
@@ -2642,6 +2657,11 @@ def main():
     p.add_argument("reason", help="Why this justification is invalid")
     p.add_argument("--type", choices=["invalid-inference", "over-generalizes", "duplicate-of", "superseded-by"],
                    help="Type of defeater (default: invalid-inference)")
+    p.add_argument("--reason-type", dest="reason_type",
+                   choices=["unsupported-conjunct", "over-generalizes", "false-causal-claim",
+                            "internal-contradiction", "circular-reasoning", "missing-bridge",
+                            "scope-mismatch"],
+                   help="Logical failure mode classification")
     p.add_argument("--defeater-id", help="Custom defeater belief ID")
 
     # defeat-with-scope
@@ -2652,6 +2672,11 @@ def main():
                    help="JSON file with scope_findings and missing_property")
     p.add_argument("--type", choices=["invalid-inference", "over-generalizes", "duplicate-of", "superseded-by"],
                    help="Type of defeater (default: invalid-inference)")
+    p.add_argument("--reason-type", dest="reason_type",
+                   choices=["unsupported-conjunct", "over-generalizes", "false-causal-claim",
+                            "internal-contradiction", "circular-reasoning", "missing-bridge",
+                            "scope-mismatch"],
+                   help="Logical failure mode classification")
     p.add_argument("--defeater-id", help="Custom defeater belief ID")
 
     # migrate-defeaters

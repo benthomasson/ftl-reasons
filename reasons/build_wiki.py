@@ -92,12 +92,14 @@ def _format_node(node_id, node_detail, node_to_page, all_details=None):
         if defeaters:
             for d_id, d_meta, d_text in defeaters:
                 d_type = d_meta.get("defeater_type", "defeater")
+                r_type = d_meta.get("defeat_reason_type", "")
+                label = f"{d_type}, {r_type}" if r_type else d_type
                 page = node_to_page.get(d_id)
                 if page:
                     link = f"[{d_id}]({page}#{d_id})"
                 else:
                     link = d_id
-                lines.append(f"**Defeated by:** {link} ({d_type})")
+                lines.append(f"**Defeated by:** {link} ({label})")
             lines.append("")
 
     lines.append(node_detail["text"])
