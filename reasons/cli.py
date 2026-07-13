@@ -319,6 +319,43 @@ def cmd_migrate_defeaters(args):
         print("No candidates found")
 
 
+def cmd_classify_defeaters(args):
+    if getattr(args, "pg", None) or os.environ.get("REASONS_PG_CONNINFO"):
+        print("Error: classify-defeaters is not supported with --pg", file=sys.stderr)
+        sys.exit(1)
+
+    dry_run = not args.apply
+    result = api.classify_defeat_reason_types(
+        defeater_type_filter=getattr(args, "type", None),
+        model=args.model,
+        timeout=args.timeout,
+        dry_run=dry_run,
+        db_path=args.db,
+    )
+
+    if dry_run:
+        print("Dry run — no changes applied")
+        print()
+
+    if result["classified"]:
+        print(f"{'Would classify' if dry_run else 'Classified'}: {len(result['classified'])}")
+        for c in result["classified"]:
+            print(f"  {c['id']}: {c['defeat_reason_type']}")
+
+    if result["skipped"]:
+        print(f"Skipped: {len(result['skipped'])}")
+        for s in result["skipped"]:
+            print(f"  {s['id']}: {s['reason']}")
+
+    if result["errors"]:
+        print(f"Errors: {len(result['errors'])}")
+        for e in result["errors"]:
+            print(f"  {e['id']}: {e['reason']}")
+
+    if not result["classified"] and not result["skipped"] and not result["errors"]:
+        print("No unclassified defeaters found")
+
+
 def cmd_assert(args):
     try:
         result = api.assert_node(args.node_id, **_backend_kwargs(args))
@@ -2684,6 +2721,13 @@ def main():
     p.add_argument("node_ids", nargs="*", help="Specific nodes to migrate (default: all candidates)")
     p.add_argument("--apply", action="store_true", help="Apply changes (default is dry-run)")
 
+    # classify-defeaters
+    p = sub.add_parser("classify-defeaters", help="Classify unclassified defeaters by logical failure mode via LLM")
+    p.add_argument("--model", "-m", required=True, help="LLM model for classification")
+    p.add_argument("--apply", action="store_true", help="Apply changes (default is dry-run)")
+    p.add_argument("--type", help="Only classify defeaters with this defeater_type")
+    p.add_argument("--timeout", type=int, default=300, help="LLM timeout in seconds (default: 300)")
+
     # what-if
     p = sub.add_parser("what-if", help="Simulate retracting or asserting a node (read-only)")
     p.add_argument("action", choices=["retract", "assert"], help="Action to simulate")
@@ -3303,6 +3347,7 @@ def main():
         "defeat-justification": cmd_defeat_justification,
         "defeat-with-scope": cmd_defeat_with_scope,
         "migrate-defeaters": cmd_migrate_defeaters,
+        "classify-defeaters": cmd_classify_defeaters,
         "what-if": cmd_what_if,
         "status": cmd_status,
         "show": cmd_show,
