@@ -127,6 +127,8 @@ def classify_defeat_reason(defeater_text, defeated_text, model, timeout):
         print(f"  WARN: classification failed: {e}", file=sys.stderr)
         return ""
     result = result.strip().lower()
+    if result in DEFEAT_REASON_TYPES:
+        return result
     for t in DEFEAT_REASON_TYPES:
         if t in result:
             return t

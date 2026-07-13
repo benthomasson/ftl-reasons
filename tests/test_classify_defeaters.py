@@ -28,6 +28,17 @@ class TestClassifyDefeatReason:
                                             "claude", 300)
         assert result == "over-generalizes"
 
+    def test_exact_match_preferred(self):
+        mock_result = type("R", (), {
+            "returncode": 0,
+            "stdout": "scope-mismatch",
+            "stderr": ""})()
+        with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
+             patch("reasons.llm.subprocess.run", return_value=mock_result):
+            result = classify_defeat_reason("defeater text", "defeated text",
+                                            "claude", 300)
+        assert result == "scope-mismatch"
+
     def test_returns_empty_on_unrecognized(self):
         mock_result = type("R", (), {
             "returncode": 0, "stdout": "I cannot classify this",
@@ -100,6 +111,7 @@ class TestClassifyDefeatReasonTypes:
                 model="claude", dry_run=True, db_path=db)
 
         assert len(result["classified"]) == 0
+        assert any(s["reason"] == "already classified" for s in result["skipped"])
 
     def test_filters_by_defeater_type(self, tmp_path):
         db = self._setup_db(tmp_path)
@@ -111,6 +123,7 @@ class TestClassifyDefeatReasonTypes:
                 defeater_type_filter="invalid-inference",
                 model="claude", dry_run=True, db_path=db)
         assert len(result["classified"]) == 0
+        assert any("migrated-retraction" in s["reason"] for s in result["skipped"])
 
         with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
              patch("reasons.llm.subprocess.run", return_value=mock_result):

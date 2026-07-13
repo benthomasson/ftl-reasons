@@ -1340,18 +1340,20 @@ def classify_defeat_reason_types(
     nodes = network.get("nodes", {})
 
     candidates = []
+    skipped = []
     for nid, node in nodes.items():
         meta = node.get("metadata") or {}
         if not meta.get("defeats_node"):
             continue
         if meta.get("defeat_reason_type"):
+            skipped.append({"id": nid, "reason": "already classified"})
             continue
         if defeater_type_filter and meta.get("defeater_type") != defeater_type_filter:
+            skipped.append({"id": nid, "reason": f"defeater_type '{meta.get('defeater_type')}' != '{defeater_type_filter}'"})
             continue
         candidates.append(nid)
 
     classified = []
-    skipped = []
     errors = []
 
     for nid in candidates:
