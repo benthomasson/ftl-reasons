@@ -1168,12 +1168,16 @@ def _require_sqlite(args, command_name):
 
 def cmd_search(args):
     fmt = getattr(args, "format", "markdown")
-    result = api.search(args.query, visible_to=_parse_visible_to(args), format=fmt, **_backend_kwargs(args))
+    include_out = getattr(args, "show_out", False)
+    result = api.search(args.query, visible_to=_parse_visible_to(args), format=fmt,
+                        include_out=include_out, **_backend_kwargs(args))
     print(result)
 
 
 def cmd_lookup(args):
-    result = api.lookup(args.query, visible_to=_parse_visible_to(args), **_backend_kwargs(args))
+    include_out = getattr(args, "show_out", False)
+    result = api.lookup(args.query, visible_to=_parse_visible_to(args),
+                        include_out=include_out, **_backend_kwargs(args))
     print(result)
 
 
@@ -3009,11 +3013,13 @@ def main():
     p.add_argument("--format", choices=["markdown", "json", "minimal"], default="markdown",
                    help="Output format (default: markdown)")
     p.add_argument("--visible-to", metavar="TAG,TAG", help="Only show nodes whose access_tags are a subset of these tags")
+    p.add_argument("--show-out", action="store_true", help="Include OUT (retracted) beliefs in results")
 
     # lookup
     p = sub.add_parser("lookup", help="Simple keyword search over beliefs (no neighbor expansion)")
     p.add_argument("query", help="Search terms (all must match, case-insensitive)")
     p.add_argument("--visible-to", metavar="TAG,TAG", help="Only show nodes whose access_tags are a subset of these tags")
+    p.add_argument("--show-out", action="store_true", help="Include OUT (retracted) beliefs in results")
 
     # ask
     p = sub.add_parser("ask", help="Ask a question about beliefs (FTS5 search + LLM synthesis)")
