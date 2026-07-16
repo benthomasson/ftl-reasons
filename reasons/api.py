@@ -2489,7 +2489,8 @@ def compact(budget: int = 500, truncate: bool = True, visible_to: list[str] | No
     """
     if pg_conninfo:
         return _pg_dispatch(pg_conninfo, project_id, "compact",
-                            budget=budget, truncate=truncate, visible_to=visible_to)
+                            budget=budget, truncate=truncate, visible_to=visible_to,
+                            include_out=include_out)
     from .compact import compact as _compact
 
     with _with_network(db_path) as net:
@@ -2525,7 +2526,8 @@ def lookup(query: str, visible_to: list[str] | None = None, db_path: str = DEFAU
     """
     if pg_conninfo:
         return _pg_dispatch(pg_conninfo, project_id, "lookup",
-                            query=query, visible_to=visible_to)
+                            query=query, visible_to=visible_to,
+                            include_out=include_out)
     with _with_network(db_path) as net:
         query_terms = query.lower().split()
         matches = []
@@ -2599,7 +2601,8 @@ def search(query: str, visible_to: list[str] | None = None, db_path: str = DEFAU
         if depth != 1:
             raise NotImplementedError("depth is not supported with PostgreSQL")
         return _pg_dispatch(pg_conninfo, project_id, "search",
-                            query=query, visible_to=visible_to, format=format)
+                            query=query, visible_to=visible_to, format=format,
+                            include_out=include_out)
     with _with_network(db_path) as net:
         matched_ids = _fts_search(query, db_path)
 

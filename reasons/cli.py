@@ -1132,10 +1132,12 @@ def cmd_pin_lines(args):
 
 
 def cmd_compact(args):
+    include_out = getattr(args, "show_out", False)
     summary = api.compact(
         budget=args.budget,
         truncate=not args.no_truncate,
         visible_to=_parse_visible_to(args),
+        include_out=include_out,
         **_backend_kwargs(args),
     )
     print(summary)
@@ -3006,6 +3008,7 @@ def main():
     p.add_argument("--budget", type=int, default=500, help="Token budget (default: 500)")
     p.add_argument("--no-truncate", action="store_true", help="Show full node text")
     p.add_argument("--visible-to", metavar="TAG,TAG", help="Only include nodes whose access_tags are a subset of these tags")
+    p.add_argument("--show-out", action="store_true", help="Include OUT (retracted) beliefs in summary")
 
     # search
     p = sub.add_parser("search", help="Search nodes using full-text search with neighbor expansion")
