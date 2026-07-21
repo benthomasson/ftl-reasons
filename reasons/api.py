@@ -2529,14 +2529,19 @@ def lookup(query: str, visible_to: list[str] | None = None, db_path: str = DEFAU
                             query=query, visible_to=visible_to,
                             include_out=include_out)
     with _with_network(db_path) as net:
-        query_terms = query.lower().split()
-        matches = []
+        raw_terms = re.findall(r'\w+', query)
+        query_terms = [t.lower() for t in raw_terms
+                       if t.lower() not in _STOP_WORDS and len(t) > 1]
+        if not query_terms:
+            query_terms = [t.lower() for t in raw_terms if len(t) > 1]
+
+        # Build searchable blocks for all eligible nodes
+        blocks = []
         for nid, node in sorted(net.nodes.items()):
             if not include_out and node.truth_value == "OUT":
                 continue
             if visible_to is not None and not _is_visible(node, visible_to):
                 continue
-            # Build the full searchable block — same fields as beliefs.md
             block_parts = [nid, node.text]
             if node.source:
                 block_parts.append(node.source)
@@ -2548,9 +2553,29 @@ def lookup(query: str, visible_to: list[str] | None = None, db_path: str = DEFAU
                 block_parts.extend(j.antecedents)
             for dep_id in node.dependents:
                 block_parts.append(dep_id)
-            block_lower = " ".join(block_parts).lower()
-            if all(term in block_lower for term in query_terms):
-                matches.append(node)
+            blocks.append((node, " ".join(block_parts).lower()))
+
+        def _match(terms):
+            return [node for node, block in blocks
+                    if all(t in block for t in terms)]
+
+        matches = _match(query_terms)
+
+        # Progressive relaxation: drop terms until we find results
+        _MAX_RELAXATION = 50
+        if not matches and len(query_terms) > 2:
+            min_terms = max(1, len(query_terms) // 2)
+            budget = _MAX_RELAXATION
+            for n in range(len(query_terms) - 1, min_terms - 1, -1):
+                for combo in combinations(query_terms, n):
+                    budget -= 1
+                    if budget < 0:
+                        break
+                    matches = _match(list(combo))
+                    if matches:
+                        break
+                if matches or budget < 0:
+                    break
 
         if not matches:
             return f"No beliefs found matching '{query}'"

@@ -10,6 +10,7 @@ import json
 import re
 from collections import deque
 from datetime import datetime, timezone
+from itertools import combinations
 
 try:
     import psycopg
@@ -937,9 +938,16 @@ class PgApi:
         }
 
     def lookup(self, query, visible_to=None, include_out=False):
-        """Simple all-terms substring search over full belief blocks."""
+        """All-terms substring search with stop-word filtering and progressive
+        relaxation over full belief blocks."""
+        from reasons.api import _STOP_WORDS
+
         pid = self.project_id
-        query_terms = query.lower().split()
+        raw_terms = re.findall(r'\w+', query)
+        query_terms = [t.lower() for t in raw_terms
+                       if t.lower() not in _STOP_WORDS and len(t) > 1]
+        if not query_terms:
+            query_terms = [t.lower() for t in raw_terms if len(t) > 1]
 
         with self.conn.cursor() as cur:
             cur.execute(
@@ -969,7 +977,7 @@ class PgApi:
             for ref in all_refs:
                 dependents_by_node.setdefault(ref, []).append(node_id)
 
-        matches = []
+        blocks = []
         for nid, text, tv, source, source_hash, date, meta in node_rows:
             if isinstance(meta, str):
                 meta = json.loads(meta) if meta else {}
@@ -989,15 +997,33 @@ class PgApi:
                 block_parts.append(ref)
             for dep in dependents_by_node.get(nid, []):
                 block_parts.append(dep)
-            block_lower = " ".join(block_parts).lower()
+            blocks.append(({
+                "id": nid, "text": text, "truth_value": tv,
+                "source": source, "source_hash": source_hash,
+                "date": date,
+                "depends_on": refs_by_node.get(nid, []),
+            }, " ".join(block_parts).lower()))
 
-            if all(term in block_lower for term in query_terms):
-                matches.append({
-                    "id": nid, "text": text, "truth_value": tv,
-                    "source": source, "source_hash": source_hash,
-                    "date": date,
-                    "depends_on": refs_by_node.get(nid, []),
-                })
+        def _match(terms):
+            return [entry for entry, block in blocks
+                    if all(t in block for t in terms)]
+
+        matches = _match(query_terms)
+
+        _MAX_RELAXATION = 50
+        if not matches and len(query_terms) > 2:
+            min_terms = max(1, len(query_terms) // 2)
+            budget = _MAX_RELAXATION
+            for n in range(len(query_terms) - 1, min_terms - 1, -1):
+                for combo in combinations(query_terms, n):
+                    budget -= 1
+                    if budget < 0:
+                        break
+                    matches = _match(list(combo))
+                    if matches:
+                        break
+                if matches or budget < 0:
+                    break
 
         if not matches:
             return f"No beliefs found matching '{query}'"
