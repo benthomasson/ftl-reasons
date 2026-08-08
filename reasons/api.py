@@ -833,51 +833,6 @@ def supersede_with_text(
         return result
 
 
-def update_node(
-    node_id: str,
-    text: str | None = None,
-    source: str | None = None,
-    source_url: str | None = None,
-    example: str | None = None,
-    db_path: str = DEFAULT_DB,
-    pg_conninfo=None, project_id=None,
-) -> dict:
-    """Update a node's source, source_url, or example metadata.
-
-    Text is immutable — use 'reasons supersede' to create a successor.
-
-    Returns: {"node_id": str, "updated_fields": list[str]}
-    """
-    if pg_conninfo:
-        return _pg_dispatch(pg_conninfo, project_id, "update_node",
-                            node_id=node_id, text=text, source=source,
-                            source_url=source_url, example=example)
-    with _with_network(db_path, write=True) as net:
-        if node_id not in net.nodes:
-            raise KeyError(f"Node '{node_id}' not found")
-        if text is not None:
-            raise ValueError(
-                f"Text mutation is not allowed — beliefs are immutable propositions. "
-                f"Use 'reasons supersede {node_id} --text \"...\"' to create a successor."
-            )
-        node = net.nodes[node_id]
-        updated = []
-        if source is not None:
-            node.source = source
-            updated.append("source")
-        if source_url is not None:
-            node.source_url = source_url
-            updated.append("source_url")
-        if example is not None:
-            meta = node.metadata or {}
-            meta["example"] = example
-            node.metadata = meta
-            updated.append("example")
-        if updated:
-            node.updated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        return {"node_id": node_id, "updated_fields": updated}
-
-
 def set_metadata(
     node_id: str,
     key: str,
@@ -2529,14 +2484,19 @@ def lookup(query: str, visible_to: list[str] | None = None, db_path: str = DEFAU
                             query=query, visible_to=visible_to,
                             include_out=include_out)
     with _with_network(db_path) as net:
-        query_terms = query.lower().split()
-        matches = []
+        raw_terms = re.findall(r'\w+', query)
+        query_terms = [t.lower() for t in raw_terms
+                       if t.lower() not in _STOP_WORDS and len(t) > 1]
+        if not query_terms:
+            query_terms = [t.lower() for t in raw_terms if len(t) > 1]
+
+        # Build searchable blocks for all eligible nodes
+        blocks = []
         for nid, node in sorted(net.nodes.items()):
             if not include_out and node.truth_value == "OUT":
                 continue
             if visible_to is not None and not _is_visible(node, visible_to):
                 continue
-            # Build the full searchable block — same fields as beliefs.md
             block_parts = [nid, node.text]
             if node.source:
                 block_parts.append(node.source)
@@ -2548,9 +2508,29 @@ def lookup(query: str, visible_to: list[str] | None = None, db_path: str = DEFAU
                 block_parts.extend(j.antecedents)
             for dep_id in node.dependents:
                 block_parts.append(dep_id)
-            block_lower = " ".join(block_parts).lower()
-            if all(term in block_lower for term in query_terms):
-                matches.append(node)
+            blocks.append((node, " ".join(block_parts).lower()))
+
+        def _match(terms):
+            return [node for node, block in blocks
+                    if all(t in block for t in terms)]
+
+        matches = _match(query_terms)
+
+        # Progressive relaxation: drop terms until we find results
+        _MAX_RELAXATION = 50
+        if not matches and len(query_terms) > 2:
+            min_terms = max(1, len(query_terms) // 2)
+            budget = _MAX_RELAXATION
+            for n in range(len(query_terms) - 1, min_terms - 1, -1):
+                for combo in combinations(query_terms, n):
+                    budget -= 1
+                    if budget < 0:
+                        break
+                    matches = _match(list(combo))
+                    if matches:
+                        break
+                if matches or budget < 0:
+                    break
 
         if not matches:
             return f"No beliefs found matching '{query}'"

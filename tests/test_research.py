@@ -388,7 +388,6 @@ class TestResearchBeliefs:
         with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
              patch("reasons.llm.subprocess.run",
                    side_effect=[triage_resp, soften_resp]), \
-             patch("reasons.api.update_node") as mock_update, \
              patch("reasons.api.retract_node") as mock_retract, \
              patch("reasons.api.add_justification") as mock_add, \
              patch("reasons.api.set_metadata") as mock_meta:
@@ -398,7 +397,6 @@ class TestResearchBeliefs:
             )
 
         assert results[0]["status"] == "softened"
-        mock_update.assert_not_called()
         mock_retract.assert_not_called()
         mock_add.assert_not_called()
         mock_meta.assert_not_called()
