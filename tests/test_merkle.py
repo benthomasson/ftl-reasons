@@ -168,16 +168,6 @@ def test_backfill_hashes(tmp_path):
     assert len(result["chain_mutations"]) == 0
 
 
-def test_update_node_rejects_text(tmp_path):
-    """update_node rejects text mutation — beliefs are immutable."""
-    db = tmp_path / "test.db"
-    api.init_db(str(db))
-    api.add_node("p1", "P1", db_path=str(db))
-
-    with pytest.raises(ValueError, match="immutable"):
-        api.update_node("p1", text="P1 CHANGED", db_path=str(db))
-
-
 def test_export_import_preserves_hashes(tmp_path):
     db = tmp_path / "test.db"
     api.init_db(str(db))

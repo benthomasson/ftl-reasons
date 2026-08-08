@@ -833,51 +833,6 @@ def supersede_with_text(
         return result
 
 
-def update_node(
-    node_id: str,
-    text: str | None = None,
-    source: str | None = None,
-    source_url: str | None = None,
-    example: str | None = None,
-    db_path: str = DEFAULT_DB,
-    pg_conninfo=None, project_id=None,
-) -> dict:
-    """Update a node's source, source_url, or example metadata.
-
-    Text is immutable — use 'reasons supersede' to create a successor.
-
-    Returns: {"node_id": str, "updated_fields": list[str]}
-    """
-    if pg_conninfo:
-        return _pg_dispatch(pg_conninfo, project_id, "update_node",
-                            node_id=node_id, text=text, source=source,
-                            source_url=source_url, example=example)
-    with _with_network(db_path, write=True) as net:
-        if node_id not in net.nodes:
-            raise KeyError(f"Node '{node_id}' not found")
-        if text is not None:
-            raise ValueError(
-                f"Text mutation is not allowed — beliefs are immutable propositions. "
-                f"Use 'reasons supersede {node_id} --text \"...\"' to create a successor."
-            )
-        node = net.nodes[node_id]
-        updated = []
-        if source is not None:
-            node.source = source
-            updated.append("source")
-        if source_url is not None:
-            node.source_url = source_url
-            updated.append("source_url")
-        if example is not None:
-            meta = node.metadata or {}
-            meta["example"] = example
-            node.metadata = meta
-            updated.append("example")
-        if updated:
-            node.updated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        return {"node_id": node_id, "updated_fields": updated}
-
-
 def set_metadata(
     node_id: str,
     key: str,

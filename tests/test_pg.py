@@ -994,32 +994,6 @@ class TestRemoveJustification:
         assert "d" in result["changed"]
 
 
-class TestUpdateNode:
-
-    def test_update_text_rejected(self, pg_api):
-        pg_api.add_node("a", "Alpha")
-        with pytest.raises(ValueError, match="immutable"):
-            pg_api.update_node("a", text="Alpha updated")
-
-    def test_update_source(self, pg_api):
-        pg_api.add_node("a", "Alpha")
-        result = pg_api.update_node("a", source="test.py", source_url="https://example.com")
-        assert "source" in result["updated_fields"]
-        assert "source_url" in result["updated_fields"]
-        node = pg_api.show_node("a")
-        assert node["source"] == "test.py"
-        assert node["source_url"] == "https://example.com"
-
-    def test_update_nothing(self, pg_api):
-        pg_api.add_node("a", "Alpha")
-        result = pg_api.update_node("a")
-        assert result["updated_fields"] == []
-
-    def test_update_not_found(self, pg_api):
-        with pytest.raises(KeyError):
-            pg_api.update_node("nonexistent", source="test.py")
-
-
 class TestConvertToPremise:
 
     def test_convert_derived_to_premise(self, pg_api):

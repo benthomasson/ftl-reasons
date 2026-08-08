@@ -1497,57 +1497,6 @@ class PgApi:
             "changed": changed,
         }
 
-    def update_node(self, node_id, text=None, source=None, source_url=None,
-                    example=None):
-        if text is not None:
-            raise ValueError(
-                f"Text mutation is not allowed — beliefs are immutable propositions. "
-                f"Use 'reasons supersede {node_id} --text \"...\"' to create a successor."
-            )
-        pid = self.project_id
-        updates = []
-        params = []
-        updated_fields = []
-        if source is not None:
-            updates.append("source = %s")
-            params.append(source)
-            updated_fields.append("source")
-        if source_url is not None:
-            updates.append("source_url = %s")
-            params.append(source_url)
-            updated_fields.append("source_url")
-
-        with self.conn.cursor() as cur:
-            cur.execute(
-                "SELECT id, metadata FROM rms_nodes WHERE id = %s AND project_id = %s",
-                (node_id, pid),
-            )
-            row = cur.fetchone()
-            if not row:
-                raise KeyError(f"Node '{node_id}' not found")
-
-            if example is not None:
-                meta = json.loads(row[1]) if row[1] else {}
-                meta["example"] = example
-                updates.append("metadata = %s")
-                params.append(json.dumps(meta))
-                updated_fields.append("example")
-
-            if not updates:
-                return {"node_id": node_id, "updated_fields": []}
-
-            updates.append("updated_at = %s")
-            params.append(datetime.now(timezone.utc).isoformat(timespec="seconds"))
-            params.extend([node_id, pid])
-            cur.execute(
-                f"UPDATE rms_nodes SET {', '.join(updates)} "
-                f"WHERE id = %s AND project_id = %s",
-                params,
-            )
-
-        self.conn.commit()
-        return {"node_id": node_id, "updated_fields": updated_fields}
-
     def set_metadata(self, node_id, key, value):
         pid = self.project_id
         with self.conn.cursor() as cur:

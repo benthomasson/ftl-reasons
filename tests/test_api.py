@@ -604,7 +604,7 @@ class TestListNegative:
             assert result["negative"][0]["id"] == "a"
 
 
-class TestUpdateNode:
+class TestSupersedeWithText:
 
     @pytest.fixture
     def db_path(self, tmp_path):
@@ -614,24 +614,6 @@ class TestUpdateNode:
         api.add_node("derived-ab", "AB combined", sl="a,b",
                       label="combined", db_path=db)
         return db
-
-    def test_rejects_text_mutation(self, db_path):
-        with pytest.raises(ValueError, match="immutable"):
-            api.update_node("a", text="Updated text", db_path=db_path)
-
-    def test_updates_source(self, db_path):
-        result = api.update_node("a", source="new/source.md", db_path=db_path)
-        assert "source" in result["updated_fields"]
-        node = api.show_node("a", db_path=db_path)
-        assert node["source"] == "new/source.md"
-
-    def test_nonexistent_text_raises_keyerror(self, db_path):
-        with pytest.raises(KeyError):
-            api.update_node("nonexistent", text="x", db_path=db_path)
-
-    def test_nonexistent_source_raises_keyerror(self, db_path):
-        with pytest.raises(KeyError):
-            api.update_node("nonexistent", source="x.py", db_path=db_path)
 
     def test_supersede_with_text(self, db_path):
         result = api.supersede_with_text("a", "Updated text", db_path=db_path)
@@ -794,13 +776,6 @@ class TestLifecycleTimestamps:
         assert node["created_at"] != ""
         assert node["updated_at"] != ""
         assert node["created_at"] == node["updated_at"]
-
-    def test_update_node_sets_updated_at(self, db_path):
-        api.add_node("ts-b", "Original", db_path=db_path)
-        original = api.show_node("ts-b", db_path=db_path)
-        api.update_node("ts-b", source="new-source.py", db_path=db_path)
-        updated = api.show_node("ts-b", db_path=db_path)
-        assert updated["updated_at"] >= original["updated_at"]
 
     def test_set_metadata_sets_updated_at(self, db_path):
         api.add_node("ts-c", "Meta node", db_path=db_path)

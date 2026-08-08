@@ -50,39 +50,6 @@ class TestAddNodeExample:
         assert node["metadata"]["access_tags"] == ["tag1"]
 
 
-class TestUpdateNodeExample:
-    def test_update_example(self, tmp_path):
-        db = str(tmp_path / "test.db")
-        api.add_node("n1", "Node one", db_path=db)
-        result = api.update_node("n1", example="y = 2", db_path=db)
-        assert "example" in result["updated_fields"]
-        node = api.show_node("n1", db_path=db)
-        assert node["metadata"]["example"] == "y = 2"
-
-    def test_update_replaces_example(self, tmp_path):
-        db = str(tmp_path / "test.db")
-        api.add_node("n1", "Node one", example="old code", db_path=db)
-        api.update_node("n1", example="new code", db_path=db)
-        node = api.show_node("n1", db_path=db)
-        assert node["metadata"]["example"] == "new code"
-
-    def test_update_example_only(self, tmp_path):
-        db = str(tmp_path / "test.db")
-        api.add_node("n1", "Original text", db_path=db)
-        api.update_node("n1", example="z = 3", db_path=db)
-        node = api.show_node("n1", db_path=db)
-        assert node["text"] == "Original text"
-        assert node["metadata"]["example"] == "z = 3"
-
-    def test_update_example_preserves_other_metadata(self, tmp_path):
-        db = str(tmp_path / "test.db")
-        api.add_node("n1", "Node one", access_tags=["internal"], db_path=db)
-        api.update_node("n1", example="code()", db_path=db)
-        node = api.show_node("n1", db_path=db)
-        assert node["metadata"]["access_tags"] == ["internal"]
-        assert node["metadata"]["example"] == "code()"
-
-
 class TestCmdAddExample:
     def test_cli_add_with_example(self, tmp_path):
         db = str(tmp_path / "test.db")
@@ -100,27 +67,6 @@ class TestCmdAddExample:
         assert code == 0
         node = api.show_node("n1", db_path=db)
         assert "example" not in node["metadata"]
-
-
-class TestCmdUpdateExample:
-    def test_cli_update_example(self, tmp_path):
-        db = str(tmp_path / "test.db")
-        run_cli("add", "n1", "A belief", db_path=db)
-        stdout, stderr, code = run_cli(
-            "update", "n1", "--example", "reasons update n1 --text 'new'",
-            db_path=db,
-        )
-        assert code == 0
-        assert "example" in stdout
-        node = api.show_node("n1", db_path=db)
-        assert node["metadata"]["example"] == "reasons update n1 --text 'new'"
-
-    def test_cli_update_no_flags_error(self, tmp_path):
-        db = str(tmp_path / "test.db")
-        run_cli("add", "n1", "A belief", db_path=db)
-        stdout, stderr, code = run_cli("update", "n1", db_path=db)
-        assert code == 1
-        assert "--example" in stderr
 
 
 class TestCmdShowExample:
