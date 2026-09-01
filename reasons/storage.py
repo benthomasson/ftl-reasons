@@ -170,11 +170,6 @@ class Storage:
                     (nogood.id, json.dumps(nogood.nodes), nogood.discovered, nogood.resolution),
                 )
 
-            self.conn.execute(
-                "INSERT INTO network_meta (key, value) VALUES (?, ?)",
-                ("next_nogood_id", str(network._next_nogood_id)),
-            )
-
             now = datetime.now(timezone.utc).isoformat(timespec="seconds")
             meta = dict(network.meta)
             meta.setdefault("schema_version", SCHEMA_VERSION)
@@ -300,25 +295,14 @@ class Storage:
 
         # Load network metadata — persisted counter takes priority,
         # otherwise derive from existing nogoods to avoid ID collisions
-        loaded_counter = False
         try:
             meta_cursor = self.conn.execute("SELECT key, value FROM network_meta")
             for key, value in meta_cursor:
                 if key == "next_nogood_id":
-                    network._next_nogood_id = int(value)
-                    loaded_counter = True
-                else:
-                    network.meta[key] = value
+                    continue
+                network.meta[key] = value
         except Exception:
             pass  # network_meta table may not exist in old databases
-        if not loaded_counter and network.nogoods:
-            import re
-            max_id = 0
-            for ng in network.nogoods:
-                m = re.fullmatch(r"nogood-(\d+)", ng.id)
-                if m:
-                    max_id = max(max_id, int(m.group(1)))
-            network._next_nogood_id = max_id + 1
 
         # Load repos
         try:
