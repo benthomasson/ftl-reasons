@@ -20,7 +20,6 @@ class Network:
     def __init__(self):
         self.nodes: dict[str, Node] = {}
         self.nogoods: list[Nogood] = []
-        self._next_nogood_id: int = 1
         self.repos: dict[str, str] = {}  # name → path mapping
         self.log: list[dict] = []  # propagation audit trail
         self.meta: dict[str, str] = {}  # schema_version, project_name, etc.

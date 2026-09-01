@@ -1853,9 +1853,6 @@ def import_json(json_file: str, db_path: str = DEFAULT_DB,
             )
             net.nogoods.append(nogood)
             existing_nogood_ids.add(nogood.id)
-            m = re.fullmatch(r"nogood-(\d+)", nogood.id)
-            if m:
-                net._next_nogood_id = max(net._next_nogood_id, int(m.group(1)) + 1)
             nogoods_imported += 1
 
         # Import repos
