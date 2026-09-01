@@ -632,6 +632,20 @@ class TestSupersedeWithText:
         node = api.show_node("a-fixed", db_path=db_path)
         assert node["text"] == "New text"
 
+    def test_supersede_with_text_copies_access_tags(self, tmp_path):
+        db = str(tmp_path / "tagged.db")
+        api.add_node("secret", "Classified info", access_tags=["finance"],
+                      db_path=db)
+        result = api.supersede_with_text("secret", "Updated classified info",
+                                          db_path=db)
+        new_node = api.show_node(result["new_id"], db_path=db)
+        assert new_node["metadata"].get("access_tags") == ["finance"]
+
+    def test_supersede_with_text_no_tags_no_metadata(self, db_path):
+        result = api.supersede_with_text("a", "Updated text", db_path=db_path)
+        new_node = api.show_node(result["new_id"], db_path=db_path)
+        assert "access_tags" not in new_node.get("metadata", {})
+
 
 class TestSetMetadata:
 
