@@ -2034,22 +2034,25 @@ class PgApi:
                 if nid not in found:
                     raise KeyError(f"Node '{nid}' not found")
 
-            # Get next nogood ID
+            # Build content-based nogood ID from sorted node IDs
+            slug = "-".join(sorted(node_ids))
+            nogood_id = f"nogood-{slug}"
             cur.execute(
-                "SELECT value FROM rms_network_meta "
-                "WHERE key = 'next_nogood_id' AND project_id = %s",
-                (pid,),
+                "SELECT id FROM rms_nogoods WHERE id = %s AND project_id = %s",
+                (nogood_id, pid),
             )
-            row = cur.fetchone()
-            next_id = int(row[0]) if row else 1
-            nogood_id = f"nogood-{next_id:03d}"
-
-            cur.execute(
-                "INSERT INTO rms_network_meta (key, project_id, value) "
-                "VALUES ('next_nogood_id', %s, %s) "
-                "ON CONFLICT (key, project_id) DO UPDATE SET value = EXCLUDED.value",
-                (pid, str(next_id + 1)),
-            )
+            if cur.fetchone():
+                suffix = 2
+                while True:
+                    candidate = f"{nogood_id}-{suffix}"
+                    cur.execute(
+                        "SELECT id FROM rms_nogoods WHERE id = %s AND project_id = %s",
+                        (candidate, pid),
+                    )
+                    if not cur.fetchone():
+                        nogood_id = candidate
+                        break
+                    suffix += 1
 
             cur.execute(
                 "INSERT INTO rms_nogoods (id, project_id, nodes, discovered) "
@@ -2370,18 +2373,6 @@ class PgApi:
                 )
                 nogoods_imported += 1
 
-                m = re.fullmatch(r"nogood-(\d+)", ng_data["id"])
-                if m:
-                    next_id = int(m.group(1)) + 1
-                    cur.execute(
-                        "INSERT INTO rms_network_meta (key, project_id, value) "
-                        "VALUES ('next_nogood_id', %s, %s) "
-                        "ON CONFLICT (key, project_id) DO UPDATE "
-                        "SET value = GREATEST(EXCLUDED.value::int, "
-                        "rms_network_meta.value::int)::text",
-                        (pid, str(next_id)),
-                    )
-
         self.conn.commit()
         return {"nodes_imported": nodes_imported, "nogoods_imported": nogoods_imported}
 
@@ -2516,17 +2507,6 @@ class PgApi:
                                 (ng["id"], pid, json.dumps(valid_nodes),
                                  ng["discovered"], ng["resolution"]),
                             )
-                            m = re.fullmatch(r"nogood-(\d+)", ng["id"])
-                            if m:
-                                next_id = int(m.group(1)) + 1
-                                cur.execute(
-                                    "INSERT INTO rms_network_meta (key, project_id, value) "
-                                    "VALUES ('next_nogood_id', %s, %s) "
-                                    "ON CONFLICT (key, project_id) DO UPDATE "
-                                    "SET value = GREATEST(EXCLUDED.value::int, "
-                                    "rms_network_meta.value::int)::text",
-                                    (pid, str(next_id)),
-                                )
                             nogoods_imported += 1
             self.conn.commit()
 
