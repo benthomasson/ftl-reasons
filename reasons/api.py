@@ -823,11 +823,14 @@ def supersede_with_text(
                 suffix += 1
 
         old_node = net.nodes[old_id]
+        old_tags = old_node.metadata.get("access_tags")
+        metadata = {"access_tags": old_tags} if old_tags else {}
         net.add_node(
             id=new_id,
             text=new_text,
             source=old_node.source,
             source_url=old_node.source_url,
+            metadata=metadata,
         )
         result = net.supersede(old_id, new_id)
         return result
