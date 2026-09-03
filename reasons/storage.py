@@ -269,7 +269,7 @@ class Storage:
                 source_hash=source_hash,
                 text_hash=text_hash or "",
                 date=date,
-                metadata=json.loads(meta_json),
+                metadata=json.loads(meta_json) if meta_json else {},
                 created_at=created_at or "",
                 updated_at=updated_at or "",
                 reviewed_at=reviewed_at or "",
