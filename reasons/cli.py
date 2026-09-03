@@ -1654,6 +1654,8 @@ def cmd_list(args):
         never_reviewed=args.never_reviewed,
         by_impact=args.by_impact,
         label=args.label,
+        limit=args.limit,
+        offset=args.offset,
         **_backend_kwargs(args),
     )
 
@@ -1679,7 +1681,12 @@ def cmd_list(args):
                 review_info = "  (never reviewed)"
         print(f"  [{marker}] {node['id']}{jinfo}{deps}{stype}{review_info}")
 
-    print(f"\n{result['count']} node{'s' if result['count'] != 1 else ''}")
+    shown = len(result["nodes"])
+    total = result["count"]
+    if shown < total:
+        print(f"\nShowing {shown} of {total} nodes")
+    else:
+        print(f"\n{total} node{'s' if total != 1 else ''}")
 
 
 def cmd_list_gated(args):
@@ -3310,6 +3317,8 @@ def main():
     p.add_argument("--by-impact", action="store_true",
                    help="Sort output by dependent count (descending)")
     p.add_argument("--label", help="Filter to nodes with a justification matching this label")
+    p.add_argument("--limit", type=int, default=None, help="Maximum number of nodes to return")
+    p.add_argument("--offset", type=int, default=0, help="Number of nodes to skip (for pagination)")
 
     args = parser.parse_args()
     if not args.command:

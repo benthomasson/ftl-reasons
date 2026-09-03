@@ -2851,6 +2851,8 @@ def list_nodes(
     never_reviewed: bool = False,
     by_impact: bool = False,
     label: str | None = None,
+    limit: int | None = None,
+    offset: int = 0,
     db_path: str = DEFAULT_DB,
     pg_conninfo=None, project_id=None,
 ) -> dict:
@@ -2858,6 +2860,9 @@ def list_nodes(
 
     Returns: {"nodes": list[dict], "count": int}
     """
+    if limit is not None:
+        limit = max(1, limit)
+    offset = max(0, offset)
     if pg_conninfo:
         unsupported = []
         if challenged:
@@ -2878,7 +2883,8 @@ def list_nodes(
         return _pg_dispatch(pg_conninfo, project_id, "list_nodes",
                             status=status, premises_only=premises_only,
                             has_dependents=has_dependents, namespace=namespace,
-                            visible_to=visible_to, label=label)
+                            visible_to=visible_to, label=label,
+                            limit=limit, offset=offset)
     from datetime import timedelta
 
     with _with_network(db_path) as net:
@@ -2940,7 +2946,10 @@ def list_nodes(
             })
         if by_impact:
             nodes.sort(key=lambda n: -n["dependent_count"])
-        return {"nodes": nodes, "count": len(nodes)}
+        total = len(nodes)
+        if limit is not None:
+            nodes = nodes[offset:offset + limit]
+        return {"nodes": nodes, "count": total}
 
 
 _TOPIC_STOP_WORDS = {

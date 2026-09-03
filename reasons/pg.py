@@ -1166,7 +1166,11 @@ class PgApi:
         }
 
     def list_nodes(self, status=None, premises_only=False, has_dependents=False,
-                   namespace=None, visible_to=None, label=None):
+                   namespace=None, visible_to=None, label=None,
+                   limit=None, offset=0):
+        if limit is not None:
+            limit = max(1, limit)
+        offset = max(0, offset)
         pid = self.project_id
         conditions = ["n.project_id = %s"]
         params = [pid]
@@ -1193,47 +1197,55 @@ class PgApi:
             )
             params.append(label)
 
+        if visible_to is not None:
+            conditions.append(
+                "(n.metadata->'access_tags' IS NULL "
+                "OR n.metadata->'access_tags' = 'null'::jsonb "
+                "OR jsonb_array_length(n.metadata->'access_tags') = 0 "
+                "OR n.metadata->'access_tags' <@ %s::jsonb)"
+            )
+            params.append(json.dumps(visible_to))
+
+        if has_dependents:
+            conditions.append(
+                "(EXISTS (SELECT 1 FROM rms_justifications j, "
+                "jsonb_array_elements_text(j.antecedents) ae(v) "
+                "WHERE j.project_id = %s AND ae.v = n.id) "
+                "OR EXISTS (SELECT 1 FROM rms_justifications j, "
+                "jsonb_array_elements_text(j.outlist) oe(v) "
+                "WHERE j.project_id = %s AND oe.v = n.id))"
+            )
+            params.extend([pid, pid])
+
         where = " AND ".join(conditions)
 
         with self.conn.cursor() as cur:
+            count_params = list(params)
             cur.execute(
+                f"SELECT COUNT(*) FROM rms_nodes n WHERE {where}",
+                count_params,
+            )
+            total = cur.fetchone()[0]
+
+            query = (
                 f"SELECT n.id, n.text, n.truth_value, n.metadata, "
                 f"(SELECT COUNT(*) FROM rms_justifications j "
                 f" WHERE j.node_id = n.id AND j.project_id = n.project_id) AS jcount "
-                f"FROM rms_nodes n WHERE {where} ORDER BY n.id",
-                params,
+                f"FROM rms_nodes n WHERE {where} ORDER BY n.id"
             )
-            rows = cur.fetchall()
+            query_params = list(params)
+            if limit is not None:
+                query += " LIMIT %s OFFSET %s"
+                query_params.extend([limit, offset])
 
-            # For has_dependents filter, we need the reverse lookup
-            if has_dependents:
-                all_ids = [r[0] for r in rows]
-                dep_set = self._find_dependents(cur, all_ids) if all_ids else set()
-                # dep_set contains nodes that ARE dependents, not nodes that HAVE dependents
-                # We need nodes that appear in others' justifications
-                ids_with_deps = set()
-                if all_ids:
-                    cur.execute(
-                        "SELECT DISTINCT je.value FROM rms_justifications j, "
-                        "jsonb_array_elements_text(j.antecedents) je(value) "
-                        "WHERE j.project_id = %s "
-                        "UNION "
-                        "SELECT DISTINCT je.value FROM rms_justifications j, "
-                        "jsonb_array_elements_text(j.outlist) je(value) "
-                        "WHERE j.project_id = %s",
-                        (pid, pid),
-                    )
-                    ids_with_deps = {r[0] for r in cur.fetchall()}
+            cur.execute(query, query_params)
+            rows = cur.fetchall()
 
         nodes = []
         for row in rows:
             nid, text, tv, meta, jcount = row
             if isinstance(meta, str):
                 meta = json.loads(meta)
-            if visible_to is not None and not self._is_visible(meta, visible_to):
-                continue
-            if has_dependents and nid not in ids_with_deps:
-                continue
             nodes.append({
                 "id": nid,
                 "text": text,
@@ -1241,7 +1253,7 @@ class PgApi:
                 "justification_count": jcount,
             })
 
-        return {"nodes": nodes, "count": len(nodes)}
+        return {"nodes": nodes, "count": total}
 
     def list_gated(self, visible_to=None):
         pid = self.project_id
