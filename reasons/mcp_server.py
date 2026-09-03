@@ -96,18 +96,23 @@ def explain(node_id: str) -> str:
 
 
 @mcp.tool()
-def list_beliefs(status: str = "", premises_only: bool = False, namespace: str = "") -> str:
+def list_beliefs(status: str = "", premises_only: bool = False, namespace: str = "",
+                 limit: int = 0, offset: int = 0) -> str:
     """List beliefs in the network with optional filters.
 
     Args:
         status: Filter by truth value — "IN", "OUT", or empty for all
         premises_only: Only show premise nodes (no derived beliefs)
         namespace: Filter by namespace prefix
+        limit: Maximum number of results (0 for all)
+        offset: Number of results to skip
     """
     result = api.list_nodes(
         status=status or None,
         premises_only=premises_only,
         namespace=namespace or None,
+        limit=limit or None,
+        offset=offset,
         db_path=_get_db(),
     )
     return json.dumps(result, indent=2)
