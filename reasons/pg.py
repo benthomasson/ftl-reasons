@@ -1168,6 +1168,9 @@ class PgApi:
     def list_nodes(self, status=None, premises_only=False, has_dependents=False,
                    namespace=None, visible_to=None, label=None,
                    limit=None, offset=0):
+        if limit is not None:
+            limit = max(1, limit)
+        offset = max(0, offset)
         pid = self.project_id
         conditions = ["n.project_id = %s"]
         params = [pid]
@@ -1197,6 +1200,7 @@ class PgApi:
         if visible_to is not None:
             conditions.append(
                 "(n.metadata->'access_tags' IS NULL "
+                "OR n.metadata->'access_tags' = 'null'::jsonb "
                 "OR jsonb_array_length(n.metadata->'access_tags') = 0 "
                 "OR n.metadata->'access_tags' <@ %s::jsonb)"
             )

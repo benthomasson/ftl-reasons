@@ -1681,7 +1681,12 @@ def cmd_list(args):
                 review_info = "  (never reviewed)"
         print(f"  [{marker}] {node['id']}{jinfo}{deps}{stype}{review_info}")
 
-    print(f"\n{result['count']} node{'s' if result['count'] != 1 else ''}")
+    shown = len(result["nodes"])
+    total = result["count"]
+    if shown < total:
+        print(f"\nShowing {shown} of {total} nodes")
+    else:
+        print(f"\n{total} node{'s' if total != 1 else ''}")
 
 
 def cmd_list_gated(args):

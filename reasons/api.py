@@ -2860,6 +2860,9 @@ def list_nodes(
 
     Returns: {"nodes": list[dict], "count": int}
     """
+    if limit is not None:
+        limit = max(1, limit)
+    offset = max(0, offset)
     if pg_conninfo:
         unsupported = []
         if challenged:
