@@ -11,6 +11,8 @@ from reasons.api import (
     init_db,
     search,
     show_node,
+    what_if_retract,
+    what_if_assert,
 )
 
 
@@ -175,3 +177,37 @@ def test_show_node_uses_cache():
 
         result2 = show_node("test-node", db_path=db)
         assert result2["id"] == "test-node"
+
+
+def test_what_if_retract_does_not_corrupt_cache():
+    """what_if_retract mutates a network copy, not the cached original."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db = str(Path(tmpdir) / "test.db")
+        init_db(db_path=db)
+        add_node("premise", "A premise", db_path=db)
+        add_node("conclusion", "Follows from premise", source="sl:premise",
+                 sl="premise", db_path=db)
+
+        result = what_if_retract("premise", db_path=db)
+        assert result["total_affected"] >= 1
+
+        cached_net = _network_cache[db][1]
+        assert cached_net.nodes["premise"].truth_value == "IN"
+        assert cached_net.nodes["conclusion"].truth_value == "IN"
+
+
+def test_what_if_assert_does_not_corrupt_cache():
+    """what_if_assert mutates a network copy, not the cached original."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        from reasons.api import retract_node
+        db = str(Path(tmpdir) / "test.db")
+        init_db(db_path=db)
+        add_node("premise", "A premise", db_path=db)
+        retract_node("premise", db_path=db)
+
+        assert _network_cache[db][1].nodes["premise"].truth_value == "OUT"
+
+        result = what_if_assert("premise", db_path=db)
+        assert not result.get("already_in", False)
+
+        assert _network_cache[db][1].nodes["premise"].truth_value == "OUT"

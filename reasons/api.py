@@ -7,6 +7,7 @@ or argparse. Each function opens the database, operates, saves, and closes.
 All functions return dicts suitable for JSON serialization.
 """
 
+import copy
 import json
 import logging
 import os
@@ -479,6 +480,9 @@ def what_if_retract(node_id: str, db_path: str = DEFAULT_DB,
                 "total_affected": 0,
             }
 
+        # Work on a copy to avoid corrupting the cached network
+        net = copy.deepcopy(net)
+
         # Snapshot truth values before
         before = {nid: n.truth_value for nid, n in net.nodes.items()}
 
@@ -542,6 +546,9 @@ def what_if_assert(node_id: str, db_path: str = DEFAULT_DB,
                 "restored": [],
                 "total_affected": 0,
             }
+
+        # Work on a copy to avoid corrupting the cached network
+        net = copy.deepcopy(net)
 
         # Snapshot truth values before
         before = {nid: n.truth_value for nid, n in net.nodes.items()}
