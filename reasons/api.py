@@ -101,11 +101,12 @@ def _with_network(db_path: str, write: bool = False):
                         pubsub.publish(events, db_path)
             if self.store:
                 self.store.close()
-            try:
-                mtime = os.path.getmtime(db_path)
-                _network_cache[db_path] = (mtime, self.network)
-            except OSError:
-                pass
+            if not (write and exc_type is not None):
+                try:
+                    mtime = os.path.getmtime(db_path)
+                    _network_cache[db_path] = (mtime, self.network)
+                except OSError:
+                    pass
             return False
 
     return _Ctx()

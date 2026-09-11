@@ -127,6 +127,26 @@ def test_clear_cache_all():
         assert len(_network_cache) == 0
 
 
+def test_write_exception_does_not_poison_cache():
+    """If a write context raises, the dirty network must not enter the cache."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db = str(Path(tmpdir) / "test.db")
+        init_db(db_path=db)
+        add_node("a", "Original belief", db_path=db)
+
+        cached_net = _network_cache[db][1]
+        assert "a" in cached_net.nodes
+
+        try:
+            with _with_network(db, write=True) as net:
+                net.nodes["a"].text = "CORRUPTED"
+                raise RuntimeError("simulated failure")
+        except RuntimeError:
+            pass
+
+        assert _network_cache[db][1].nodes["a"].text == "Original belief"
+
+
 def test_search_uses_cache():
     """Search should work correctly with cached networks."""
     with tempfile.TemporaryDirectory() as tmpdir:
