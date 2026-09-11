@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ftl-reasons"
-version = "0.56.1"
+version = "0.56.2"
 description = "Reasons — automatic belief retraction and dependency-directed backtracking"
 readme = "README.md"
 license = "MIT"
@@ -20,6 +20,7 @@ mcp = ["mcp>=1.0"]
 api = ["langchain-anthropic>=0.3"]
 vertex = ["langchain-google-vertexai>=2.0"]
 langfuse = ["langfuse>=2.0"]
+openai = ["openai>=1.0"]
 llm = ["langchain-anthropic>=0.3", "langchain-google-vertexai>=2.0", "langfuse>=2.0"]
 
 [project.scripts]
