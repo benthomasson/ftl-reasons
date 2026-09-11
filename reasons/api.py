@@ -7,8 +7,10 @@ or argparse. Each function opens the database, operates, saves, and closes.
 All functions return dicts suitable for JSON serialization.
 """
 
+import copy
 import json
 import logging
+import os
 import re
 import sqlite3
 import sys
@@ -27,6 +29,8 @@ from .storage import Storage
 logger = logging.getLogger(__name__)
 
 DEFAULT_DB = "reasons.db"
+
+_network_cache: dict[str, tuple[float, Network]] = {}
 
 
 def _is_visible(node, visible_to: list[str]) -> bool:
@@ -54,11 +58,25 @@ def _resolve_namespace(node_id: str, namespace: str | None) -> str:
 
 
 def _with_network(db_path: str, write: bool = False):
-    """Context manager pattern for load/operate/save."""
+    """Context manager pattern for load/operate/save.
+
+    Caches the Network object keyed by (db_path, mtime). Read-only calls
+    reuse the cached network when the file hasn't changed. Write calls
+    always load fresh, save, then update the cache.
+    """
     class _Ctx:
         def __init__(self):
-            self.store = Storage(db_path)
-            self.network = self.store.load()
+            self.store = None
+            try:
+                mtime = os.path.getmtime(db_path)
+            except OSError:
+                mtime = None
+            cached = _network_cache.get(db_path)
+            if cached and mtime is not None and cached[0] == mtime and not write:
+                self.network = cached[1]
+            else:
+                self.store = Storage(db_path)
+                self.network = self.store.load()
             self._before: dict[str, str] | None = None
 
         def __enter__(self):
@@ -71,20 +89,40 @@ def _with_network(db_path: str, write: bool = False):
 
         def __exit__(self, exc_type, exc_val, exc_tb):
             if write and exc_type is None:
-                self.store.save(self.network)
-                if self._before is not None:
-                    after = {
-                        nid: n.truth_value
-                        for nid, n in self.network.nodes.items()
-                    }
-                    events = pubsub.compute_changes(
-                        self._before, after, db_path
-                    )
-                    pubsub.publish(events, db_path)
-            self.store.close()
+                if self.store:
+                    self.store.save(self.network)
+                    if self._before is not None:
+                        after = {
+                            nid: n.truth_value
+                            for nid, n in self.network.nodes.items()
+                        }
+                        events = pubsub.compute_changes(
+                            self._before, after, db_path
+                        )
+                        pubsub.publish(events, db_path)
+            if self.store:
+                self.store.close()
+            if not (write and exc_type is not None):
+                try:
+                    mtime = os.path.getmtime(db_path)
+                    _network_cache[db_path] = (mtime, self.network)
+                except OSError:
+                    pass
             return False
 
     return _Ctx()
+
+
+def clear_network_cache(db_path: str | None = None) -> None:
+    """Clear the in-memory network cache.
+
+    Args:
+        db_path: If given, clear only that path. Otherwise clear all.
+    """
+    if db_path is None:
+        _network_cache.clear()
+    else:
+        _network_cache.pop(db_path, None)
 
 
 def _pg_dispatch(pg_conninfo, project_id, method_name, **kwargs):
@@ -442,6 +480,9 @@ def what_if_retract(node_id: str, db_path: str = DEFAULT_DB,
                 "total_affected": 0,
             }
 
+        # Work on a copy to avoid corrupting the cached network
+        net = copy.deepcopy(net)
+
         # Snapshot truth values before
         before = {nid: n.truth_value for nid, n in net.nodes.items()}
 
@@ -505,6 +546,9 @@ def what_if_assert(node_id: str, db_path: str = DEFAULT_DB,
                 "restored": [],
                 "total_affected": 0,
             }
+
+        # Work on a copy to avoid corrupting the cached network
+        net = copy.deepcopy(net)
 
         # Snapshot truth values before
         before = {nid: n.truth_value for nid, n in net.nodes.items()}
