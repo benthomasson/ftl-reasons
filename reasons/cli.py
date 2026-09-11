@@ -433,19 +433,53 @@ def cmd_what_if(args):
 
 
 def cmd_status(args):
-    result = api.get_status(visible_to=_parse_visible_to(args), **_backend_kwargs(args))
+    show_all = getattr(args, "all", False)
+    namespace = getattr(args, "namespace", None)
+    status_filter = getattr(args, "status", None)
+    premises_only = getattr(args, "premises", False)
+    limit = getattr(args, "limit", None)
 
-    if not result["nodes"]:
+    result = api.get_status(
+        visible_to=_parse_visible_to(args),
+        namespace=namespace,
+        status_filter=status_filter,
+        premises_only=premises_only,
+        limit=limit,
+        **_backend_kwargs(args),
+    )
+
+    if result["total"] == 0:
         print("No nodes in the network.")
         return
 
-    for node in result["nodes"]:
-        marker = "+" if node["truth_value"] == "IN" else "-"
-        jcount = node["justification_count"]
-        jinfo = f"  ({jcount} justification{'s' if jcount != 1 else ''})" if jcount else "  (premise)"
-        print(f"  [{marker}] {node['id']}: {node['text']}{jinfo}")
+    # Summary header (always shown)
+    print(f"Beliefs: {result['in_count']} IN / {result['out_count']} OUT / {result['total']} total")
+    print(f"  Premises: {result['premise_count']}  Derived: {result['derived_count']}")
+    if result["challenged_count"]:
+        print(f"  Challenged: {result['challenged_count']}")
+    if result["superseded_count"]:
+        print(f"  Superseded: {result['superseded_count']}")
 
-    print(f"\n{result['in_count']}/{result['total']} IN")
+    if result["by_namespace"]:
+        print(f"\nNamespaces ({len(result['by_namespace'])}):")
+        for ns in sorted(result["by_namespace"],
+                         key=lambda k: -result["by_namespace"][k]["total"]):
+            stats = result["by_namespace"][ns]
+            print(f"  {ns:40s} {stats['in']:4d} IN / {stats['total']} total")
+
+    # Node listing (only with --all or filters)
+    if show_all or namespace or status_filter or premises_only or limit:
+        shown = result["nodes"]
+        if not shown:
+            print("\nNo matching nodes.")
+            return
+        print(f"\nNodes ({len(shown)}" +
+              (f" of {result['total']}" if limit else "") + "):")
+        for node in shown:
+            marker = "+" if node["truth_value"] == "IN" else "-"
+            jcount = node["justification_count"]
+            jinfo = f"  ({jcount} justification{'s' if jcount != 1 else ''})" if jcount else "  (premise)"
+            print(f"  [{marker}] {node['id']}: {node['text']}{jinfo}")
 
 
 def cmd_show(args):
@@ -577,13 +611,17 @@ def cmd_supersede(args):
         print("Error: either new_id or --text is required", file=sys.stderr)
         sys.exit(1)
 
+    transitive = getattr(args, "transitive", False)
+
     try:
         if text:
             result = api.supersede_with_text(
                 args.old_id, text, new_id=custom_id, db_path=args.db,
+                transitive=transitive,
             )
         else:
-            result = api.supersede(args.old_id, new_id, **_backend_kwargs(args))
+            result = api.supersede(args.old_id, new_id, transitive=transitive,
+                                   **_backend_kwargs(args))
     except (KeyError, ValueError) as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
@@ -1150,8 +1188,11 @@ def _require_sqlite(args, command_name):
 def cmd_search(args):
     fmt = getattr(args, "format", "markdown")
     include_out = getattr(args, "show_out", False)
+    sort = getattr(args, "sort", "relevance")
+    namespace = getattr(args, "namespace", None)
     result = api.search(args.query, visible_to=_parse_visible_to(args), format=fmt,
-                        include_out=include_out, **_backend_kwargs(args))
+                        include_out=include_out, sort=sort, namespace=namespace,
+                        **_backend_kwargs(args))
     print(result)
 
 
@@ -2730,7 +2771,12 @@ def main():
     p.add_argument("node_id", help="Node to simulate")
 
     # status
-    p = sub.add_parser("status", help="Show all nodes with truth values")
+    p = sub.add_parser("status", help="Show network summary (use --all for full listing)")
+    p.add_argument("--all", action="store_true", help="Show all nodes (default: summary only)")
+    p.add_argument("-n", "--namespace", help="Filter to a namespace")
+    p.add_argument("--status", choices=["IN", "OUT"], default=None, help="Filter by truth value")
+    p.add_argument("--premises", action="store_true", help="Show only premises")
+    p.add_argument("--limit", type=int, default=None, help="Max nodes to show")
     p.add_argument("--visible-to", metavar="TAG,TAG", help="Only show nodes whose access_tags are a subset of these tags")
 
     # show
@@ -2760,6 +2806,8 @@ def main():
     p.add_argument("new_id", nargs="?", default=None, help="Belief that supersedes it (omit when using --text)")
     p.add_argument("--text", default=None, help="Create a successor node with this text and supersede")
     p.add_argument("--id", default=None, help="Custom ID for the successor node (used with --text)")
+    p.add_argument("--transitive", action="store_true",
+                   help="Also defeat all ancestors in the supersession chain (version chain semantics)")
 
     # set-metadata
     p = sub.add_parser("set-metadata", help="Set a metadata key on a belief")
@@ -2998,6 +3046,9 @@ def main():
     p.add_argument("query", help="Search terms (FTS5 all-terms matching)")
     p.add_argument("--format", choices=["markdown", "json", "minimal"], default="markdown",
                    help="Output format (default: markdown)")
+    p.add_argument("--sort", choices=["relevance", "newest", "oldest"], default="relevance",
+                   help="Result ordering (default: relevance)")
+    p.add_argument("-n", "--namespace", help="Filter results to a namespace")
     p.add_argument("--visible-to", metavar="TAG,TAG", help="Only show nodes whose access_tags are a subset of these tags")
     p.add_argument("--show-out", action="store_true", help="Include OUT (retracted) beliefs in results")
 

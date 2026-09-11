@@ -588,10 +588,20 @@ def propagate(db_path: str = DEFAULT_DB,
 
 
 def get_status(visible_to: list[str] | None = None, db_path: str = DEFAULT_DB,
+               namespace: str | None = None,
+               status_filter: str | None = None,
+               premises_only: bool = False,
+               limit: int | None = None,
                pg_conninfo=None, project_id=None) -> dict:
-    """Get all nodes with truth values.
+    """Get network status with optional filtering.
 
-    Returns: {"nodes": list[dict], "in_count": int, "total": int}
+    Returns: {
+        "nodes": list[dict],
+        "in_count": int, "out_count": int, "total": int,
+        "premise_count": int, "derived_count": int,
+        "challenged_count": int, "superseded_count": int,
+        "by_namespace": dict[str, {"in": int, "out": int, "total": int}],
+    }
     """
     if pg_conninfo:
         return _pg_dispatch(pg_conninfo, project_id, "get_status",
@@ -599,17 +609,67 @@ def get_status(visible_to: list[str] | None = None, db_path: str = DEFAULT_DB,
 
     with _with_network(db_path) as net:
         nodes = []
+        in_count = 0
+        out_count = 0
+        premise_count = 0
+        derived_count = 0
+        challenged_count = 0
+        superseded_count = 0
+        by_namespace: dict[str, dict] = {}
+
         for nid, node in sorted(net.nodes.items()):
             if visible_to is not None and not _is_visible(node, visible_to):
                 continue
+            if namespace and not nid.startswith(f"{namespace}:"):
+                continue
+
+            ns = nid.rsplit(":", 1)[0] if ":" in nid else "(default)"
+            if ns not in by_namespace:
+                by_namespace[ns] = {"in": 0, "out": 0, "total": 0}
+            by_namespace[ns]["total"] += 1
+            if node.truth_value == "IN":
+                by_namespace[ns]["in"] += 1
+                in_count += 1
+            else:
+                by_namespace[ns]["out"] += 1
+                out_count += 1
+
+            is_premise = not node.justifications
+            if is_premise:
+                premise_count += 1
+            else:
+                derived_count += 1
+            if node.metadata.get("challenges"):
+                challenged_count += 1
+            if node.metadata.get("superseded_by"):
+                superseded_count += 1
+
+            if status_filter and node.truth_value != status_filter:
+                continue
+            if premises_only and node.justifications:
+                continue
+
             nodes.append({
                 "id": nid,
                 "text": node.text,
                 "truth_value": node.truth_value,
                 "justification_count": len(node.justifications),
             })
-        in_count = sum(1 for n in nodes if n["truth_value"] == "IN")
-        return {"nodes": nodes, "in_count": in_count, "total": len(nodes)}
+
+        if limit is not None:
+            nodes = nodes[:limit]
+
+        return {
+            "nodes": nodes,
+            "in_count": in_count,
+            "out_count": out_count,
+            "total": in_count + out_count,
+            "premise_count": premise_count,
+            "derived_count": derived_count,
+            "challenged_count": challenged_count,
+            "superseded_count": superseded_count,
+            "by_namespace": by_namespace,
+        }
 
 
 def show_node(node_id: str, visible_to: list[str] | None = None, db_path: str = DEFAULT_DB,
@@ -785,8 +845,12 @@ def summarize(
 
 
 def supersede(old_id: str, new_id: str, db_path: str = DEFAULT_DB,
+              transitive: bool = False,
               pg_conninfo=None, project_id=None) -> dict:
     """Mark old_id as superseded by new_id. Old goes OUT when new is IN.
+
+    With transitive=True, also defeats all ancestors in the supersession
+    chain so only the latest version is IN.
 
     Returns: {"old_id": str, "new_id": str, "changed": list[str]}
     """
@@ -794,7 +858,7 @@ def supersede(old_id: str, new_id: str, db_path: str = DEFAULT_DB,
         return _pg_dispatch(pg_conninfo, project_id, "supersede",
                             old_id=old_id, new_id=new_id)
     with _with_network(db_path, write=True) as net:
-        return net.supersede(old_id, new_id)
+        return net.supersede(old_id, new_id, transitive=transitive)
 
 
 def supersede_with_text(
@@ -802,6 +866,7 @@ def supersede_with_text(
     new_text: str,
     new_id: str | None = None,
     db_path: str = DEFAULT_DB,
+    transitive: bool = False,
 ) -> dict:
     """Create a successor node with new text and supersede old_id.
 
@@ -832,7 +897,7 @@ def supersede_with_text(
             source_url=old_node.source_url,
             metadata=metadata,
         )
-        result = net.supersede(old_id, new_id)
+        result = net.supersede(old_id, new_id, transitive=transitive)
         return result
 
 
@@ -2562,6 +2627,8 @@ def lookup(query: str, visible_to: list[str] | None = None, db_path: str = DEFAU
 def search(query: str, visible_to: list[str] | None = None, db_path: str = DEFAULT_DB,
            format: str = "markdown", depth: int = 1,
            include_out: bool = False,
+           sort: str = "relevance",
+           namespace: str | None = None,
            pg_conninfo=None, project_id=None) -> str:
     """Search nodes using full-text search with neighbor expansion.
 
@@ -2578,6 +2645,8 @@ def search(query: str, visible_to: list[str] | None = None, db_path: str = DEFAU
         format: output format — "markdown" (default), "json", or "minimal"
         depth: number of hops to expand along justification chains (default: 1)
         include_out: if False (default), exclude OUT beliefs from results
+        sort: result ordering — "relevance" (default), "newest", or "oldest"
+        namespace: filter results to a namespace prefix
 
     Returns: formatted string with matched nodes and neighbors
     """
@@ -2604,6 +2673,13 @@ def search(query: str, visible_to: list[str] | None = None, db_path: str = DEFAU
             if not matched_ids:
                 return "No results found."
 
+        # Filter by namespace
+        if namespace:
+            prefix = f"{namespace}:"
+            matched_ids = [nid for nid in matched_ids if nid.startswith(prefix)]
+            if not matched_ids:
+                return "No results found."
+
         # Apply access filtering
         if visible_to is not None:
             matched_ids = [
@@ -2612,6 +2688,14 @@ def search(query: str, visible_to: list[str] | None = None, db_path: str = DEFAU
             ]
             if not matched_ids:
                 return "No results found."
+
+        # Sort results
+        if sort in ("newest", "oldest"):
+            reverse = sort == "newest"
+            matched_ids.sort(
+                key=lambda nid: getattr(net.nodes.get(nid), "created_at", "") or "",
+                reverse=reverse,
+            )
 
         # Expand to include neighbors (BFS along dependency graph)
         neighbor_ids = set()
