@@ -1473,4 +1473,46 @@ class TestProposalLifecycle:
         out_new, _, _ = run_cli("show", "a-v2", db_path=db_path)
         assert "Better A" in out_new
 
+    def test_propose_update_store(self, db_path):
+        import json
+        mock_response = json.dumps([{
+            "id": "a",
+            "action": "retract",
+            "proposed_text": None,
+            "failure_mode": "stale",
+            "basis": "prior-knowledge",
+            "evidence": "outdated",
+            "comment": "No longer valid",
+        }])
+        with patch("reasons.propose_update.invoke_model",
+                   return_value=mock_response):
+            out, err, code = run_cli("propose-update", "a",
+                                      "--store", "--proposer", "test-llm",
+                                      "--no-report", db_path=db_path)
+        assert code == 0
+        assert "Stored 1 proposal(s)" in out
+        assert "prop-a-retract-1" in out
+        props_out, _, _ = run_cli("proposals", db_path=db_path)
+        assert "1 proposal(s)" in props_out
+
+    def test_propose_update_no_store(self, db_path):
+        import json
+        mock_response = json.dumps([{
+            "id": "a",
+            "action": "retract",
+            "proposed_text": None,
+            "failure_mode": "stale",
+            "basis": "prior-knowledge",
+            "evidence": "",
+            "comment": "Stale",
+        }])
+        with patch("reasons.propose_update.invoke_model",
+                   return_value=mock_response):
+            out, err, code = run_cli("propose-update", "a",
+                                      "--no-report", db_path=db_path)
+        assert code == 0
+        assert "Stored" not in out
+        props_out, _, _ = run_cli("proposals", db_path=db_path)
+        assert "No proposals found" in props_out
+
 

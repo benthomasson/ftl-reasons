@@ -1345,3 +1345,148 @@ class TestWithdrawProposal:
         api.reject_proposal(r["proposal_id"], db_path=db_path)
         with pytest.raises(ValueError, match="not pending"):
             api.withdraw_proposal(r["proposal_id"], db_path=db_path)
+
+
+class TestStoreLlmProposals:
+
+    def test_stores_retract(self, db_path):
+        api.add_node("a", "A is true", db_path=db_path)
+        llm_result = {
+            "proposals": [{
+                "id": "a",
+                "action": "retract",
+                "proposed_text": None,
+                "failure_mode": "stale",
+                "basis": "prior-knowledge",
+                "evidence": "outdated",
+                "comment": "No longer valid",
+            }],
+        }
+        result = api.store_llm_proposals(llm_result, proposer="test-llm",
+                                         db_path=db_path)
+        assert result["count"] == 1
+        assert result["stored"][0]["action"] == "retract"
+        assert result["stored"][0]["node_id"] == "a"
+        props = api.list_proposals(db_path=db_path)
+        assert props["count"] == 1
+        assert props["proposals"][0]["action"] == "retract"
+
+    def test_stores_update_as_supersede(self, db_path):
+        api.add_node("b", "B is true", db_path=db_path)
+        llm_result = {
+            "proposals": [{
+                "id": "b",
+                "action": "update",
+                "proposed_text": "B is actually false",
+                "failure_mode": "contradicted-by-source",
+                "basis": "source-divergence",
+                "evidence": "Source changed",
+                "comment": "Source disagrees",
+            }],
+        }
+        result = api.store_llm_proposals(llm_result, proposer="test-llm",
+                                         db_path=db_path)
+        assert result["count"] == 1
+        assert result["stored"][0]["action"] == "supersede"
+        assert result["stored"][0]["new_id"] != ""
+
+    def test_skips_update_without_text(self, db_path):
+        api.add_node("c", "C is true", db_path=db_path)
+        llm_result = {
+            "proposals": [{
+                "id": "c",
+                "action": "update",
+                "proposed_text": None,
+                "failure_mode": "",
+                "basis": "prior-knowledge",
+                "evidence": "",
+                "comment": "",
+            }],
+        }
+        result = api.store_llm_proposals(llm_result, db_path=db_path)
+        assert result["count"] == 0
+        assert len(result["skipped"]) == 1
+        assert "no proposed_text" in result["skipped"][0]["reason"]
+
+    def test_skips_missing_node(self, db_path):
+        llm_result = {
+            "proposals": [{
+                "id": "nonexistent",
+                "action": "retract",
+                "proposed_text": None,
+                "failure_mode": "stale",
+                "basis": "prior-knowledge",
+                "evidence": "",
+                "comment": "",
+            }],
+        }
+        result = api.store_llm_proposals(llm_result, db_path=db_path)
+        assert result["count"] == 0
+        assert len(result["skipped"]) == 1
+
+    def test_mixed_batch(self, db_path):
+        api.add_node("x", "X", db_path=db_path)
+        api.add_node("y", "Y", db_path=db_path)
+        llm_result = {
+            "proposals": [
+                {
+                    "id": "x",
+                    "action": "retract",
+                    "proposed_text": None,
+                    "failure_mode": "stale",
+                    "basis": "prior-knowledge",
+                    "evidence": "",
+                    "comment": "Stale",
+                },
+                {
+                    "id": "y",
+                    "action": "update",
+                    "proposed_text": "Y revised",
+                    "failure_mode": "smuggled-premise",
+                    "basis": "prior-knowledge",
+                    "evidence": "",
+                    "comment": "Fixed assumption",
+                },
+                {
+                    "id": "missing",
+                    "action": "retract",
+                    "proposed_text": None,
+                    "failure_mode": "",
+                    "basis": "prior-knowledge",
+                    "evidence": "",
+                    "comment": "",
+                },
+            ],
+        }
+        result = api.store_llm_proposals(llm_result, db_path=db_path)
+        assert result["count"] == 2
+        assert len(result["skipped"]) == 1
+        actions = {s["action"] for s in result["stored"]}
+        assert actions == {"retract", "supersede"}
+
+    def test_empty_proposals(self, db_path):
+        result = api.store_llm_proposals({"proposals": []}, db_path=db_path)
+        assert result["count"] == 0
+        assert result["stored"] == []
+        assert result["skipped"] == []
+
+    def test_proposals_are_pending(self, db_path):
+        api.add_node("d", "D is true", db_path=db_path)
+        llm_result = {
+            "proposals": [{
+                "id": "d",
+                "action": "retract",
+                "proposed_text": None,
+                "failure_mode": "stale",
+                "basis": "source-divergence",
+                "evidence": "file changed",
+                "comment": "outdated",
+            }],
+        }
+        result = api.store_llm_proposals(llm_result, proposer="my-llm",
+                                         db_path=db_path)
+        proposal_id = result["stored"][0]["proposal_id"]
+        detail = api.show_proposal(proposal_id, db_path=db_path)
+        assert detail["status"] == "pending"
+        assert detail["proposer"] == "my-llm"
+        assert detail["basis"] == "source-divergence"

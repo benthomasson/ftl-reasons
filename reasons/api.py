@@ -4195,6 +4195,89 @@ def propose_update(
     }
 
 
+def store_llm_proposals(
+    llm_result: dict,
+    proposer: str = "llm",
+    db_path: str = DEFAULT_DB,
+    pg_conninfo=None,
+    project_id=None,
+) -> dict:
+    """Convert LLM propose_update output into stored proposals.
+
+    Takes the dict returned by propose_update() and creates a pending
+    proposal for each item: retract → propose_retraction,
+    update → propose_supersession.
+
+    Returns: {"stored": [...], "skipped": [...], "count": int}
+    """
+    proposals = llm_result.get("proposals", [])
+    stored = []
+    skipped = []
+
+    for p in proposals:
+        node_id = p.get("id", "")
+        action = p.get("action", "update")
+        proposed_text = p.get("proposed_text")
+        failure_mode = p.get("failure_mode", "")
+        basis = p.get("basis", "prior-knowledge")
+        evidence = p.get("evidence", "")
+        comment = p.get("comment", "")
+
+        try:
+            if action == "retract":
+                result = propose_retraction(
+                    node_id,
+                    reason=comment,
+                    failure_mode=failure_mode,
+                    basis=basis,
+                    evidence=evidence,
+                    proposer=proposer,
+                    db_path=db_path,
+                    pg_conninfo=pg_conninfo,
+                    project_id=project_id,
+                )
+                stored.append({
+                    "node_id": node_id,
+                    "action": "retract",
+                    "proposal_id": result["proposal_id"],
+                })
+            elif action == "update" and proposed_text:
+                result = propose_supersession(
+                    node_id,
+                    proposed_text,
+                    reason=comment,
+                    failure_mode=failure_mode,
+                    basis=basis,
+                    evidence=evidence,
+                    proposer=proposer,
+                    db_path=db_path,
+                    pg_conninfo=pg_conninfo,
+                    project_id=project_id,
+                )
+                stored.append({
+                    "node_id": node_id,
+                    "action": "supersede",
+                    "proposal_id": result["proposal_id"],
+                    "new_id": result.get("new_id", ""),
+                })
+            else:
+                skipped.append({
+                    "node_id": node_id,
+                    "reason": "update action with no proposed_text",
+                })
+        except (KeyError, ValueError) as e:
+            skipped.append({
+                "node_id": node_id,
+                "reason": str(e),
+            })
+
+    return {
+        "stored": stored,
+        "skipped": skipped,
+        "count": len(stored),
+    }
+
+
 def repair_smuggled(
     review_file: str | None = None,
     belief_ids: list[str] | None = None,

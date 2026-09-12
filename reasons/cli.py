@@ -2702,6 +2702,17 @@ def cmd_propose_update(args):
         }, indent=2))
         print(f"  Report: {report_path}")
 
+    if getattr(args, "store", False) and proposals:
+        store_result = api.store_llm_proposals(
+            result, proposer=getattr(args, "proposer", "llm"),
+            db_path=args.db,
+        )
+        print(f"\nStored {store_result['count']} proposal(s) in proposals table")
+        for s in store_result["stored"]:
+            print(f"  {s['proposal_id']} ({s['action']} {s['node_id']})")
+        for sk in store_result["skipped"]:
+            print(f"  SKIP {sk['node_id']}: {sk['reason']}")
+
     cost = format_cost_summary()
     if cost:
         print(f"  {cost}", file=sys.stderr)
@@ -3594,6 +3605,10 @@ def main():
                    help="Directory for JSON reports (default: reviews/)")
     p.add_argument("--no-report", action="store_true",
                    help="Skip JSON report generation")
+    p.add_argument("--store", action="store_true",
+                   help="Store proposals in the proposals table for lifecycle tracking")
+    p.add_argument("--proposer", default="llm",
+                   help="Proposer identity when using --store (default: llm)")
 
     # repair-smuggled
     p = sub.add_parser("repair-smuggled",
