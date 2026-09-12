@@ -647,6 +647,64 @@ class TestSupersedeWithText:
         assert "access_tags" not in new_node.get("metadata", {})
 
 
+class TestWhatIfSupersede:
+
+    @pytest.fixture
+    def db_path(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        api.add_node("a", "Original text", db_path=db)
+        api.add_node("b", "Premise B", db_path=db)
+        api.add_node("derived-ab", "AB combined", sl="a,b",
+                      label="combined", db_path=db)
+        return db
+
+    def test_basic_supersede(self, db_path):
+        result = api.what_if_supersede("a", "Updated text", db_path=db_path)
+        assert result["old_id"] == "a"
+        assert result["new_id"] == "a-v2"
+        assert result["already_out"] is False
+        assert not any(r["id"] == "a" for r in result["retracted"])
+        assert result["total_affected"] >= 1
+        # Database should not be modified
+        node = api.show_node("a", db_path=db_path)
+        assert node["truth_value"] == "IN"
+        assert "a-v2" not in [n["id"] for n in api.get_status(db_path=db_path)["nodes"]]
+
+    def test_cascade_to_dependents(self, db_path):
+        result = api.what_if_supersede("a", "Updated text", db_path=db_path)
+        retracted_ids = [r["id"] for r in result["retracted"]]
+        assert "a" not in retracted_ids
+        assert "derived-ab" in retracted_ids
+
+    def test_custom_new_id(self, db_path):
+        result = api.what_if_supersede("a", "Updated text", new_id="a-fixed",
+                                        db_path=db_path)
+        assert result["new_id"] == "a-fixed"
+
+    def test_already_out(self, db_path):
+        api.retract_node("a", db_path=db_path)
+        result = api.what_if_supersede("a", "Updated text", db_path=db_path)
+        assert result["already_out"] is True
+        assert result["retracted"] == []
+        assert result["total_affected"] == 0
+
+    def test_not_found(self, db_path):
+        with pytest.raises(KeyError):
+            api.what_if_supersede("nonexistent", "text", db_path=db_path)
+
+    def test_does_not_mutate_db(self, db_path):
+        before = api.get_status(db_path=db_path)
+        api.what_if_supersede("a", "Updated text", db_path=db_path)
+        after = api.get_status(db_path=db_path)
+        assert before["in_count"] == after["in_count"]
+        assert before["total"] == after["total"]
+
+    def test_auto_id_increments(self, db_path):
+        api.add_node("a-v2", "Existing v2", db_path=db_path)
+        result = api.what_if_supersede("a", "Updated text", db_path=db_path)
+        assert result["new_id"] == "a-v3"
+
+
 class TestSetMetadata:
 
     def test_sets_key(self, tmp_path):
@@ -885,3 +943,405 @@ class TestLifecycleTimestamps:
         api.import_json(json_path, db_path=db2)
         node = api.show_node("ts-ver", db_path=db2)
         assert node["verified_at"] == now
+
+
+class TestProposeRetraction:
+
+    @pytest.fixture
+    def db_path(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        api.add_node("a", "Original text", db_path=db)
+        api.add_node("b", "Premise B", db_path=db)
+        api.add_node("derived-ab", "AB combined", sl="a,b",
+                      label="combined", db_path=db)
+        return db
+
+    def test_basic_propose(self, db_path):
+        result = api.propose_retraction("a", reason="Stale finding",
+                                         proposer="worker-bee", db_path=db_path)
+        assert result["proposal_id"].startswith("prop-a-retract-")
+        assert result["target_id"] == "a"
+        assert result["action"] == "retract"
+        assert result["status"] == "pending"
+        assert result["impact"]["total_affected"] >= 1
+
+    def test_no_truth_change(self, db_path):
+        api.propose_retraction("a", db_path=db_path)
+        node = api.show_node("a", db_path=db_path)
+        assert node["truth_value"] == "IN"
+
+    def test_target_not_found(self, db_path):
+        with pytest.raises(KeyError):
+            api.propose_retraction("nonexistent", db_path=db_path)
+
+    def test_target_already_out(self, db_path):
+        api.retract_node("a", db_path=db_path)
+        with pytest.raises(ValueError, match="already OUT"):
+            api.propose_retraction("a", db_path=db_path)
+
+    def test_auto_stales_older_pending(self, db_path):
+        r1 = api.propose_retraction("a", reason="first", db_path=db_path)
+        r2 = api.propose_retraction("a", reason="second", db_path=db_path)
+        assert r1["proposal_id"] in r2["staled"]
+        p1 = api.show_proposal(r1["proposal_id"], db_path=db_path)
+        assert p1["status"] == "stale"
+        p2 = api.show_proposal(r2["proposal_id"], db_path=db_path)
+        assert p2["status"] == "pending"
+
+    def test_list_proposals(self, db_path):
+        api.propose_retraction("a", proposer="bee-1", db_path=db_path)
+        api.propose_retraction("b", proposer="bee-2", db_path=db_path)
+        result = api.list_proposals(db_path=db_path)
+        assert result["count"] == 2
+        ids = [p["id"] for p in result["proposals"]]
+        assert any("a" in pid for pid in ids)
+        assert any("b" in pid for pid in ids)
+
+    def test_list_proposals_filter_by_proposer(self, db_path):
+        api.propose_retraction("a", proposer="bee-1", db_path=db_path)
+        api.propose_retraction("b", proposer="bee-2", db_path=db_path)
+        result = api.list_proposals(proposer="bee-1", db_path=db_path)
+        assert result["count"] == 1
+        assert result["proposals"][0]["proposer"] == "bee-1"
+
+    def test_show_proposal(self, db_path):
+        r = api.propose_retraction("a", reason="Stale", basis="source-divergence",
+                                    evidence="file changed", proposer="bee",
+                                    db_path=db_path)
+        p = api.show_proposal(r["proposal_id"], db_path=db_path)
+        assert p["action"] == "retract"
+        assert p["reason"] == "Stale"
+        assert p["basis"] == "source-divergence"
+        assert p["evidence"] == "file changed"
+        assert p["proposer"] == "bee"
+        assert p["snapshot"]["truth_value"] == "IN"
+
+    def test_show_proposal_not_found(self, db_path):
+        with pytest.raises(KeyError):
+            api.show_proposal("prop-nonexistent", db_path=db_path)
+
+    def test_proposal_ids_increment(self, db_path):
+        r1 = api.propose_retraction("a", reason="first", db_path=db_path)
+        r2 = api.propose_retraction("a", reason="second", db_path=db_path)
+        assert r1["proposal_id"] == "prop-a-retract-1"
+        assert r2["proposal_id"] == "prop-a-retract-2"
+
+
+class TestProposeSupersession:
+
+    @pytest.fixture
+    def db_path(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        api.add_node("a", "Original text", db_path=db)
+        api.add_node("b", "Premise B", db_path=db)
+        api.add_node("derived-ab", "AB combined", sl="a,b",
+                      label="combined", db_path=db)
+        return db
+
+    def test_basic_propose(self, db_path):
+        result = api.propose_supersession("a", "Updated text",
+                                           proposer="worker-bee",
+                                           db_path=db_path)
+        assert result["proposal_id"].startswith("prop-a-supersede-")
+        assert result["target_id"] == "a"
+        assert result["new_id"] == "a-v2"
+        assert result["action"] == "supersede"
+        assert result["status"] == "pending"
+
+    def test_no_truth_change(self, db_path):
+        api.propose_supersession("a", "Updated text", db_path=db_path)
+        node = api.show_node("a", db_path=db_path)
+        assert node["truth_value"] == "IN"
+        status = api.get_status(db_path=db_path)
+        assert not any(n["id"] == "a-v2" for n in status["nodes"])
+
+    def test_custom_new_id(self, db_path):
+        result = api.propose_supersession("a", "Updated text",
+                                           new_id="a-fixed", db_path=db_path)
+        assert result["new_id"] == "a-fixed"
+
+    def test_target_not_found(self, db_path):
+        with pytest.raises(KeyError):
+            api.propose_supersession("nonexistent", "text", db_path=db_path)
+
+    def test_target_already_out(self, db_path):
+        api.retract_node("a", db_path=db_path)
+        with pytest.raises(ValueError, match="already OUT"):
+            api.propose_supersession("a", "text", db_path=db_path)
+
+    def test_new_id_already_exists(self, db_path):
+        with pytest.raises(ValueError, match="already exists"):
+            api.propose_supersession("a", "text", new_id="b", db_path=db_path)
+
+    def test_auto_stales_older_pending(self, db_path):
+        r1 = api.propose_supersession("a", "first", db_path=db_path)
+        r2 = api.propose_supersession("a", "second", db_path=db_path)
+        assert r1["proposal_id"] in r2["staled"]
+        p1 = api.show_proposal(r1["proposal_id"], db_path=db_path)
+        assert p1["status"] == "stale"
+
+    def test_show_proposal_has_proposed_text(self, db_path):
+        r = api.propose_supersession("a", "Updated text", db_path=db_path)
+        p = api.show_proposal(r["proposal_id"], db_path=db_path)
+        assert p["proposed_text"] == "Updated text"
+        assert p["new_id"] == "a-v2"
+
+    def test_different_actions_dont_stale_each_other(self, db_path):
+        r1 = api.propose_retraction("a", db_path=db_path)
+        r2 = api.propose_supersession("a", "new text", db_path=db_path)
+        assert r2["staled"] == []
+        p1 = api.show_proposal(r1["proposal_id"], db_path=db_path)
+        assert p1["status"] == "pending"
+
+
+class TestProposeAddition:
+
+    @pytest.fixture
+    def db_path(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        api.add_node("a", "Premise A", db_path=db)
+        api.add_node("b", "Premise B", db_path=db)
+        return db
+
+    def test_basic_propose(self, db_path):
+        result = api.propose_addition("new-belief", "A new belief",
+                                       proposer="worker-bee", db_path=db_path)
+        assert result["proposal_id"].startswith("prop-new-belief-add-")
+        assert result["node_id"] == "new-belief"
+        assert result["action"] == "add"
+        assert result["status"] == "pending"
+
+    def test_no_network_change(self, db_path):
+        api.propose_addition("new-belief", "A new belief", db_path=db_path)
+        status = api.get_status(db_path=db_path)
+        assert not any(n["id"] == "new-belief" for n in status["nodes"])
+
+    def test_node_already_exists(self, db_path):
+        with pytest.raises(ValueError, match="already exists"):
+            api.propose_addition("a", "duplicate", db_path=db_path)
+
+    def test_with_justification(self, db_path):
+        result = api.propose_addition("derived-c", "Derived from A and B",
+                                       sl="a,b", label="combined",
+                                       db_path=db_path)
+        p = api.show_proposal(result["proposal_id"], db_path=db_path)
+        assert p["proposed_text"] == "Derived from A and B"
+        snapshot = p["snapshot"]
+        assert snapshot["sl"] == "a,b"
+        assert snapshot["label"] == "combined"
+
+    def test_auto_stales_older_pending(self, db_path):
+        r1 = api.propose_addition("new-belief", "first draft", db_path=db_path)
+        r2 = api.propose_addition("new-belief", "second draft", db_path=db_path)
+        assert r1["proposal_id"] in r2["staled"]
+        p1 = api.show_proposal(r1["proposal_id"], db_path=db_path)
+        assert p1["status"] == "stale"
+
+    def test_shows_in_list(self, db_path):
+        api.propose_addition("new-belief", "A belief", db_path=db_path)
+        result = api.list_proposals(db_path=db_path)
+        assert result["count"] == 1
+        assert result["proposals"][0]["action"] == "add"
+
+    def test_with_source(self, db_path):
+        r = api.propose_addition("sourced", "From a file",
+                                  source="repo:src/foo.py",
+                                  source_url="https://example.com",
+                                  db_path=db_path)
+        p = api.show_proposal(r["proposal_id"], db_path=db_path)
+        snapshot = p["snapshot"]
+        assert snapshot["source"] == "repo:src/foo.py"
+        assert snapshot["source_url"] == "https://example.com"
+
+    def test_different_actions_independent(self, db_path):
+        r1 = api.propose_retraction("a", db_path=db_path)
+        r2 = api.propose_addition("new-belief", "new", db_path=db_path)
+        assert r2["staled"] == []
+        result = api.list_proposals(db_path=db_path)
+        assert result["count"] == 2
+
+
+class TestAcceptProposal:
+
+    @pytest.fixture
+    def db_path(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        api.add_node("a", "Original text", db_path=db)
+        api.add_node("b", "Premise B", db_path=db)
+        api.add_node("derived-ab", "AB combined", sl="a,b",
+                      label="combined", db_path=db)
+        return db
+
+    def test_accept_retraction(self, db_path):
+        r = api.propose_retraction("a", reason="Stale", db_path=db_path)
+        result = api.accept_proposal(r["proposal_id"], voter="reviewer",
+                                      db_path=db_path)
+        assert result["applied"] is True
+        assert result["status"] == "accepted"
+        assert result["action"] == "retract"
+        node = api.show_node("a", db_path=db_path)
+        assert node["truth_value"] == "OUT"
+
+    def test_accept_retraction_cascades(self, db_path):
+        r = api.propose_retraction("a", db_path=db_path)
+        api.accept_proposal(r["proposal_id"], db_path=db_path)
+        derived = api.show_node("derived-ab", db_path=db_path)
+        assert derived["truth_value"] == "OUT"
+
+    def test_accept_supersession(self, db_path):
+        r = api.propose_supersession("a", "Updated text", db_path=db_path)
+        result = api.accept_proposal(r["proposal_id"], voter="reviewer",
+                                      db_path=db_path)
+        assert result["applied"] is True
+        assert result["action"] == "supersede"
+        old = api.show_node("a", db_path=db_path)
+        assert old["truth_value"] == "OUT"
+        new = api.show_node("a-v2", db_path=db_path)
+        assert new["text"] == "Updated text"
+        assert new["truth_value"] == "IN"
+
+    def test_accept_addition(self, db_path):
+        r = api.propose_addition("new-belief", "A new belief",
+                                  sl="a,b", label="derived",
+                                  db_path=db_path)
+        result = api.accept_proposal(r["proposal_id"], db_path=db_path)
+        assert result["applied"] is True
+        assert result["action"] == "add"
+        node = api.show_node("new-belief", db_path=db_path)
+        assert node["text"] == "A new belief"
+        assert node["truth_value"] == "IN"
+
+    def test_accept_addition_premise(self, db_path):
+        r = api.propose_addition("new-premise", "A premise",
+                                  db_path=db_path)
+        result = api.accept_proposal(r["proposal_id"], db_path=db_path)
+        assert result["applied"] is True
+        node = api.show_node("new-premise", db_path=db_path)
+        assert node["truth_value"] == "IN"
+
+    def test_accept_marks_proposal_accepted(self, db_path):
+        r = api.propose_retraction("a", db_path=db_path)
+        api.accept_proposal(r["proposal_id"], voter="rev", db_path=db_path)
+        p = api.show_proposal(r["proposal_id"], db_path=db_path)
+        assert p["status"] == "accepted"
+        assert p["resolved_by"] == "rev"
+        assert p["resolved_at"] != ""
+
+    def test_accept_not_found(self, db_path):
+        with pytest.raises(KeyError):
+            api.accept_proposal("prop-nonexistent", db_path=db_path)
+
+    def test_accept_already_resolved(self, db_path):
+        r = api.propose_retraction("a", db_path=db_path)
+        api.reject_proposal(r["proposal_id"], db_path=db_path)
+        with pytest.raises(ValueError, match="not pending"):
+            api.accept_proposal(r["proposal_id"], db_path=db_path)
+
+    def test_drift_target_already_out(self, db_path):
+        r = api.propose_retraction("a", db_path=db_path)
+        api.retract_node("a", db_path=db_path)
+        result = api.accept_proposal(r["proposal_id"], db_path=db_path)
+        assert result["applied"] is False
+        assert result["status"] == "stale"
+        p = api.show_proposal(r["proposal_id"], db_path=db_path)
+        assert p["status"] == "stale"
+
+    def test_drift_target_deleted(self, db_path):
+        r = api.propose_supersession("b", "new B", db_path=db_path)
+        api.retract_node("b", db_path=db_path)
+        result = api.accept_proposal(r["proposal_id"], db_path=db_path)
+        assert result["applied"] is False
+        assert result["status"] == "stale"
+
+    def test_drift_add_node_already_exists(self, db_path):
+        r = api.propose_addition("new-belief", "text", db_path=db_path)
+        api.add_node("new-belief", "someone added it first", db_path=db_path)
+        result = api.accept_proposal(r["proposal_id"], db_path=db_path)
+        assert result["applied"] is False
+        assert result["status"] == "stale"
+
+    def test_drift_supersede_new_id_collision(self, db_path):
+        r = api.propose_supersession("a", "Updated", new_id="a-fixed",
+                                      db_path=db_path)
+        api.add_node("a-fixed", "someone used this id", db_path=db_path)
+        result = api.accept_proposal(r["proposal_id"], db_path=db_path)
+        assert result["applied"] is False
+        assert result["status"] == "stale"
+
+
+class TestRejectProposal:
+
+    @pytest.fixture
+    def db_path(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        api.add_node("a", "Premise A", db_path=db)
+        return db
+
+    def test_reject(self, db_path):
+        r = api.propose_retraction("a", db_path=db_path)
+        result = api.reject_proposal(r["proposal_id"], voter="reviewer",
+                                      reason="Not convinced", db_path=db_path)
+        assert result["status"] == "rejected"
+        assert result["reason"] == "Not convinced"
+
+    def test_reject_no_truth_change(self, db_path):
+        r = api.propose_retraction("a", db_path=db_path)
+        api.reject_proposal(r["proposal_id"], db_path=db_path)
+        node = api.show_node("a", db_path=db_path)
+        assert node["truth_value"] == "IN"
+
+    def test_reject_marks_proposal(self, db_path):
+        r = api.propose_retraction("a", db_path=db_path)
+        api.reject_proposal(r["proposal_id"], voter="rev", db_path=db_path)
+        p = api.show_proposal(r["proposal_id"], db_path=db_path)
+        assert p["status"] == "rejected"
+        assert p["resolved_by"] == "rev"
+
+    def test_reject_not_found(self, db_path):
+        with pytest.raises(KeyError):
+            api.reject_proposal("prop-nonexistent", db_path=db_path)
+
+    def test_reject_already_resolved(self, db_path):
+        r = api.propose_retraction("a", db_path=db_path)
+        api.accept_proposal(r["proposal_id"], db_path=db_path)
+        with pytest.raises(ValueError, match="not pending"):
+            api.reject_proposal(r["proposal_id"], db_path=db_path)
+
+
+class TestWithdrawProposal:
+
+    @pytest.fixture
+    def db_path(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        api.add_node("a", "Premise A", db_path=db)
+        return db
+
+    def test_withdraw(self, db_path):
+        r = api.propose_retraction("a", proposer="bee", db_path=db_path)
+        result = api.withdraw_proposal(r["proposal_id"], proposer="bee",
+                                        db_path=db_path)
+        assert result["status"] == "withdrawn"
+
+    def test_withdraw_no_truth_change(self, db_path):
+        r = api.propose_retraction("a", db_path=db_path)
+        api.withdraw_proposal(r["proposal_id"], db_path=db_path)
+        node = api.show_node("a", db_path=db_path)
+        assert node["truth_value"] == "IN"
+
+    def test_withdraw_marks_proposal(self, db_path):
+        r = api.propose_retraction("a", db_path=db_path)
+        api.withdraw_proposal(r["proposal_id"], proposer="bee",
+                               db_path=db_path)
+        p = api.show_proposal(r["proposal_id"], db_path=db_path)
+        assert p["status"] == "withdrawn"
+        assert p["resolved_by"] == "bee"
+
+    def test_withdraw_not_found(self, db_path):
+        with pytest.raises(KeyError):
+            api.withdraw_proposal("prop-nonexistent", db_path=db_path)
+
+    def test_withdraw_already_resolved(self, db_path):
+        r = api.propose_retraction("a", db_path=db_path)
+        api.reject_proposal(r["proposal_id"], db_path=db_path)
+        with pytest.raises(ValueError, match="not pending"):
+            api.withdraw_proposal(r["proposal_id"], db_path=db_path)
