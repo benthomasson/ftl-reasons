@@ -663,7 +663,7 @@ class TestWhatIfSupersede:
         assert result["old_id"] == "a"
         assert result["new_id"] == "a-v2"
         assert result["already_out"] is False
-        assert any(r["id"] == "a" for r in result["retracted"])
+        assert not any(r["id"] == "a" for r in result["retracted"])
         assert result["total_affected"] >= 1
         # Database should not be modified
         node = api.show_node("a", db_path=db_path)
@@ -673,7 +673,7 @@ class TestWhatIfSupersede:
     def test_cascade_to_dependents(self, db_path):
         result = api.what_if_supersede("a", "Updated text", db_path=db_path)
         retracted_ids = [r["id"] for r in result["retracted"]]
-        assert "a" in retracted_ids
+        assert "a" not in retracted_ids
         assert "derived-ab" in retracted_ids
 
     def test_custom_new_id(self, db_path):
@@ -1126,10 +1126,9 @@ class TestProposeAddition:
                                        db_path=db_path)
         p = api.show_proposal(result["proposal_id"], db_path=db_path)
         assert p["proposed_text"] == "Derived from A and B"
-        import json
-        impact = json.loads(json.dumps(p["impact"]))
-        assert impact["sl"] == "a,b"
-        assert impact["label"] == "combined"
+        snapshot = p["snapshot"]
+        assert snapshot["sl"] == "a,b"
+        assert snapshot["label"] == "combined"
 
     def test_auto_stales_older_pending(self, db_path):
         r1 = api.propose_addition("new-belief", "first draft", db_path=db_path)
@@ -1150,10 +1149,9 @@ class TestProposeAddition:
                                   source_url="https://example.com",
                                   db_path=db_path)
         p = api.show_proposal(r["proposal_id"], db_path=db_path)
-        import json
-        impact = json.loads(json.dumps(p["impact"]))
-        assert impact["source"] == "repo:src/foo.py"
-        assert impact["source_url"] == "https://example.com"
+        snapshot = p["snapshot"]
+        assert snapshot["source"] == "repo:src/foo.py"
+        assert snapshot["source_url"] == "https://example.com"
 
     def test_different_actions_independent(self, db_path):
         r1 = api.propose_retraction("a", db_path=db_path)

@@ -68,6 +68,10 @@ CREATE TABLE IF NOT EXISTS network_meta (
     value TEXT NOT NULL
 );
 
+CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(id, text, tokenize="porter unicode61");
+"""
+
+PROPOSALS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS proposals (
     id              TEXT PRIMARY KEY,
     action          TEXT NOT NULL CHECK (action IN ('retract','supersede','add')),
@@ -91,8 +95,6 @@ CREATE TABLE IF NOT EXISTS proposals (
 );
 CREATE INDEX IF NOT EXISTS idx_proposals_target ON proposals (target_id, status);
 CREATE INDEX IF NOT EXISTS idx_proposals_status ON proposals (status);
-
-CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(id, text, tokenize="porter unicode61");
 """
 
 

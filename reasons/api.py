@@ -23,7 +23,7 @@ from . import Justification
 from . import pubsub
 from .metadata import build_meta
 from .network import Network
-from .storage import Storage
+from .storage import PROPOSALS_SCHEMA, Storage
 
 
 logger = logging.getLogger(__name__)
@@ -643,6 +643,8 @@ def what_if_supersede(old_id: str, new_text: str, new_id: str | None = None,
         retracted = []
         restored = []
         for nid in before:
+            if nid == old_id:
+                continue
             n = net.nodes[nid]
             if before[nid] == "IN" and n.truth_value == "OUT":
                 info = {
@@ -4753,55 +4755,20 @@ def _proposals_db(db_path: str):
     conn = sqlite3.connect(db_path)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS proposals (
-            id              TEXT PRIMARY KEY,
-            action          TEXT NOT NULL CHECK (action IN ('retract','supersede','add')),
-            target_id       TEXT NOT NULL,
-            new_id          TEXT DEFAULT '',
-            proposed_text   TEXT DEFAULT '',
-            reason          TEXT DEFAULT '',
-            failure_mode    TEXT DEFAULT '',
-            basis           TEXT DEFAULT 'prior-knowledge',
-            evidence        TEXT DEFAULT '',
-            proposer        TEXT DEFAULT '',
-            status          TEXT NOT NULL DEFAULT 'pending'
-                            CHECK (status IN ('pending','accepted','rejected','withdrawn','stale')),
-            snapshot_json   TEXT DEFAULT '{}',
-            impact_json     TEXT DEFAULT '{}',
-            created_at      TEXT NOT NULL,
-            updated_at      TEXT NOT NULL,
-            resolved_at     TEXT DEFAULT '',
-            resolved_by     TEXT DEFAULT '',
-            result_json     TEXT DEFAULT ''
-        )
-    """)
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_proposals_target "
-        "ON proposals (target_id, status)"
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_proposals_status "
-        "ON proposals (status)"
-    )
+    conn.executescript(PROPOSALS_SCHEMA)
     conn.commit()
     return conn
 
 
 def _next_proposal_id(conn, target_id: str, action: str) -> str:
     """Generate the next proposal ID for a given target and action."""
+    prefix = f"prop-{target_id}-{action}-"
     cursor = conn.execute(
-        "SELECT id FROM proposals WHERE target_id = ? AND action = ? "
-        "ORDER BY created_at DESC LIMIT 1",
+        "SELECT COUNT(*) FROM proposals WHERE target_id = ? AND action = ?",
         (target_id, action),
     )
-    row = cursor.fetchone()
-    if row:
-        last_id = row[0]
-        parts = last_id.rsplit("-", 1)
-        if parts[-1].isdigit():
-            return f"{parts[0]}-{int(parts[-1]) + 1}"
-    return f"prop-{target_id}-{action}-1"
+    count = cursor.fetchone()[0]
+    return f"{prefix}{count + 1}"
 
 
 def _stale_older_pending(conn, target_id: str, action: str, now: str) -> list[str]:
@@ -5028,7 +4995,8 @@ def propose_addition(
             (
                 proposal_id, "add", node_id, node_id, text,
                 reason, failure_mode, basis, evidence, proposer,
-                "{}", json.dumps(proposed),
+                json.dumps(proposed),
+                json.dumps({"total_affected": 0}),
                 now, now,
             ),
         )
@@ -5212,12 +5180,12 @@ def accept_proposal(
                     f"Node '{target_id}' now exists (created since proposal)"
                 )
 
-        impact = json.loads(impact_json) if impact_json else {}
-        sl = impact.get("sl", "")
-        unless = impact.get("unless", "")
-        label_val = impact.get("label", "")
-        source = impact.get("source", "")
-        source_url = impact.get("source_url", "")
+        proposed_config = snapshot
+        sl = proposed_config.get("sl", "")
+        unless = proposed_config.get("unless", "")
+        label_val = proposed_config.get("label", "")
+        source = proposed_config.get("source", "")
+        source_url = proposed_config.get("source_url", "")
 
         add_result = add_node(
             target_id, proposed_text,
