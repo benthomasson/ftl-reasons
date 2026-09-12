@@ -308,7 +308,7 @@ def propose_update(belief_ids: list[str] | None = None, model: str = "claude",
 @mcp.tool()
 def propose_retract(target_id: str, reason: str = "", failure_mode: str = "",
                     basis: str = "prior-knowledge", evidence: str = "",
-                    proposer: str = "") -> str:
+                    proposer: str = "", tags: list[str] | None = None) -> str:
     """Propose retracting a belief without changing truth values.
 
     Computes cascade impact and stores a pending proposal for review.
@@ -320,12 +320,13 @@ def propose_retract(target_id: str, reason: str = "", failure_mode: str = "",
         basis: Evidential basis (default: "prior-knowledge")
         evidence: Supporting evidence for the retraction
         proposer: Who is making this proposal
+        tags: Access control tags for this proposal
     """
     try:
         result = api.propose_retraction(
             target_id, reason=reason, failure_mode=failure_mode,
             basis=basis, evidence=evidence, proposer=proposer,
-            db_path=_get_db(),
+            tags=tags, db_path=_get_db(),
         )
         return json.dumps(result, indent=2)
     except (KeyError, ValueError) as e:
@@ -336,7 +337,8 @@ def propose_retract(target_id: str, reason: str = "", failure_mode: str = "",
 def propose_supersede(old_id: str, new_text: str, new_id: str = "",
                       reason: str = "", failure_mode: str = "",
                       basis: str = "prior-knowledge", evidence: str = "",
-                      proposer: str = "") -> str:
+                      proposer: str = "",
+                      tags: list[str] | None = None) -> str:
     """Propose superseding a belief with updated text.
 
     The old belief would be retracted and a new one created with the same
@@ -351,13 +353,14 @@ def propose_supersede(old_id: str, new_text: str, new_id: str = "",
         basis: Evidential basis (default: "prior-knowledge")
         evidence: Supporting evidence
         proposer: Who is making this proposal
+        tags: Access control tags for this proposal
     """
     try:
         result = api.propose_supersession(
             old_id, new_text, new_id=new_id or None,
             reason=reason, failure_mode=failure_mode,
             basis=basis, evidence=evidence, proposer=proposer,
-            db_path=_get_db(),
+            tags=tags, db_path=_get_db(),
         )
         return json.dumps(result, indent=2)
     except (KeyError, ValueError) as e:
@@ -369,7 +372,8 @@ def propose_add(node_id: str, text: str, sl: str = "", unless: str = "",
                 label: str = "", source: str = "", source_url: str = "",
                 reason: str = "", failure_mode: str = "",
                 basis: str = "prior-knowledge", evidence: str = "",
-                proposer: str = "") -> str:
+                proposer: str = "",
+                tags: list[str] | None = None) -> str:
     """Propose adding a new belief to the network.
 
     Does not modify the network. Stores the proposed node configuration
@@ -388,6 +392,7 @@ def propose_add(node_id: str, text: str, sl: str = "", unless: str = "",
         basis: Evidential basis (default: "prior-knowledge")
         evidence: Supporting evidence
         proposer: Who is making this proposal
+        tags: Access control tags for this proposal
     """
     try:
         result = api.propose_addition(
@@ -395,7 +400,36 @@ def propose_add(node_id: str, text: str, sl: str = "", unless: str = "",
             source=source, source_url=source_url,
             reason=reason, failure_mode=failure_mode,
             basis=basis, evidence=evidence, proposer=proposer,
-            db_path=_get_db(),
+            tags=tags, db_path=_get_db(),
+        )
+        return json.dumps(result, indent=2)
+    except (KeyError, ValueError) as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+def propose_nogood(node_ids: list[str], reason: str = "",
+                   basis: str = "prior-knowledge", evidence: str = "",
+                   proposer: str = "",
+                   tags: list[str] | None = None) -> str:
+    """Propose a contradiction (nogood) between beliefs.
+
+    On acceptance, triggers dependency-directed backtracking to retract
+    the weakest premise. Does not modify the network until accepted.
+
+    Args:
+        node_ids: List of node IDs that form the contradiction (at least 2)
+        reason: Why these nodes are contradictory
+        basis: Evidential basis (default: "prior-knowledge")
+        evidence: Supporting evidence
+        proposer: Who is making this proposal
+        tags: Access control tags for this proposal
+    """
+    try:
+        result = api.propose_nogood(
+            node_ids, reason=reason, basis=basis,
+            evidence=evidence, proposer=proposer,
+            tags=tags, db_path=_get_db(),
         )
         return json.dumps(result, indent=2)
     except (KeyError, ValueError) as e:
@@ -404,18 +438,20 @@ def propose_add(node_id: str, text: str, sl: str = "", unless: str = "",
 
 @mcp.tool()
 def list_proposals(proposal_status: str = "pending", target_id: str = "",
-                   proposer: str = "") -> str:
+                   proposer: str = "", tag: str = "") -> str:
     """List proposals with optional filters.
 
     Args:
         proposal_status: Filter by status — "pending", "accepted", "rejected", "withdrawn", "stale", or empty for all
         target_id: Filter by target belief ID
         proposer: Filter by proposer
+        tag: Filter by tag
     """
     result = api.list_proposals(
         status=proposal_status or None,
         target_id=target_id or None,
         proposer=proposer or None,
+        tag=tag or None,
         db_path=_get_db(),
     )
     return json.dumps(result, indent=2)
