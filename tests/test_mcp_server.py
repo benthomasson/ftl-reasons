@@ -266,3 +266,245 @@ class TestTopicsTool:
     def test_topics(self, db):
         result = json.loads(mcp_server.topics(limit=10))
         assert "topics" in result
+
+
+class TestWhatIfSupersede:
+
+    def test_what_if_supersede(self, db):
+        result = json.loads(mcp_server.what_if(
+            "premise-a", action="supersede", text="A is updated"))
+        assert result["old_id"] == "premise-a"
+        assert "new_id" in result
+        node = api.show_node("premise-a", db_path=db)
+        assert node["truth_value"] == "IN"
+
+    def test_what_if_supersede_missing_text(self, db):
+        result = json.loads(mcp_server.what_if(
+            "premise-a", action="supersede"))
+        assert "error" in result
+
+    def test_what_if_supersede_not_found(self, db):
+        result = json.loads(mcp_server.what_if(
+            "nonexistent", action="supersede", text="something"))
+        assert "error" in result
+
+
+class TestProposeRetractTool:
+
+    def test_propose_retract(self, db):
+        result = json.loads(mcp_server.propose_retract(
+            "premise-a", reason="outdated", proposer="test-bee"))
+        assert result["proposal_id"].startswith("prop-premise-a-retract-")
+        assert result["action"] == "retract"
+        assert result["status"] == "pending"
+        node = api.show_node("premise-a", db_path=db)
+        assert node["truth_value"] == "IN"
+
+    def test_propose_retract_not_found(self, db):
+        result = json.loads(mcp_server.propose_retract("nonexistent"))
+        assert "error" in result
+
+    def test_propose_retract_already_out(self, db):
+        api.retract_node("premise-a", db_path=db)
+        result = json.loads(mcp_server.propose_retract("premise-a"))
+        assert "error" in result
+
+    def test_propose_retract_with_impact(self, db):
+        result = json.loads(mcp_server.propose_retract("premise-a"))
+        assert "impact" in result
+        assert result["impact"]["total_affected"] >= 1
+
+
+class TestProposeSupersedeTool:
+
+    def test_propose_supersede(self, db):
+        result = json.loads(mcp_server.propose_supersede(
+            "premise-a", "A is updated", proposer="test-bee"))
+        assert result["proposal_id"].startswith("prop-premise-a-supersede-")
+        assert result["action"] == "supersede"
+        assert result["status"] == "pending"
+        assert "new_id" in result
+
+    def test_propose_supersede_custom_id(self, db):
+        result = json.loads(mcp_server.propose_supersede(
+            "premise-a", "A revised", new_id="premise-a-revised"))
+        assert result["new_id"] == "premise-a-revised"
+
+    def test_propose_supersede_not_found(self, db):
+        result = json.loads(mcp_server.propose_supersede(
+            "nonexistent", "text"))
+        assert "error" in result
+
+    def test_propose_supersede_already_out(self, db):
+        api.retract_node("premise-a", db_path=db)
+        result = json.loads(mcp_server.propose_supersede(
+            "premise-a", "updated"))
+        assert "error" in result
+
+
+class TestProposeAddTool:
+
+    def test_propose_add(self, db):
+        result = json.loads(mcp_server.propose_add(
+            "new-node", "New belief", proposer="test-bee"))
+        assert result["proposal_id"].startswith("prop-new-node-add-")
+        assert result["action"] == "add"
+        assert result["status"] == "pending"
+        result = json.loads(mcp_server.show("new-node"))
+        assert "error" in result
+
+    def test_propose_add_already_exists(self, db):
+        result = json.loads(mcp_server.propose_add(
+            "premise-a", "duplicate"))
+        assert "error" in result
+
+    def test_propose_add_with_justification(self, db):
+        result = json.loads(mcp_server.propose_add(
+            "new-derived", "Derived from A", sl="premise-a",
+            label="test-just"))
+        assert result["action"] == "add"
+        assert result["status"] == "pending"
+
+
+class TestListProposalsTool:
+
+    def test_list_proposals_empty(self, db):
+        result = json.loads(mcp_server.list_proposals())
+        assert result["count"] == 0
+
+    def test_list_proposals_after_propose(self, db):
+        mcp_server.propose_retract("premise-a", proposer="bee-1")
+        result = json.loads(mcp_server.list_proposals())
+        assert result["count"] == 1
+        assert result["proposals"][0]["target_id"] == "premise-a"
+
+    def test_list_proposals_filter_by_status(self, db):
+        prop = json.loads(mcp_server.propose_retract("premise-a"))
+        mcp_server.reject_proposal(prop["proposal_id"], voter="reviewer")
+        pending = json.loads(mcp_server.list_proposals(
+            proposal_status="pending"))
+        assert pending["count"] == 0
+        rejected = json.loads(mcp_server.list_proposals(
+            proposal_status="rejected"))
+        assert rejected["count"] == 1
+
+    def test_list_proposals_all_statuses(self, db):
+        mcp_server.propose_retract("premise-a")
+        result = json.loads(mcp_server.list_proposals(proposal_status=""))
+        assert result["count"] == 1
+
+
+class TestShowProposalTool:
+
+    def test_show_proposal(self, db):
+        prop = json.loads(mcp_server.propose_retract(
+            "premise-a", reason="test-reason"))
+        detail = json.loads(mcp_server.show_proposal(prop["proposal_id"]))
+        assert detail["id"] == prop["proposal_id"]
+        assert detail["reason"] == "test-reason"
+        assert detail["action"] == "retract"
+        assert "snapshot" in detail
+        assert "impact" in detail
+
+    def test_show_proposal_not_found(self, db):
+        result = json.loads(mcp_server.show_proposal("nonexistent"))
+        assert "error" in result
+
+
+class TestAcceptProposalTool:
+
+    def test_accept_retract(self, db):
+        prop = json.loads(mcp_server.propose_retract("premise-a"))
+        result = json.loads(mcp_server.accept_proposal(
+            prop["proposal_id"], voter="reviewer"))
+        assert result["applied"] is True
+        assert result["status"] == "accepted"
+        node = api.show_node("premise-a", db_path=db)
+        assert node["truth_value"] == "OUT"
+
+    def test_accept_supersede(self, db):
+        prop = json.loads(mcp_server.propose_supersede(
+            "premise-a", "A updated"))
+        result = json.loads(mcp_server.accept_proposal(
+            prop["proposal_id"], voter="reviewer"))
+        assert result["applied"] is True
+        old = api.show_node("premise-a", db_path=db)
+        assert old["truth_value"] == "OUT"
+
+    def test_accept_add(self, db):
+        prop = json.loads(mcp_server.propose_add(
+            "new-node", "Brand new belief"))
+        result = json.loads(mcp_server.accept_proposal(
+            prop["proposal_id"], voter="reviewer"))
+        assert result["applied"] is True
+        node = api.show_node("new-node", db_path=db)
+        assert node["truth_value"] == "IN"
+        assert node["text"] == "Brand new belief"
+
+    def test_accept_not_found(self, db):
+        result = json.loads(mcp_server.accept_proposal("nonexistent"))
+        assert "error" in result
+
+    def test_accept_already_resolved(self, db):
+        prop = json.loads(mcp_server.propose_retract("premise-a"))
+        mcp_server.reject_proposal(prop["proposal_id"])
+        result = json.loads(mcp_server.accept_proposal(prop["proposal_id"]))
+        assert "error" in result
+
+    def test_accept_cascade(self, db):
+        prop = json.loads(mcp_server.propose_retract("premise-a"))
+        mcp_server.accept_proposal(prop["proposal_id"])
+        derived = api.show_node("derived-c", db_path=db)
+        assert derived["truth_value"] == "OUT"
+
+    def test_accept_drift_already_out(self, db):
+        prop = json.loads(mcp_server.propose_retract("premise-a"))
+        api.retract_node("premise-a", db_path=db)
+        result = json.loads(mcp_server.accept_proposal(prop["proposal_id"]))
+        assert result["applied"] is False
+        assert result["status"] == "stale"
+
+
+class TestRejectProposalTool:
+
+    def test_reject(self, db):
+        prop = json.loads(mcp_server.propose_retract("premise-a"))
+        result = json.loads(mcp_server.reject_proposal(
+            prop["proposal_id"], voter="reviewer", reason="not convinced"))
+        assert result["status"] == "rejected"
+        assert result["reason"] == "not convinced"
+        node = api.show_node("premise-a", db_path=db)
+        assert node["truth_value"] == "IN"
+
+    def test_reject_not_found(self, db):
+        result = json.loads(mcp_server.reject_proposal("nonexistent"))
+        assert "error" in result
+
+    def test_reject_already_resolved(self, db):
+        prop = json.loads(mcp_server.propose_retract("premise-a"))
+        mcp_server.accept_proposal(prop["proposal_id"])
+        result = json.loads(mcp_server.reject_proposal(prop["proposal_id"]))
+        assert "error" in result
+
+
+class TestWithdrawProposalTool:
+
+    def test_withdraw(self, db):
+        prop = json.loads(mcp_server.propose_retract(
+            "premise-a", proposer="bee-1"))
+        result = json.loads(mcp_server.withdraw_proposal(
+            prop["proposal_id"], proposer="bee-1"))
+        assert result["status"] == "withdrawn"
+        node = api.show_node("premise-a", db_path=db)
+        assert node["truth_value"] == "IN"
+
+    def test_withdraw_not_found(self, db):
+        result = json.loads(mcp_server.withdraw_proposal("nonexistent"))
+        assert "error" in result
+
+    def test_withdraw_already_resolved(self, db):
+        prop = json.loads(mcp_server.propose_retract("premise-a"))
+        mcp_server.reject_proposal(prop["proposal_id"])
+        result = json.loads(mcp_server.withdraw_proposal(
+            prop["proposal_id"]))
+        assert "error" in result

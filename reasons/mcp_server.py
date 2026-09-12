@@ -167,18 +167,26 @@ def assert_belief(node_id: str) -> str:
 
 
 @mcp.tool()
-def what_if(node_id: str, action: str = "retract") -> str:
-    """Simulate retracting or asserting a belief without modifying the database.
+def what_if(node_id: str, action: str = "retract", text: str = "",
+            new_id: str = "") -> str:
+    """Simulate retracting, asserting, or superseding a belief without modifying the database.
 
     Shows the cascade: which beliefs would change truth values.
 
     Args:
         node_id: The belief to simulate
-        action: "retract" or "assert"
+        action: "retract", "assert", or "supersede"
+        text: Replacement text (required for supersede)
+        new_id: ID for the replacement node (supersede only, auto-generated if empty)
     """
     try:
         if action == "assert":
             result = api.what_if_assert(node_id, db_path=_get_db())
+        elif action == "supersede":
+            if not text:
+                return json.dumps({"error": "text is required for what_if supersede"})
+            result = api.what_if_supersede(node_id, text, new_id=new_id or None,
+                                           db_path=_get_db())
         else:
             result = api.what_if_retract(node_id, db_path=_get_db())
         return json.dumps(result, indent=2)
@@ -244,7 +252,197 @@ def compact(budget: int = 500, include_out: bool = False) -> str:
     return api.compact(budget=budget, include_out=include_out, db_path=_get_db())
 
 
-# --- Tier 3: Data management ---
+# --- Tier 3: Proposals ---
+
+
+@mcp.tool()
+def propose_retract(target_id: str, reason: str = "", failure_mode: str = "",
+                    basis: str = "prior-knowledge", evidence: str = "",
+                    proposer: str = "") -> str:
+    """Propose retracting a belief without changing truth values.
+
+    Computes cascade impact and stores a pending proposal for review.
+
+    Args:
+        target_id: The belief to propose retracting
+        reason: Why this belief should be retracted
+        failure_mode: How the belief fails (e.g. "outdated", "incorrect")
+        basis: Evidential basis (default: "prior-knowledge")
+        evidence: Supporting evidence for the retraction
+        proposer: Who is making this proposal
+    """
+    try:
+        result = api.propose_retraction(
+            target_id, reason=reason, failure_mode=failure_mode,
+            basis=basis, evidence=evidence, proposer=proposer,
+            db_path=_get_db(),
+        )
+        return json.dumps(result, indent=2)
+    except (KeyError, ValueError) as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+def propose_supersede(old_id: str, new_text: str, new_id: str = "",
+                      reason: str = "", failure_mode: str = "",
+                      basis: str = "prior-knowledge", evidence: str = "",
+                      proposer: str = "") -> str:
+    """Propose superseding a belief with updated text.
+
+    The old belief would be retracted and a new one created with the same
+    justification structure. Computes cascade impact.
+
+    Args:
+        old_id: The belief to supersede
+        new_text: Replacement belief text
+        new_id: ID for the replacement (auto-generated as {old_id}-vN if empty)
+        reason: Why this belief should be superseded
+        failure_mode: How the original belief fails
+        basis: Evidential basis (default: "prior-knowledge")
+        evidence: Supporting evidence
+        proposer: Who is making this proposal
+    """
+    try:
+        result = api.propose_supersession(
+            old_id, new_text, new_id=new_id or None,
+            reason=reason, failure_mode=failure_mode,
+            basis=basis, evidence=evidence, proposer=proposer,
+            db_path=_get_db(),
+        )
+        return json.dumps(result, indent=2)
+    except (KeyError, ValueError) as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+def propose_add(node_id: str, text: str, sl: str = "", unless: str = "",
+                label: str = "", source: str = "", source_url: str = "",
+                reason: str = "", failure_mode: str = "",
+                basis: str = "prior-knowledge", evidence: str = "",
+                proposer: str = "") -> str:
+    """Propose adding a new belief to the network.
+
+    Does not modify the network. Stores the proposed node configuration
+    for later review and acceptance.
+
+    Args:
+        node_id: Identifier for the proposed belief
+        text: The belief text
+        sl: Comma-separated antecedent node IDs for SL justification
+        unless: Comma-separated outlist node IDs
+        label: Optional justification label
+        source: Source reference
+        source_url: Source URL
+        reason: Why this belief should be added
+        failure_mode: Potential failure modes
+        basis: Evidential basis (default: "prior-knowledge")
+        evidence: Supporting evidence
+        proposer: Who is making this proposal
+    """
+    try:
+        result = api.propose_addition(
+            node_id, text, sl=sl, unless=unless, label=label,
+            source=source, source_url=source_url,
+            reason=reason, failure_mode=failure_mode,
+            basis=basis, evidence=evidence, proposer=proposer,
+            db_path=_get_db(),
+        )
+        return json.dumps(result, indent=2)
+    except (KeyError, ValueError) as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+def list_proposals(proposal_status: str = "pending", target_id: str = "",
+                   proposer: str = "") -> str:
+    """List proposals with optional filters.
+
+    Args:
+        proposal_status: Filter by status — "pending", "accepted", "rejected", "withdrawn", "stale", or empty for all
+        target_id: Filter by target belief ID
+        proposer: Filter by proposer
+    """
+    result = api.list_proposals(
+        status=proposal_status or None,
+        target_id=target_id or None,
+        proposer=proposer or None,
+        db_path=_get_db(),
+    )
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+def show_proposal(proposal_id: str) -> str:
+    """Show full details of a proposal including snapshot, impact, and resolution history.
+
+    Args:
+        proposal_id: The proposal identifier (e.g. "prop-node-id-retract-0")
+    """
+    try:
+        result = api.show_proposal(proposal_id, db_path=_get_db())
+        return json.dumps(result, indent=2)
+    except KeyError:
+        return json.dumps({"error": f"Proposal '{proposal_id}' not found"})
+
+
+@mcp.tool()
+def accept_proposal(proposal_id: str, voter: str = "") -> str:
+    """Accept a pending proposal — applies the change after drift re-validation.
+
+    Re-validates the proposal against the live network state. If the target
+    has changed since the proposal was created (drift), the proposal is
+    marked stale instead of applied.
+
+    Args:
+        proposal_id: The proposal to accept
+        voter: Who is accepting this proposal
+    """
+    try:
+        result = api.accept_proposal(
+            proposal_id, voter=voter, db_path=_get_db(),
+        )
+        return json.dumps(result, indent=2)
+    except (KeyError, ValueError) as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+def reject_proposal(proposal_id: str, voter: str = "",
+                    reason: str = "") -> str:
+    """Reject a pending proposal without changing truth values.
+
+    Args:
+        proposal_id: The proposal to reject
+        voter: Who is rejecting this proposal
+        reason: Why the proposal is being rejected
+    """
+    try:
+        result = api.reject_proposal(
+            proposal_id, voter=voter, reason=reason, db_path=_get_db(),
+        )
+        return json.dumps(result, indent=2)
+    except (KeyError, ValueError) as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+def withdraw_proposal(proposal_id: str, proposer: str = "") -> str:
+    """Withdraw a pending proposal (typically by the original proposer).
+
+    Args:
+        proposal_id: The proposal to withdraw
+        proposer: Who is withdrawing this proposal
+    """
+    try:
+        result = api.withdraw_proposal(
+            proposal_id, proposer=proposer, db_path=_get_db(),
+        )
+        return json.dumps(result, indent=2)
+    except (KeyError, ValueError) as e:
+        return json.dumps({"error": str(e)})
+
+
+# --- Tier 4: Data management ---
 
 
 @mcp.tool()
