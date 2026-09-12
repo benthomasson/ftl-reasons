@@ -1702,6 +1702,13 @@ def cmd_accept(args):
           f"({len(skipped)} skipped).", file=sys.stderr)
 
 
+def _parse_tags(args):
+    raw = getattr(args, "tags", None)
+    if not raw:
+        return None
+    return [t.strip() for t in raw.split(",") if t.strip()]
+
+
 def cmd_propose_retract(args):
     try:
         result = api.propose_retraction(
@@ -1711,6 +1718,7 @@ def cmd_propose_retract(args):
             basis=getattr(args, "basis", "prior-knowledge") or "prior-knowledge",
             evidence=getattr(args, "evidence", "") or "",
             proposer=getattr(args, "proposer", "") or "",
+            tags=_parse_tags(args),
             **_backend_kwargs(args),
         )
     except (KeyError, ValueError) as e:
@@ -1738,6 +1746,7 @@ def cmd_propose_supersede(args):
             basis=getattr(args, "basis", "prior-knowledge") or "prior-knowledge",
             evidence=getattr(args, "evidence", "") or "",
             proposer=getattr(args, "proposer", "") or "",
+            tags=_parse_tags(args),
             **_backend_kwargs(args),
         )
     except (KeyError, ValueError) as e:
@@ -1768,6 +1777,7 @@ def cmd_propose_add(args):
             basis=getattr(args, "basis", "prior-knowledge") or "prior-knowledge",
             evidence=getattr(args, "evidence", "") or "",
             proposer=getattr(args, "proposer", "") or "",
+            tags=_parse_tags(args),
             **_backend_kwargs(args),
         )
     except (KeyError, ValueError) as e:
@@ -1781,12 +1791,35 @@ def cmd_propose_add(args):
         print(f"  Staled: {', '.join(result['staled'])}")
 
 
+def cmd_propose_nogood(args):
+    try:
+        result = api.propose_nogood(
+            args.node_ids,
+            reason=getattr(args, "reason", "") or "",
+            basis=getattr(args, "basis", "prior-knowledge") or "prior-knowledge",
+            evidence=getattr(args, "evidence", "") or "",
+            proposer=getattr(args, "proposer", "") or "",
+            tags=_parse_tags(args),
+            **_backend_kwargs(args),
+        )
+    except (KeyError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Created proposal: {result['proposal_id']}")
+    print(f"  Nodes: {', '.join(result['node_ids'])}")
+    print(f"  Action: nogood")
+    if result.get("staled"):
+        print(f"  Staled: {', '.join(result['staled'])}")
+
+
 def cmd_proposals(args):
     try:
         result = api.list_proposals(
             status=getattr(args, "status", "pending") or "pending",
             target_id=getattr(args, "target", None),
             proposer=getattr(args, "proposer", None),
+            tag=getattr(args, "tag", None),
             **_backend_kwargs(args),
         )
     except Exception as e:
@@ -3169,6 +3202,7 @@ def main():
     p.add_argument("--failure-mode", help="Failure mode category")
     p.add_argument("--evidence", help="Supporting evidence")
     p.add_argument("--proposer", help="Who is proposing (e.g. worker-bee)")
+    p.add_argument("--tags", help="Comma-separated tags for access control")
 
     # propose-supersede
     p = sub.add_parser("propose-supersede", help="Propose superseding a hive belief (no truth change)")
@@ -3182,6 +3216,7 @@ def main():
     p.add_argument("--failure-mode", help="Failure mode category")
     p.add_argument("--evidence", help="Supporting evidence")
     p.add_argument("--proposer", help="Who is proposing")
+    p.add_argument("--tags", help="Comma-separated tags for access control")
 
     # propose-add
     p = sub.add_parser("propose-add", help="Propose adding a new belief to the hive (no truth change)")
@@ -3198,6 +3233,18 @@ def main():
                    help="Basis (default: prior-knowledge)")
     p.add_argument("--evidence", help="Supporting evidence")
     p.add_argument("--proposer", help="Who is proposing")
+    p.add_argument("--tags", help="Comma-separated tags for access control")
+
+    # propose-nogood
+    p = sub.add_parser("propose-nogood", help="Propose a contradiction (nogood) between beliefs")
+    p.add_argument("node_ids", nargs="+", help="Node IDs that form the contradiction (at least 2)")
+    p.add_argument("--reason", help="Why these nodes are contradictory")
+    p.add_argument("--basis", default="prior-knowledge",
+                   choices=["source-divergence", "detected-contradiction", "prior-knowledge"],
+                   help="Basis (default: prior-knowledge)")
+    p.add_argument("--evidence", help="Supporting evidence")
+    p.add_argument("--proposer", help="Who is proposing")
+    p.add_argument("--tags", help="Comma-separated tags for access control")
 
     # proposals (list)
     p = sub.add_parser("proposals", help="List hive proposals")
@@ -3206,6 +3253,7 @@ def main():
                    help="Filter by status (default: pending)")
     p.add_argument("--target", help="Filter by target node ID")
     p.add_argument("--proposer", help="Filter by proposer")
+    p.add_argument("--tag", help="Filter by tag")
 
     # proposal (show)
     p = sub.add_parser("proposal", help="Show details of a hive proposal")
@@ -3725,6 +3773,7 @@ def main():
         "propose-retract": cmd_propose_retract,
         "propose-supersede": cmd_propose_supersede,
         "propose-add": cmd_propose_add,
+        "propose-nogood": cmd_propose_nogood,
         "proposals": cmd_proposals,
         "proposal": cmd_proposal,
         "accept-proposal": cmd_accept_proposal,

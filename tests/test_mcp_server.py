@@ -268,6 +268,51 @@ class TestTopicsTool:
         assert "topics" in result
 
 
+class TestProposeNogoodTool:
+
+    def test_propose_nogood(self, db):
+        result = json.loads(mcp_server.propose_nogood(
+            ["premise-a", "premise-b"], reason="contradictory",
+            proposer="test-bee"))
+        assert result["action"] == "nogood"
+        assert result["status"] == "pending"
+        assert sorted(result["node_ids"]) == ["premise-a", "premise-b"]
+
+    def test_propose_nogood_missing_node(self, db):
+        result = json.loads(mcp_server.propose_nogood(
+            ["premise-a", "nonexistent"]))
+        assert "error" in result
+
+    def test_propose_nogood_too_few(self, db):
+        result = json.loads(mcp_server.propose_nogood(["premise-a"]))
+        assert "error" in result
+
+    def test_accept_nogood(self, db):
+        prop = json.loads(mcp_server.propose_nogood(
+            ["premise-a", "premise-b"]))
+        result = json.loads(mcp_server.accept_proposal(
+            prop["proposal_id"]))
+        assert result["applied"] is True
+
+    def test_propose_nogood_with_tags(self, db):
+        result = json.loads(mcp_server.propose_nogood(
+            ["premise-a", "premise-b"], tags=["contradiction"]))
+        detail = json.loads(mcp_server.show_proposal(result["proposal_id"]))
+        assert detail["tags"] == ["contradiction"]
+
+
+class TestProposalTagFiltering:
+
+    def test_list_by_tag(self, db):
+        mcp_server.propose_retract("premise-a", tags=["infra"])
+        mcp_server.propose_retract("premise-b", tags=["review"])
+        infra = json.loads(mcp_server.list_proposals(tag="infra"))
+        assert infra["count"] == 1
+        assert infra["proposals"][0]["tags"] == ["infra"]
+        all_props = json.loads(mcp_server.list_proposals())
+        assert all_props["count"] == 2
+
+
 class TestProposeUpdateTool:
 
     def test_propose_update_stores_proposals(self, db):
