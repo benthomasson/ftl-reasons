@@ -301,7 +301,7 @@ def propose_update(belief_ids: list[str] | None = None, model: str = "claude",
             output["proposals"] = result["proposals"]
 
         return json.dumps(output, indent=2)
-    except Exception as e:
+    except (KeyError, ValueError, RuntimeError, OSError) as e:
         return json.dumps({"error": str(e)})
 
 
