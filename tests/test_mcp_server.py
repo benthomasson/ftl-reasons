@@ -268,6 +268,56 @@ class TestTopicsTool:
         assert "topics" in result
 
 
+class TestProposeUpdateTool:
+
+    def test_propose_update_stores_proposals(self, db):
+        mock_response = json.dumps([{
+            "id": "premise-a",
+            "action": "retract",
+            "proposed_text": None,
+            "failure_mode": "stale",
+            "basis": "prior-knowledge",
+            "evidence": "outdated",
+            "comment": "No longer valid",
+        }])
+        with patch("reasons.propose_update.invoke_model",
+                   return_value=mock_response):
+            result = json.loads(mcp_server.propose_update(
+                belief_ids=["premise-a"], proposer="test-llm"))
+        assert result["stored_count"] == 1
+        assert result["stored"][0]["action"] == "retract"
+        props = json.loads(mcp_server.list_proposals())
+        assert props["count"] == 1
+
+    def test_propose_update_no_store(self, db):
+        mock_response = json.dumps([{
+            "id": "premise-a",
+            "action": "update",
+            "proposed_text": "A revised",
+            "failure_mode": "smuggled-premise",
+            "basis": "prior-knowledge",
+            "evidence": "",
+            "comment": "Fixed",
+        }])
+        with patch("reasons.propose_update.invoke_model",
+                   return_value=mock_response):
+            result = json.loads(mcp_server.propose_update(
+                belief_ids=["premise-a"], store=False))
+        assert "proposals" in result
+        assert result["llm_proposals"] == 1
+        assert "stored_count" not in result
+        props = json.loads(mcp_server.list_proposals())
+        assert props["count"] == 0
+
+    def test_propose_update_empty_result(self, db):
+        mock_response = "[]"
+        with patch("reasons.propose_update.invoke_model",
+                   return_value=mock_response):
+            result = json.loads(mcp_server.propose_update(
+                belief_ids=["premise-a"]))
+        assert result["llm_proposals"] == 0
+
+
 class TestWhatIfSupersede:
 
     def test_what_if_supersede(self, db):

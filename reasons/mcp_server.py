@@ -256,6 +256,56 @@ def compact(budget: int = 500, include_out: bool = False) -> str:
 
 
 @mcp.tool()
+def propose_update(belief_ids: list[str] | None = None, model: str = "claude",
+                   stale_only: bool = False, namespace: str = "",
+                   sample: int = 0, proposer: str = "llm",
+                   store: bool = True) -> str:
+    """Run LLM-driven review of beliefs and create proposals for updates/retractions.
+
+    Sends beliefs to an LLM for evaluation. Each proposed change is stored
+    as a pending proposal (retract or supersede) in the proposals table.
+
+    Args:
+        belief_ids: Specific belief IDs to evaluate (default: all IN beliefs)
+        model: LLM model to use (default: "claude")
+        stale_only: Only evaluate beliefs flagged as stale
+        namespace: Filter by namespace prefix (empty for all)
+        sample: Randomly sample N beliefs (0 for all)
+        proposer: Identity for stored proposals (default: "llm")
+        store: Store proposals in the proposals table (default: true)
+    """
+    try:
+        result = api.propose_update(
+            belief_ids=belief_ids or None,
+            model=model,
+            stale_only=stale_only,
+            namespace=namespace or None,
+            sample=sample or None,
+            db_path=_get_db(),
+        )
+
+        output = {
+            "reviewed": result["reviewed"],
+            "llm_proposals": len(result["proposals"]),
+            "timestamp": result["timestamp"],
+        }
+
+        if store and result["proposals"]:
+            store_result = api.store_llm_proposals(
+                result, proposer=proposer, db_path=_get_db(),
+            )
+            output["stored"] = store_result["stored"]
+            output["skipped"] = store_result["skipped"]
+            output["stored_count"] = store_result["count"]
+        else:
+            output["proposals"] = result["proposals"]
+
+        return json.dumps(output, indent=2)
+    except (KeyError, ValueError, RuntimeError, OSError) as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
 def propose_retract(target_id: str, reason: str = "", failure_mode: str = "",
                     basis: str = "prior-knowledge", evidence: str = "",
                     proposer: str = "") -> str:
