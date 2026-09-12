@@ -586,6 +586,94 @@ def what_if_assert(node_id: str, db_path: str = DEFAULT_DB,
         }
 
 
+def what_if_supersede(old_id: str, new_text: str, new_id: str | None = None,
+                      db_path: str = DEFAULT_DB,
+                      pg_conninfo=None, project_id=None) -> dict:
+    """Simulate superseding old_id with new_text without mutating the database.
+
+    Adds a new node in memory, supersedes old_id, and returns the cascade
+    effects. The database is not modified.
+
+    Returns: {"old_id": str, "new_id": str, "retracted": list[dict],
+              "restored": list[dict], "total_affected": int}
+    """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "what_if_supersede",
+                            old_id=old_id, new_text=new_text, new_id=new_id)
+
+    with _with_network(db_path, write=False) as net:
+        if old_id not in net.nodes:
+            raise KeyError(f"Node '{old_id}' not found")
+
+        old_node = net.nodes[old_id]
+        if old_node.truth_value == "OUT":
+            return {
+                "old_id": old_id,
+                "new_id": new_id,
+                "already_out": True,
+                "retracted": [],
+                "restored": [],
+                "total_affected": 0,
+            }
+
+        net = copy.deepcopy(net)
+
+        if not new_id:
+            base = f"{old_id}-v2"
+            new_id = base
+            suffix = 3
+            while new_id in net.nodes:
+                new_id = f"{old_id}-v{suffix}"
+                suffix += 1
+
+        before = {nid: n.truth_value for nid, n in net.nodes.items()}
+
+        old_node = net.nodes[old_id]
+        old_tags = old_node.metadata.get("access_tags")
+        metadata = {"access_tags": old_tags} if old_tags else {}
+        net.add_node(
+            id=new_id,
+            text=new_text,
+            source=old_node.source,
+            source_url=old_node.source_url,
+            metadata=metadata,
+        )
+        net.supersede(old_id, new_id)
+
+        retracted = []
+        restored = []
+        for nid in before:
+            n = net.nodes[nid]
+            if before[nid] == "IN" and n.truth_value == "OUT":
+                info = {
+                    "id": nid,
+                    "text": n.text,
+                    "depth": _cascade_depth(net, nid, old_id),
+                    "dependents": len(n.dependents),
+                }
+                retracted.append(info)
+            elif before[nid] == "OUT" and n.truth_value == "IN":
+                info = {
+                    "id": nid,
+                    "text": n.text,
+                    "depth": _cascade_depth(net, nid, old_id),
+                    "dependents": len(n.dependents),
+                }
+                restored.append(info)
+
+        retracted.sort(key=lambda c: (c["depth"], c["id"]))
+        restored.sort(key=lambda c: (c["depth"], c["id"]))
+
+        return {
+            "old_id": old_id,
+            "new_id": new_id,
+            "already_out": False,
+            "retracted": retracted,
+            "restored": restored,
+            "total_affected": len(retracted) + len(restored),
+        }
+
+
 def _cascade_depth(net, target_id: str, retracted_id: str) -> int:
     """Find the shortest justification path from retracted node to target."""
     from collections import deque
@@ -4654,3 +4742,653 @@ def apply_dedup_plan(
                 net.retract(old_id)
                 retracted.append(old_id)
         return {"applied": len(plan), "retracted": retracted, "errors": errors}
+
+
+# ---------------------------------------------------------------------------
+# Proposals — propose changes to the hive without mutating truth values
+# ---------------------------------------------------------------------------
+
+def _proposals_db(db_path: str):
+    """Open a connection to the proposals table in the given database."""
+    conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS proposals (
+            id              TEXT PRIMARY KEY,
+            action          TEXT NOT NULL CHECK (action IN ('retract','supersede','add')),
+            target_id       TEXT NOT NULL,
+            new_id          TEXT DEFAULT '',
+            proposed_text   TEXT DEFAULT '',
+            reason          TEXT DEFAULT '',
+            failure_mode    TEXT DEFAULT '',
+            basis           TEXT DEFAULT 'prior-knowledge',
+            evidence        TEXT DEFAULT '',
+            proposer        TEXT DEFAULT '',
+            status          TEXT NOT NULL DEFAULT 'pending'
+                            CHECK (status IN ('pending','accepted','rejected','withdrawn','stale')),
+            snapshot_json   TEXT DEFAULT '{}',
+            impact_json     TEXT DEFAULT '{}',
+            created_at      TEXT NOT NULL,
+            updated_at      TEXT NOT NULL,
+            resolved_at     TEXT DEFAULT '',
+            resolved_by     TEXT DEFAULT '',
+            result_json     TEXT DEFAULT ''
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_proposals_target "
+        "ON proposals (target_id, status)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_proposals_status "
+        "ON proposals (status)"
+    )
+    conn.commit()
+    return conn
+
+
+def _next_proposal_id(conn, target_id: str, action: str) -> str:
+    """Generate the next proposal ID for a given target and action."""
+    cursor = conn.execute(
+        "SELECT id FROM proposals WHERE target_id = ? AND action = ? "
+        "ORDER BY created_at DESC LIMIT 1",
+        (target_id, action),
+    )
+    row = cursor.fetchone()
+    if row:
+        last_id = row[0]
+        parts = last_id.rsplit("-", 1)
+        if parts[-1].isdigit():
+            return f"{parts[0]}-{int(parts[-1]) + 1}"
+    return f"prop-{target_id}-{action}-1"
+
+
+def _stale_older_pending(conn, target_id: str, action: str, now: str) -> list[str]:
+    """Mark older pending proposals for the same (target, action) as stale."""
+    cursor = conn.execute(
+        "SELECT id FROM proposals WHERE target_id = ? AND action = ? "
+        "AND status = 'pending'",
+        (target_id, action),
+    )
+    staled = []
+    for (pid,) in cursor.fetchall():
+        conn.execute(
+            "UPDATE proposals SET status = 'stale', updated_at = ?, "
+            "resolved_at = ? WHERE id = ?",
+            (now, now, pid),
+        )
+        staled.append(pid)
+    return staled
+
+
+def propose_retraction(
+    target_id: str,
+    reason: str = "",
+    failure_mode: str = "",
+    basis: str = "prior-knowledge",
+    evidence: str = "",
+    proposer: str = "",
+    db_path: str = DEFAULT_DB,
+    pg_conninfo=None,
+    project_id=None,
+) -> dict:
+    """Create a pending proposal to retract target_id.
+
+    Does not change any truth value. Returns proposal details including
+    computed impact. Auto-stales any older pending proposal for the same target.
+    """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "propose_retraction",
+                            target_id=target_id, reason=reason,
+                            failure_mode=failure_mode, basis=basis,
+                            evidence=evidence, proposer=proposer)
+
+    with _with_network(db_path, write=False) as net:
+        if target_id not in net.nodes:
+            raise KeyError(f"Node '{target_id}' not found")
+        node = net.nodes[target_id]
+        if node.truth_value == "OUT":
+            raise ValueError(f"Node '{target_id}' is already OUT")
+
+        snapshot = {
+            "truth_value": node.truth_value,
+            "text_hash": node.text_hash,
+        }
+
+    impact = what_if_retract(target_id, db_path=db_path)
+
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    conn = _proposals_db(db_path)
+    try:
+        staled = _stale_older_pending(conn, target_id, "retract", now)
+        proposal_id = _next_proposal_id(conn, target_id, "retract")
+        conn.execute(
+            "INSERT INTO proposals "
+            "(id, action, target_id, reason, failure_mode, basis, evidence, "
+            "proposer, status, snapshot_json, impact_json, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)",
+            (
+                proposal_id, "retract", target_id, reason, failure_mode,
+                basis, evidence, proposer,
+                json.dumps(snapshot), json.dumps(impact),
+                now, now,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    return {
+        "proposal_id": proposal_id,
+        "target_id": target_id,
+        "action": "retract",
+        "status": "pending",
+        "impact": impact,
+        "staled": staled,
+    }
+
+
+def propose_supersession(
+    old_id: str,
+    new_text: str,
+    new_id: str | None = None,
+    reason: str = "",
+    failure_mode: str = "",
+    basis: str = "prior-knowledge",
+    evidence: str = "",
+    proposer: str = "",
+    db_path: str = DEFAULT_DB,
+    pg_conninfo=None,
+    project_id=None,
+) -> dict:
+    """Create a pending proposal to supersede old_id with new_text.
+
+    Does not change any truth value. Auto-generates new_id as
+    {old_id}-vN if not specified. Auto-stales any older pending proposal
+    for the same target.
+    """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "propose_supersession",
+                            old_id=old_id, new_text=new_text, new_id=new_id,
+                            reason=reason, failure_mode=failure_mode,
+                            basis=basis, evidence=evidence, proposer=proposer)
+
+    with _with_network(db_path, write=False) as net:
+        if old_id not in net.nodes:
+            raise KeyError(f"Node '{old_id}' not found")
+        node = net.nodes[old_id]
+        if node.truth_value == "OUT":
+            raise ValueError(f"Node '{old_id}' is already OUT")
+
+        if not new_id:
+            base = f"{old_id}-v2"
+            new_id = base
+            suffix = 3
+            while new_id in net.nodes:
+                new_id = f"{old_id}-v{suffix}"
+                suffix += 1
+
+        if new_id in net.nodes:
+            raise ValueError(f"Node '{new_id}' already exists")
+
+        snapshot = {
+            "truth_value": node.truth_value,
+            "text_hash": node.text_hash,
+        }
+
+    impact = what_if_supersede(old_id, new_text, new_id=new_id, db_path=db_path)
+
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    conn = _proposals_db(db_path)
+    try:
+        staled = _stale_older_pending(conn, old_id, "supersede", now)
+        proposal_id = _next_proposal_id(conn, old_id, "supersede")
+        conn.execute(
+            "INSERT INTO proposals "
+            "(id, action, target_id, new_id, proposed_text, reason, "
+            "failure_mode, basis, evidence, proposer, status, "
+            "snapshot_json, impact_json, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)",
+            (
+                proposal_id, "supersede", old_id, new_id, new_text,
+                reason, failure_mode, basis, evidence, proposer,
+                json.dumps(snapshot), json.dumps(impact),
+                now, now,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    return {
+        "proposal_id": proposal_id,
+        "target_id": old_id,
+        "new_id": new_id,
+        "action": "supersede",
+        "status": "pending",
+        "impact": impact,
+        "staled": staled,
+    }
+
+
+def propose_addition(
+    node_id: str,
+    text: str,
+    sl: str = "",
+    unless: str = "",
+    label: str = "",
+    source: str = "",
+    source_url: str = "",
+    reason: str = "",
+    failure_mode: str = "",
+    basis: str = "prior-knowledge",
+    evidence: str = "",
+    proposer: str = "",
+    db_path: str = DEFAULT_DB,
+    pg_conninfo=None,
+    project_id=None,
+) -> dict:
+    """Create a pending proposal to add a new node to the hive.
+
+    Does not change the network. The proposed node, its text, and
+    justification structure are stored in the proposal for later accept.
+    """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "propose_addition",
+                            node_id=node_id, text=text, sl=sl, unless=unless,
+                            label=label, source=source, source_url=source_url,
+                            reason=reason, failure_mode=failure_mode,
+                            basis=basis, evidence=evidence, proposer=proposer)
+
+    with _with_network(db_path, write=False) as net:
+        if node_id in net.nodes:
+            raise ValueError(f"Node '{node_id}' already exists")
+
+    proposed = {
+        "text": text,
+        "sl": sl,
+        "unless": unless,
+        "label": label,
+        "source": source,
+        "source_url": source_url,
+    }
+
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    conn = _proposals_db(db_path)
+    try:
+        staled = _stale_older_pending(conn, node_id, "add", now)
+        proposal_id = _next_proposal_id(conn, node_id, "add")
+        conn.execute(
+            "INSERT INTO proposals "
+            "(id, action, target_id, new_id, proposed_text, reason, "
+            "failure_mode, basis, evidence, proposer, status, "
+            "snapshot_json, impact_json, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)",
+            (
+                proposal_id, "add", node_id, node_id, text,
+                reason, failure_mode, basis, evidence, proposer,
+                "{}", json.dumps(proposed),
+                now, now,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    return {
+        "proposal_id": proposal_id,
+        "node_id": node_id,
+        "action": "add",
+        "status": "pending",
+        "staled": staled,
+    }
+
+
+def list_proposals(
+    status: str = "pending",
+    target_id: str | None = None,
+    proposer: str | None = None,
+    db_path: str = DEFAULT_DB,
+    pg_conninfo=None,
+    project_id=None,
+) -> dict:
+    """List proposals, optionally filtered by status, target, or proposer."""
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "list_proposals",
+                            status=status, target_id=target_id,
+                            proposer=proposer)
+
+    conn = _proposals_db(db_path)
+    try:
+        query = "SELECT id, action, target_id, new_id, status, proposer, " \
+                "basis, created_at, impact_json FROM proposals WHERE 1=1"
+        params: list = []
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        if target_id:
+            query += " AND target_id = ?"
+            params.append(target_id)
+        if proposer:
+            query += " AND proposer = ?"
+            params.append(proposer)
+        query += " ORDER BY created_at DESC"
+
+        rows = conn.execute(query, params).fetchall()
+        proposals = []
+        for row in rows:
+            impact = json.loads(row[8]) if row[8] else {}
+            proposals.append({
+                "id": row[0],
+                "action": row[1],
+                "target_id": row[2],
+                "new_id": row[3],
+                "status": row[4],
+                "proposer": row[5],
+                "basis": row[6],
+                "created_at": row[7],
+                "impact": {"total_affected": impact.get("total_affected", 0)},
+            })
+        return {"count": len(proposals), "proposals": proposals}
+    finally:
+        conn.close()
+
+
+def show_proposal(
+    proposal_id: str,
+    db_path: str = DEFAULT_DB,
+    pg_conninfo=None,
+    project_id=None,
+) -> dict:
+    """Show full details of a proposal including snapshot, impact, and history."""
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "show_proposal",
+                            proposal_id=proposal_id)
+
+    conn = _proposals_db(db_path)
+    try:
+        row = conn.execute(
+            "SELECT id, action, target_id, new_id, proposed_text, reason, "
+            "failure_mode, basis, evidence, proposer, status, snapshot_json, "
+            "impact_json, created_at, updated_at, resolved_at, resolved_by, "
+            "result_json FROM proposals WHERE id = ?",
+            (proposal_id,),
+        ).fetchone()
+        if not row:
+            raise KeyError(f"Proposal '{proposal_id}' not found")
+        return {
+            "id": row[0],
+            "action": row[1],
+            "target_id": row[2],
+            "new_id": row[3],
+            "proposed_text": row[4],
+            "reason": row[5],
+            "failure_mode": row[6],
+            "basis": row[7],
+            "evidence": row[8],
+            "proposer": row[9],
+            "status": row[10],
+            "snapshot": json.loads(row[11]) if row[11] else {},
+            "impact": json.loads(row[12]) if row[12] else {},
+            "created_at": row[13],
+            "updated_at": row[14],
+            "resolved_at": row[15],
+            "resolved_by": row[16],
+            "result": json.loads(row[17]) if row[17] else {},
+        }
+    finally:
+        conn.close()
+
+
+def accept_proposal(
+    proposal_id: str,
+    voter: str = "",
+    db_path: str = DEFAULT_DB,
+    pg_conninfo=None,
+    project_id=None,
+) -> dict:
+    """Apply a pending proposal atomically after re-validation.
+
+    Re-validates against the live network to detect drift. On success,
+    applies the change in a single write transaction and marks the
+    proposal accepted. On drift, marks it stale without applying.
+    """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "accept_proposal",
+                            proposal_id=proposal_id, voter=voter)
+
+    conn = _proposals_db(db_path)
+    try:
+        row = conn.execute(
+            "SELECT id, action, target_id, new_id, proposed_text, reason, "
+            "snapshot_json, impact_json FROM proposals "
+            "WHERE id = ? AND status = 'pending'",
+            (proposal_id,),
+        ).fetchone()
+        if not row:
+            existing = conn.execute(
+                "SELECT status FROM proposals WHERE id = ?",
+                (proposal_id,),
+            ).fetchone()
+            if existing:
+                raise ValueError(
+                    f"Proposal '{proposal_id}' is '{existing[0]}', not pending"
+                )
+            raise KeyError(f"Proposal '{proposal_id}' not found")
+
+        _, action, target_id, new_id, proposed_text, reason, \
+            snapshot_json, impact_json = row
+        snapshot = json.loads(snapshot_json) if snapshot_json else {}
+    finally:
+        conn.close()
+
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+    def _mark_stale(reason_text: str):
+        c = _proposals_db(db_path)
+        try:
+            c.execute(
+                "UPDATE proposals SET status = 'stale', updated_at = ?, "
+                "resolved_at = ?, resolved_by = ?, "
+                "result_json = ? WHERE id = ? AND status = 'pending'",
+                (now, now, voter, json.dumps({"reason": reason_text}),
+                 proposal_id),
+            )
+            c.commit()
+        finally:
+            c.close()
+        return {
+            "proposal_id": proposal_id,
+            "applied": False,
+            "status": "stale",
+            "reason": reason_text,
+        }
+
+    if action == "add":
+        with _with_network(db_path, write=False) as net:
+            if target_id in net.nodes:
+                return _mark_stale(
+                    f"Node '{target_id}' now exists (created since proposal)"
+                )
+
+        impact = json.loads(impact_json) if impact_json else {}
+        sl = impact.get("sl", "")
+        unless = impact.get("unless", "")
+        label_val = impact.get("label", "")
+        source = impact.get("source", "")
+        source_url = impact.get("source_url", "")
+
+        add_result = add_node(
+            target_id, proposed_text,
+            sl=sl, unless=unless, label=label_val,
+            source=source, source_url=source_url,
+            db_path=db_path,
+        )
+
+        result_data = {"add_result": add_result}
+
+    elif action == "retract":
+        with _with_network(db_path, write=False) as net:
+            if target_id not in net.nodes:
+                return _mark_stale(f"Node '{target_id}' no longer exists")
+            node = net.nodes[target_id]
+            if node.truth_value == "OUT":
+                return _mark_stale(f"Node '{target_id}' is already OUT")
+            if snapshot.get("truth_value") and \
+               node.truth_value != snapshot["truth_value"]:
+                return _mark_stale(
+                    f"Truth value drifted: was {snapshot['truth_value']}, "
+                    f"now {node.truth_value}"
+                )
+            if snapshot.get("text_hash") and node.text_hash and \
+               node.text_hash != snapshot["text_hash"]:
+                return _mark_stale("Node text changed since proposal")
+
+        retract_result = retract_node(target_id, reason=reason,
+                                       db_path=db_path)
+        result_data = {"retract_result": retract_result}
+
+    elif action == "supersede":
+        with _with_network(db_path, write=False) as net:
+            if target_id not in net.nodes:
+                return _mark_stale(f"Node '{target_id}' no longer exists")
+            node = net.nodes[target_id]
+            if node.truth_value == "OUT":
+                return _mark_stale(f"Node '{target_id}' is already OUT")
+            if snapshot.get("truth_value") and \
+               node.truth_value != snapshot["truth_value"]:
+                return _mark_stale(
+                    f"Truth value drifted: was {snapshot['truth_value']}, "
+                    f"now {node.truth_value}"
+                )
+            if snapshot.get("text_hash") and node.text_hash and \
+               node.text_hash != snapshot["text_hash"]:
+                return _mark_stale("Node text changed since proposal")
+            if new_id and new_id in net.nodes:
+                return _mark_stale(
+                    f"Node '{new_id}' now exists (ID collision)"
+                )
+
+        supersede_result = supersede_with_text(
+            target_id, proposed_text, new_id=new_id or None,
+            db_path=db_path,
+        )
+        result_data = {"supersede_result": supersede_result}
+
+    else:
+        raise ValueError(f"Unknown action '{action}'")
+
+    conn = _proposals_db(db_path)
+    try:
+        affected = conn.execute(
+            "UPDATE proposals SET status = 'accepted', updated_at = ?, "
+            "resolved_at = ?, resolved_by = ?, "
+            "result_json = ? WHERE id = ? AND status = 'pending'",
+            (now, now, voter, json.dumps(result_data), proposal_id),
+        ).rowcount
+        conn.commit()
+        if affected == 0:
+            return {
+                "proposal_id": proposal_id,
+                "applied": False,
+                "status": "stale",
+                "reason": "Concurrent accept race: proposal no longer pending",
+            }
+    finally:
+        conn.close()
+
+    return {
+        "proposal_id": proposal_id,
+        "applied": True,
+        "status": "accepted",
+        "action": action,
+        "result": result_data,
+    }
+
+
+def reject_proposal(
+    proposal_id: str,
+    voter: str = "",
+    reason: str = "",
+    db_path: str = DEFAULT_DB,
+    pg_conninfo=None,
+    project_id=None,
+) -> dict:
+    """Mark a pending proposal as rejected. No truth change."""
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "reject_proposal",
+                            proposal_id=proposal_id, voter=voter,
+                            reason=reason)
+
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    conn = _proposals_db(db_path)
+    try:
+        affected = conn.execute(
+            "UPDATE proposals SET status = 'rejected', updated_at = ?, "
+            "resolved_at = ?, resolved_by = ?, "
+            "result_json = ? WHERE id = ? AND status = 'pending'",
+            (now, now, voter, json.dumps({"reason": reason}), proposal_id),
+        ).rowcount
+        conn.commit()
+        if affected == 0:
+            existing = conn.execute(
+                "SELECT status FROM proposals WHERE id = ?",
+                (proposal_id,),
+            ).fetchone()
+            if not existing:
+                raise KeyError(f"Proposal '{proposal_id}' not found")
+            raise ValueError(
+                f"Proposal '{proposal_id}' is '{existing[0]}', not pending"
+            )
+    finally:
+        conn.close()
+
+    return {
+        "proposal_id": proposal_id,
+        "status": "rejected",
+        "voter": voter,
+        "reason": reason,
+    }
+
+
+def withdraw_proposal(
+    proposal_id: str,
+    proposer: str = "",
+    db_path: str = DEFAULT_DB,
+    pg_conninfo=None,
+    project_id=None,
+) -> dict:
+    """Withdraw a pending proposal. No truth change."""
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "withdraw_proposal",
+                            proposal_id=proposal_id, proposer=proposer)
+
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    conn = _proposals_db(db_path)
+    try:
+        affected = conn.execute(
+            "UPDATE proposals SET status = 'withdrawn', updated_at = ?, "
+            "resolved_at = ?, resolved_by = ? "
+            "WHERE id = ? AND status = 'pending'",
+            (now, now, proposer, proposal_id),
+        ).rowcount
+        conn.commit()
+        if affected == 0:
+            existing = conn.execute(
+                "SELECT status FROM proposals WHERE id = ?",
+                (proposal_id,),
+            ).fetchone()
+            if not existing:
+                raise KeyError(f"Proposal '{proposal_id}' not found")
+            raise ValueError(
+                f"Proposal '{proposal_id}' is '{existing[0]}', not pending"
+            )
+    finally:
+        conn.close()
+
+    return {
+        "proposal_id": proposal_id,
+        "status": "withdrawn",
+        "proposer": proposer,
+    }

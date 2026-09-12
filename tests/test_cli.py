@@ -1349,3 +1349,128 @@ Also from nothing
         assert "No valid proposals" in out
 
 
+class TestProposalLifecycle:
+
+    @pytest.fixture
+    def db_path(self, tmp_path):
+        db = str(tmp_path / "test.db")
+        run_cli("init", db_path=db)
+        run_cli("add", "a", "Premise A", db_path=db)
+        run_cli("add", "b", "Premise B", db_path=db)
+        run_cli("add", "derived-ab", "AB combined", "--sl", "a,b", db_path=db)
+        return db
+
+    def test_propose_retract(self, db_path):
+        out, err, code = run_cli("propose-retract", "a",
+                                  "--reason", "Stale", "--proposer", "bee",
+                                  db_path=db_path)
+        assert code == 0
+        assert "Created proposal" in out
+        assert "prop-a-retract-1" in out
+
+    def test_propose_supersede(self, db_path):
+        out, err, code = run_cli("propose-supersede", "a",
+                                  "--text", "Updated A",
+                                  "--proposer", "bee",
+                                  db_path=db_path)
+        assert code == 0
+        assert "Created proposal" in out
+        assert "supersede" in out
+
+    def test_propose_add(self, db_path):
+        out, err, code = run_cli("propose-add", "new-belief",
+                                  "--text", "A new belief",
+                                  "--sl", "a,b",
+                                  "--proposer", "bee",
+                                  db_path=db_path)
+        assert code == 0
+        assert "Created proposal" in out
+        assert "add" in out
+
+    def test_proposals_list(self, db_path):
+        run_cli("propose-retract", "a", "--reason", "Stale", db_path=db_path)
+        run_cli("propose-retract", "b", "--reason", "Also stale", db_path=db_path)
+        out, err, code = run_cli("proposals", db_path=db_path)
+        assert code == 0
+        assert "2 proposal(s)" in out
+
+    def test_proposal_show(self, db_path):
+        run_cli("propose-retract", "a", "--reason", "Stale",
+                "--proposer", "bee", db_path=db_path)
+        out, err, code = run_cli("proposal", "prop-a-retract-1",
+                                  db_path=db_path)
+        assert code == 0
+        assert "prop-a-retract-1" in out
+        assert "retract" in out
+        assert "Stale" in out
+        assert "bee" in out
+
+    def test_accept_proposal_retract(self, db_path):
+        run_cli("propose-retract", "a", "--reason", "Wrong",
+                db_path=db_path)
+        out, err, code = run_cli("accept-proposal", "prop-a-retract-1",
+                                  "--voter", "reviewer", db_path=db_path)
+        assert code == 0
+        assert "Accepted" in out
+        # Verify truth value changed
+        out2, _, _ = run_cli("show", "a", db_path=db_path)
+        assert "OUT" in out2
+
+    def test_accept_proposal_add(self, db_path):
+        run_cli("propose-add", "new-c", "--text", "New C",
+                db_path=db_path)
+        out, err, code = run_cli("accept-proposal", "prop-new-c-add-1",
+                                  db_path=db_path)
+        assert code == 0
+        assert "Accepted" in out
+        out2, _, _ = run_cli("show", "new-c", db_path=db_path)
+        assert "New C" in out2
+
+    def test_reject_proposal(self, db_path):
+        run_cli("propose-retract", "a", db_path=db_path)
+        out, err, code = run_cli("reject-proposal", "prop-a-retract-1",
+                                  "--reason", "Not convinced",
+                                  db_path=db_path)
+        assert code == 0
+        assert "Rejected" in out
+        # Verify truth value NOT changed
+        out2, _, _ = run_cli("show", "a", db_path=db_path)
+        assert "IN" in out2
+
+    def test_withdraw_proposal(self, db_path):
+        run_cli("propose-retract", "a", "--proposer", "bee",
+                db_path=db_path)
+        out, err, code = run_cli("withdraw-proposal", "prop-a-retract-1",
+                                  "--proposer", "bee", db_path=db_path)
+        assert code == 0
+        assert "Withdrawn" in out
+
+    def test_propose_retract_missing_node(self, db_path):
+        out, err, code = run_cli("propose-retract", "nonexistent",
+                                  db_path=db_path)
+        assert code == 1
+        assert "not found" in err.lower()
+
+    def test_accept_stale_drift(self, db_path):
+        run_cli("propose-retract", "a", db_path=db_path)
+        run_cli("retract", "a", db_path=db_path)
+        out, err, code = run_cli("accept-proposal", "prop-a-retract-1",
+                                  db_path=db_path)
+        assert code == 0
+        assert "STALE" in out
+
+    def test_end_to_end_supersede(self, db_path):
+        run_cli("propose-supersede", "a", "--text", "Better A",
+                "--new-id", "a-v2", "--proposer", "bee", db_path=db_path)
+        out, _, _ = run_cli("proposals", db_path=db_path)
+        assert "prop-a-supersede-1" in out
+        out, _, code = run_cli("accept-proposal", "prop-a-supersede-1",
+                                db_path=db_path)
+        assert code == 0
+        assert "Accepted" in out
+        out_old, _, _ = run_cli("show", "a", db_path=db_path)
+        assert "OUT" in out_old
+        out_new, _, _ = run_cli("show", "a-v2", db_path=db_path)
+        assert "Better A" in out_new
+
+

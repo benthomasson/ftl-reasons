@@ -420,6 +420,19 @@ def cmd_what_if(args):
             if result.get("already_out"):
                 print(f"{args.node_id} is already OUT — nothing to simulate.")
                 return
+        elif action == "supersede":
+            text = getattr(args, "text", None)
+            if not text:
+                print("Error: --text is required for what-if supersede",
+                      file=sys.stderr)
+                sys.exit(1)
+            custom_new_id = getattr(args, "new_id", None)
+            result = api.what_if_supersede(
+                args.node_id, text, new_id=custom_new_id,
+                **_backend_kwargs(args))
+            if result.get("already_out"):
+                print(f"{args.node_id} is already OUT — nothing to simulate.")
+                return
         else:
             result = api.what_if_assert(args.node_id, **_backend_kwargs(args))
             if result.get("already_in"):
@@ -429,7 +442,15 @@ def cmd_what_if(args):
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
-    _print_what_if_results(result, action, args.node_id)
+    if action == "supersede":
+        print(f"What if '{args.node_id}' were superseded by '{result['new_id']}'?\n")
+        if result["retracted"] or result["restored"]:
+            _print_what_if_results(result, action, args.node_id)
+        else:
+            print(f"Superseding {args.node_id} would affect no other nodes.")
+            print(f"\nTotal: {args.node_id} → {result['new_id']} (database NOT modified)")
+    else:
+        _print_what_if_results(result, action, args.node_id)
 
 
 def cmd_status(args):
@@ -1681,6 +1702,215 @@ def cmd_accept(args):
           f"({len(skipped)} skipped).", file=sys.stderr)
 
 
+def cmd_propose_retract(args):
+    try:
+        result = api.propose_retraction(
+            args.target_id,
+            reason=args.reason or "",
+            failure_mode=getattr(args, "failure_mode", "") or "",
+            basis=getattr(args, "basis", "prior-knowledge") or "prior-knowledge",
+            evidence=getattr(args, "evidence", "") or "",
+            proposer=getattr(args, "proposer", "") or "",
+            **_backend_kwargs(args),
+        )
+    except (KeyError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Created proposal: {result['proposal_id']}")
+    impact = result.get("impact", {})
+    affected = impact.get("total_affected", 0)
+    print(f"  Target: {result['target_id']}")
+    print(f"  Action: retract")
+    print(f"  Impact: {affected} node(s) affected")
+    if result.get("staled"):
+        print(f"  Staled: {', '.join(result['staled'])}")
+
+
+def cmd_propose_supersede(args):
+    try:
+        result = api.propose_supersession(
+            args.old_id,
+            args.text,
+            new_id=getattr(args, "new_id", None),
+            reason=args.reason or "",
+            failure_mode=getattr(args, "failure_mode", "") or "",
+            basis=getattr(args, "basis", "prior-knowledge") or "prior-knowledge",
+            evidence=getattr(args, "evidence", "") or "",
+            proposer=getattr(args, "proposer", "") or "",
+            **_backend_kwargs(args),
+        )
+    except (KeyError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Created proposal: {result['proposal_id']}")
+    impact = result.get("impact", {})
+    affected = impact.get("total_affected", 0)
+    print(f"  Target: {result['target_id']} → {result['new_id']}")
+    print(f"  Action: supersede")
+    print(f"  Impact: {affected} node(s) affected")
+    if result.get("staled"):
+        print(f"  Staled: {', '.join(result['staled'])}")
+
+
+def cmd_propose_add(args):
+    try:
+        result = api.propose_addition(
+            args.node_id,
+            args.text,
+            sl=getattr(args, "sl", "") or "",
+            unless=getattr(args, "unless", "") or "",
+            label=getattr(args, "label", "") or "",
+            source=getattr(args, "source", "") or "",
+            source_url=getattr(args, "source_url", "") or "",
+            reason=getattr(args, "reason", "") or "",
+            basis=getattr(args, "basis", "prior-knowledge") or "prior-knowledge",
+            evidence=getattr(args, "evidence", "") or "",
+            proposer=getattr(args, "proposer", "") or "",
+            **_backend_kwargs(args),
+        )
+    except (KeyError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Created proposal: {result['proposal_id']}")
+    print(f"  Node: {result['node_id']}")
+    print(f"  Action: add")
+    if result.get("staled"):
+        print(f"  Staled: {', '.join(result['staled'])}")
+
+
+def cmd_proposals(args):
+    try:
+        result = api.list_proposals(
+            status=getattr(args, "status", "pending") or "pending",
+            target_id=getattr(args, "target", None),
+            proposer=getattr(args, "proposer", None),
+            **_backend_kwargs(args),
+        )
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    if not result["proposals"]:
+        print("No proposals found.")
+        return
+
+    for p in result["proposals"]:
+        impact = p.get("impact", {}).get("total_affected", 0)
+        parts = [f"[{p['status'].upper()}]", p["id"], f"({p['action']})", p["target_id"]]
+        if p.get("new_id") and p["action"] == "supersede":
+            parts.append(f"→ {p['new_id']}")
+        if p.get("proposer"):
+            parts.append(f"by {p['proposer']}")
+        if impact:
+            parts.append(f"({impact} affected)")
+        print("  " + " ".join(parts))
+
+    print(f"\n{result['count']} proposal(s)")
+
+
+def cmd_proposal(args):
+    try:
+        p = api.show_proposal(args.proposal_id, **_backend_kwargs(args))
+    except KeyError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Proposal: {p['id']}")
+    print(f"  Status:   {p['status'].upper()}")
+    print(f"  Action:   {p['action']}")
+    print(f"  Target:   {p['target_id']}")
+    if p.get("new_id"):
+        print(f"  New ID:   {p['new_id']}")
+    if p.get("proposed_text"):
+        text = p["proposed_text"][:120]
+        print(f"  Text:     {text}")
+    if p.get("reason"):
+        print(f"  Reason:   {p['reason']}")
+    if p.get("basis"):
+        print(f"  Basis:    {p['basis']}")
+    if p.get("evidence"):
+        print(f"  Evidence: {p['evidence']}")
+    if p.get("proposer"):
+        print(f"  Proposer: {p['proposer']}")
+    print(f"  Created:  {p['created_at']}")
+    if p.get("resolved_at"):
+        print(f"  Resolved: {p['resolved_at']} by {p.get('resolved_by', '?')}")
+
+    impact = p.get("impact", {})
+    if isinstance(impact, dict) and impact.get("total_affected"):
+        print(f"  Impact:   {impact['total_affected']} node(s) affected")
+    elif isinstance(impact, dict) and impact.get("retracted"):
+        retracted = impact["retracted"]
+        print(f"  Impact:   {len(retracted)} would go OUT")
+        for item in retracted[:5]:
+            print(f"    [-] {item['id']}")
+        if len(retracted) > 5:
+            print(f"    ... and {len(retracted) - 5} more")
+
+
+def cmd_accept_proposal(args):
+    try:
+        result = api.accept_proposal(
+            args.proposal_id,
+            voter=getattr(args, "voter", "") or "",
+            **_backend_kwargs(args),
+        )
+    except (KeyError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    if result["applied"]:
+        print(f"Accepted proposal {result['proposal_id']}")
+        print(f"  Action: {result['action']}")
+        r = result.get("result", {})
+        if "retract_result" in r:
+            went_out = r["retract_result"].get("went_out", [])
+            print(f"  Cascade: {len(went_out)} node(s) went OUT")
+        elif "supersede_result" in r:
+            sr = r["supersede_result"]
+            print(f"  Replaced: {sr.get('old_id', '?')} → {sr.get('new_id', '?')}")
+        elif "add_result" in r:
+            ar = r["add_result"]
+            print(f"  Added: {ar.get('node_id', '?')} [{ar.get('truth_value', '?')}]")
+    else:
+        print(f"Proposal {result['proposal_id']} marked STALE (not applied)")
+        print(f"  Reason: {result.get('reason', '?')}")
+
+
+def cmd_reject_proposal(args):
+    try:
+        result = api.reject_proposal(
+            args.proposal_id,
+            voter=getattr(args, "voter", "") or "",
+            reason=getattr(args, "reason", "") or "",
+            **_backend_kwargs(args),
+        )
+    except (KeyError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Rejected proposal {result['proposal_id']}")
+    if result.get("reason"):
+        print(f"  Reason: {result['reason']}")
+
+
+def cmd_withdraw_proposal(args):
+    try:
+        result = api.withdraw_proposal(
+            args.proposal_id,
+            proposer=getattr(args, "proposer", "") or "",
+            **_backend_kwargs(args),
+        )
+    except (KeyError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Withdrawn proposal {result['proposal_id']}")
+
+
 def cmd_list(args):
     sort = args.sort if args.sort != "id" else None
     if args.by_impact:
@@ -2766,9 +2996,11 @@ def main():
     p.add_argument("--timeout", type=int, default=300, help="LLM timeout in seconds (default: 300)")
 
     # what-if
-    p = sub.add_parser("what-if", help="Simulate retracting or asserting a node (read-only)")
-    p.add_argument("action", choices=["retract", "assert"], help="Action to simulate")
+    p = sub.add_parser("what-if", help="Simulate retracting, asserting, or superseding a node (read-only)")
+    p.add_argument("action", choices=["retract", "assert", "supersede"], help="Action to simulate")
     p.add_argument("node_id", help="Node to simulate")
+    p.add_argument("--text", help="Replacement text (required for supersede)")
+    p.add_argument("--new-id", help="Custom ID for the new node (supersede only)")
 
     # status
     p = sub.add_parser("status", help="Show network summary (use --all for full listing)")
@@ -2915,6 +3147,74 @@ def main():
     p = sub.add_parser("accept", help="Accept proposals from a derive proposals file")
     p.add_argument("file", nargs="?", default="proposed-derivations.md",
                    help="Proposals file (default: proposed-derivations.md)")
+
+    # propose-retract
+    p = sub.add_parser("propose-retract", help="Propose retracting a hive belief (no truth change)")
+    p.add_argument("target_id", help="Node to propose retracting")
+    p.add_argument("--reason", help="Why this node should be retracted")
+    p.add_argument("--basis", default="prior-knowledge",
+                   choices=["source-divergence", "detected-contradiction", "prior-knowledge"],
+                   help="Basis for retraction (default: prior-knowledge)")
+    p.add_argument("--failure-mode", help="Failure mode category")
+    p.add_argument("--evidence", help="Supporting evidence")
+    p.add_argument("--proposer", help="Who is proposing (e.g. worker-bee)")
+
+    # propose-supersede
+    p = sub.add_parser("propose-supersede", help="Propose superseding a hive belief (no truth change)")
+    p.add_argument("old_id", help="Node to propose superseding")
+    p.add_argument("--text", required=True, help="Replacement text for the new node")
+    p.add_argument("--new-id", help="Custom ID for the new node (auto-generated if omitted)")
+    p.add_argument("--reason", help="Why this node should be superseded")
+    p.add_argument("--basis", default="prior-knowledge",
+                   choices=["source-divergence", "detected-contradiction", "prior-knowledge"],
+                   help="Basis for supersession (default: prior-knowledge)")
+    p.add_argument("--failure-mode", help="Failure mode category")
+    p.add_argument("--evidence", help="Supporting evidence")
+    p.add_argument("--proposer", help="Who is proposing")
+
+    # propose-add
+    p = sub.add_parser("propose-add", help="Propose adding a new belief to the hive (no truth change)")
+    p.add_argument("node_id", help="ID for the proposed node")
+    p.add_argument("--text", required=True, help="Belief text")
+    p.add_argument("--sl", help="Comma-separated antecedent IDs for SL justification")
+    p.add_argument("--unless", help="Comma-separated outlist IDs")
+    p.add_argument("--label", help="Justification label")
+    p.add_argument("--source", help="Provenance (repo:path)")
+    p.add_argument("--source-url", help="Source URL")
+    p.add_argument("--reason", help="Why this belief should be added")
+    p.add_argument("--basis", default="prior-knowledge",
+                   choices=["source-divergence", "detected-contradiction", "prior-knowledge"],
+                   help="Basis (default: prior-knowledge)")
+    p.add_argument("--evidence", help="Supporting evidence")
+    p.add_argument("--proposer", help="Who is proposing")
+
+    # proposals (list)
+    p = sub.add_parser("proposals", help="List hive proposals")
+    p.add_argument("--status", default="pending",
+                   choices=["pending", "accepted", "rejected", "withdrawn", "stale"],
+                   help="Filter by status (default: pending)")
+    p.add_argument("--target", help="Filter by target node ID")
+    p.add_argument("--proposer", help="Filter by proposer")
+
+    # proposal (show)
+    p = sub.add_parser("proposal", help="Show details of a hive proposal")
+    p.add_argument("proposal_id", help="Proposal ID to show")
+
+    # accept-proposal
+    p = sub.add_parser("accept-proposal", help="Accept a pending hive proposal (applies the change)")
+    p.add_argument("proposal_id", help="Proposal ID to accept")
+    p.add_argument("--voter", help="Who is accepting")
+
+    # reject-proposal
+    p = sub.add_parser("reject-proposal", help="Reject a pending hive proposal (no truth change)")
+    p.add_argument("proposal_id", help="Proposal ID to reject")
+    p.add_argument("--voter", help="Who is rejecting")
+    p.add_argument("--reason", help="Why the proposal is rejected")
+
+    # withdraw-proposal
+    p = sub.add_parser("withdraw-proposal", help="Withdraw a pending hive proposal (no truth change)")
+    p.add_argument("proposal_id", help="Proposal ID to withdraw")
+    p.add_argument("--proposer", help="Who is withdrawing")
 
     # import-agent
     p = sub.add_parser("import-agent", help="Import another agent's beliefs with namespacing")
@@ -3407,6 +3707,14 @@ def main():
         "repos": cmd_repos,
         "derive": cmd_derive,
         "accept": cmd_accept,
+        "propose-retract": cmd_propose_retract,
+        "propose-supersede": cmd_propose_supersede,
+        "propose-add": cmd_propose_add,
+        "proposals": cmd_proposals,
+        "proposal": cmd_proposal,
+        "accept-proposal": cmd_accept_proposal,
+        "reject-proposal": cmd_reject_proposal,
+        "withdraw-proposal": cmd_withdraw_proposal,
         "import-agent": cmd_import_agent,
         "sync-agent": cmd_sync_agent,
         "import-beliefs": cmd_import_beliefs,

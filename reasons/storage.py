@@ -68,6 +68,30 @@ CREATE TABLE IF NOT EXISTS network_meta (
     value TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS proposals (
+    id              TEXT PRIMARY KEY,
+    action          TEXT NOT NULL CHECK (action IN ('retract','supersede','add')),
+    target_id       TEXT NOT NULL,
+    new_id          TEXT DEFAULT '',
+    proposed_text   TEXT DEFAULT '',
+    reason          TEXT DEFAULT '',
+    failure_mode    TEXT DEFAULT '',
+    basis           TEXT DEFAULT 'prior-knowledge',
+    evidence        TEXT DEFAULT '',
+    proposer        TEXT DEFAULT '',
+    status          TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending','accepted','rejected','withdrawn','stale')),
+    snapshot_json   TEXT DEFAULT '{}',
+    impact_json     TEXT DEFAULT '{}',
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    resolved_at     TEXT DEFAULT '',
+    resolved_by     TEXT DEFAULT '',
+    result_json     TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_proposals_target ON proposals (target_id, status);
+CREATE INDEX IF NOT EXISTS idx_proposals_status ON proposals (status);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(id, text, tokenize="porter unicode61");
 """
 
