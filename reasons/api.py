@@ -2860,6 +2860,16 @@ def search(query: str, visible_to: list[str] | None = None, db_path: str = DEFAU
                 reverse=reverse,
             )
 
+        # Paginate matched results before neighbor expansion
+        if offset:
+            matched_ids = matched_ids[offset:]
+        if limit is not None:
+            matched_ids = matched_ids[:limit]
+
+        # names-only: skip neighbor expansion (flat ID list, no context)
+        if format == "names-only":
+            return _format_names_only(matched_ids, set())
+
         # Expand to include neighbors (BFS along dependency graph)
         neighbor_ids = set()
         frontier = set(matched_ids)
@@ -2897,20 +2907,12 @@ def search(query: str, visible_to: list[str] | None = None, db_path: str = DEFAU
                 if nid in net.nodes and _is_visible(net.nodes[nid], visible_to)
             }
 
-        # Paginate matched results (neighbors expand from the page)
-        if offset:
-            matched_ids = matched_ids[offset:]
-        if limit is not None:
-            matched_ids = matched_ids[:limit]
-
         if format == "json":
             return _format_json(net, matched_ids, neighbor_ids)
         elif format == "minimal":
             return _format_minimal(net, matched_ids, neighbor_ids)
         elif format == "compact":
             return _format_compact(net, matched_ids, neighbor_ids)
-        elif format == "names-only":
-            return _format_names_only(matched_ids, neighbor_ids)
         else:
             return _format_markdown(net, matched_ids, neighbor_ids)
 
