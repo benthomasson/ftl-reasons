@@ -2650,7 +2650,7 @@ def compact(budget: int = 500, truncate: bool = True, visible_to: list[str] | No
     if pg_conninfo:
         return _pg_dispatch(pg_conninfo, project_id, "compact",
                             budget=budget, truncate=truncate, visible_to=visible_to,
-                            include_out=include_out)
+                            include_out=include_out, format=format)
     from .compact import compact as _compact
 
     with _with_network(db_path) as net:
@@ -2693,7 +2693,7 @@ def lookup(query: str, visible_to: list[str] | None = None, db_path: str = DEFAU
     if pg_conninfo:
         return _pg_dispatch(pg_conninfo, project_id, "lookup",
                             query=query, visible_to=visible_to,
-                            include_out=include_out)
+                            include_out=include_out, format=format)
     with _with_network(db_path) as net:
         raw_terms = re.findall(r'\w+', query)
         query_terms = [t.lower() for t in raw_terms
@@ -2787,7 +2787,7 @@ def search(query: str, visible_to: list[str] | None = None, db_path: str = DEFAU
         query: search terms (FTS5 matches all terms in any order)
         visible_to: only return nodes whose access_tags are a subset
         db_path: path to RMS database
-        format: output format — "markdown" (default), "json", or "minimal"
+        format: output format — "markdown" (default), "json", "minimal", "compact", or "names-only"
         depth: number of hops to expand along justification chains (default: 1)
         include_out: if False (default), exclude OUT beliefs from results
         sort: result ordering — "relevance" (default), "newest", or "oldest"
