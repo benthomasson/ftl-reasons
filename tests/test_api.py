@@ -1621,3 +1621,48 @@ class TestStoreLlmProposals:
         assert detail["status"] == "pending"
         assert detail["proposer"] == "my-llm"
         assert detail["basis"] == "source-divergence"
+
+
+class TestNamesOnlyFormat:
+
+    def test_search_names_only(self, db_path):
+        api.add_node("alpha", "Alpha belief", db_path=db_path)
+        api.add_node("beta", "Beta belief", db_path=db_path)
+        result = api.search("belief", format="names-only", db_path=db_path)
+        lines = result.strip().split("\n")
+        assert "alpha" in lines
+        assert "beta" in lines
+        assert all(":" not in line and "[" not in line for line in lines)
+
+    def test_search_names_only_no_results(self, db_path):
+        result = api.search("nonexistent", format="names-only", db_path=db_path)
+        assert result == "No results found."
+
+    def test_compact_names_only(self, db_path):
+        api.add_node("node-a", "Node A text", db_path=db_path)
+        api.add_node("node-b", "Node B text", db_path=db_path)
+        result = api.compact(format="names-only", db_path=db_path)
+        lines = result.strip().split("\n")
+        assert "node-a" in lines
+        assert "node-b" in lines
+
+    def test_compact_names_only_excludes_out(self, db_path):
+        api.add_node("in-node", "Stays in", db_path=db_path)
+        api.add_node("out-node", "Goes out", db_path=db_path)
+        api.retract_node("out-node", db_path=db_path)
+        result = api.compact(format="names-only", db_path=db_path)
+        lines = result.strip().split("\n")
+        assert "in-node" in lines
+        assert "out-node" not in lines
+
+    def test_lookup_names_only(self, db_path):
+        api.add_node("gamma", "Gamma is great", db_path=db_path)
+        api.add_node("delta", "Delta is great", db_path=db_path)
+        result = api.lookup("great", format="names-only", db_path=db_path)
+        lines = result.strip().split("\n")
+        assert "gamma" in lines
+        assert "delta" in lines
+
+    def test_lookup_names_only_no_results(self, db_path):
+        result = api.lookup("nonexistent", format="names-only", db_path=db_path)
+        assert "No beliefs found" in result
