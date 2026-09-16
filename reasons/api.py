@@ -2647,10 +2647,16 @@ def compact(budget: int = 500, truncate: bool = True, visible_to: list[str] | No
 
     Returns: the compact summary string
     """
+    if format == "names-only":
+        status_filter = None if include_out else "IN"
+        result = list_nodes(status=status_filter, visible_to=visible_to,
+                            db_path=db_path, pg_conninfo=pg_conninfo,
+                            project_id=project_id)
+        return "\n".join(n["id"] for n in result["nodes"])
     if pg_conninfo:
         return _pg_dispatch(pg_conninfo, project_id, "compact",
                             budget=budget, truncate=truncate, visible_to=visible_to,
-                            include_out=include_out, format=format)
+                            include_out=include_out)
     from .compact import compact as _compact
 
     with _with_network(db_path) as net:
@@ -2665,11 +2671,7 @@ def compact(budget: int = 500, truncate: bool = True, visible_to: list[str] | No
                     continue
                 filtered.nodes[nid] = node
             filtered.nogoods = [ng for ng in net.nogoods if all(n in filtered.nodes for n in ng.nodes)]
-            if format == "names-only":
-                return "\n".join(sorted(filtered.nodes.keys()))
             return _compact(filtered, budget=budget, truncate=truncate)
-        if format == "names-only":
-            return "\n".join(sorted(net.nodes.keys()))
         return _compact(net, budget=budget, truncate=truncate)
 
 
@@ -2693,7 +2695,7 @@ def lookup(query: str, visible_to: list[str] | None = None, db_path: str = DEFAU
     if pg_conninfo:
         return _pg_dispatch(pg_conninfo, project_id, "lookup",
                             query=query, visible_to=visible_to,
-                            include_out=include_out, format=format)
+                            include_out=include_out)
     with _with_network(db_path) as net:
         raw_terms = re.findall(r'\w+', query)
         query_terms = [t.lower() for t in raw_terms
