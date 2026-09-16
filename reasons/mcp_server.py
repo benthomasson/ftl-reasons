@@ -56,7 +56,7 @@ def _get_db() -> str:
 
 @mcp.tool()
 def search(query: str, output_format: str = "markdown", depth: int = 1,
-           include_out: bool = False) -> str:
+           include_out: bool = False, limit: int = 0, offset: int = 0) -> str:
     """Search beliefs by text with neighbor expansion.
 
     Args:
@@ -64,9 +64,11 @@ def search(query: str, output_format: str = "markdown", depth: int = 1,
         output_format: Output format — "markdown", "json", "minimal", or "names-only"
         depth: Hops to expand along justification chains (default 1)
         include_out: Include OUT (retracted) beliefs in results (default: false)
+        limit: Maximum number of matched results (0 for no limit)
+        offset: Number of matched results to skip
     """
     return api.search(query, db_path=_get_db(), format=output_format, depth=depth,
-                      include_out=include_out)
+                      include_out=include_out, limit=limit or None, offset=offset)
 
 
 @mcp.tool()

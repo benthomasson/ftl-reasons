@@ -726,6 +726,7 @@ def get_status(visible_to: list[str] | None = None, db_path: str = DEFAULT_DB,
                status_filter: str | None = None,
                premises_only: bool = False,
                limit: int | None = None,
+               offset: int = 0,
                pg_conninfo=None, project_id=None) -> dict:
     """Get network status with optional filtering.
 
@@ -790,6 +791,8 @@ def get_status(visible_to: list[str] | None = None, db_path: str = DEFAULT_DB,
                 "justification_count": len(node.justifications),
             })
 
+        if offset:
+            nodes = nodes[offset:]
         if limit is not None:
             nodes = nodes[:limit]
 
@@ -2785,6 +2788,8 @@ def search(query: str, visible_to: list[str] | None = None, db_path: str = DEFAU
            include_out: bool = False,
            sort: str = "relevance",
            namespace: str | None = None,
+           limit: int | None = None,
+           offset: int = 0,
            pg_conninfo=None, project_id=None) -> str:
     """Search nodes using full-text search with neighbor expansion.
 
@@ -2803,6 +2808,8 @@ def search(query: str, visible_to: list[str] | None = None, db_path: str = DEFAU
         include_out: if False (default), exclude OUT beliefs from results
         sort: result ordering — "relevance" (default), "newest", or "oldest"
         namespace: filter results to a namespace prefix
+        limit: maximum number of matched results (default: no limit)
+        offset: number of matched results to skip (default: 0)
 
     Returns: formatted string with matched nodes and neighbors
     """
@@ -2890,6 +2897,12 @@ def search(query: str, visible_to: list[str] | None = None, db_path: str = DEFAU
                 if nid in net.nodes and _is_visible(net.nodes[nid], visible_to)
             }
 
+        # Paginate matched results (neighbors expand from the page)
+        if offset:
+            matched_ids = matched_ids[offset:]
+        if limit is not None:
+            matched_ids = matched_ids[:limit]
+
         if format == "json":
             return _format_json(net, matched_ids, neighbor_ids)
         elif format == "minimal":
@@ -2902,11 +2915,11 @@ def search(query: str, visible_to: list[str] | None = None, db_path: str = DEFAU
             return _format_markdown(net, matched_ids, neighbor_ids)
 
 
-def _fts_query(conn, terms: list[str]) -> list[str]:
+def _fts_query(conn, terms: list[str], limit: int = 200) -> list[str]:
     fts_query = " ".join(f'"{t}"' for t in terms)
     cursor = conn.execute(
-        "SELECT id FROM nodes_fts WHERE nodes_fts MATCH ? ORDER BY rank LIMIT 20",
-        (fts_query,),
+        "SELECT id FROM nodes_fts WHERE nodes_fts MATCH ? ORDER BY rank LIMIT ?",
+        (fts_query, limit),
     )
     return [row[0] for row in cursor.fetchall()]
 

@@ -1674,3 +1674,58 @@ class TestNamesOnlyFormat:
     def test_lookup_names_only_no_results(self, db_path):
         result = api.lookup("nonexistent", format="names-only", db_path=db_path)
         assert "No beliefs found" in result
+
+
+class TestSearchPagination:
+
+    def test_limit(self, db_path):
+        for i in range(10):
+            api.add_node(f"node-{i}", f"Test node {i}", db_path=db_path)
+        result = api.search("node test", format="names-only", limit=3,
+                            db_path=db_path)
+        lines = [l for l in result.strip().split("\n") if l]
+        assert len(lines) == 3
+
+    def test_offset(self, db_path):
+        for i in range(5):
+            api.add_node(f"item-{i}", f"Searchable item {i}", db_path=db_path)
+        all_result = api.search("item searchable", format="names-only",
+                                db_path=db_path)
+        offset_result = api.search("item searchable", format="names-only",
+                                   offset=2, db_path=db_path)
+        all_lines = all_result.strip().split("\n")
+        offset_lines = offset_result.strip().split("\n")
+        assert len(offset_lines) == len(all_lines) - 2
+
+    def test_limit_and_offset(self, db_path):
+        for i in range(10):
+            api.add_node(f"entry-{i}", f"Entry number {i}", db_path=db_path)
+        result = api.search("entry number", format="names-only", limit=3,
+                            offset=2, db_path=db_path)
+        lines = [l for l in result.strip().split("\n") if l]
+        assert len(lines) == 3
+
+    def test_no_limit_returns_all(self, db_path):
+        for i in range(10):
+            api.add_node(f"belief-{i}", f"Test belief {i}", db_path=db_path)
+        result = api.search("belief test", format="names-only",
+                            db_path=db_path)
+        lines = [l for l in result.strip().split("\n") if l]
+        assert len(lines) == 10
+
+
+class TestStatusPagination:
+
+    def test_offset(self, db_path):
+        for i in range(5):
+            api.add_node(f"s-{i}", f"Status node {i}", db_path=db_path)
+        result_all = api.get_status(db_path=db_path)
+        result_off = api.get_status(offset=2, db_path=db_path)
+        assert len(result_off["nodes"]) == len(result_all["nodes"]) - 2
+
+    def test_limit_and_offset(self, db_path):
+        for i in range(10):
+            api.add_node(f"p-{i}", f"Page node {i}", db_path=db_path)
+        result = api.get_status(limit=3, offset=2, db_path=db_path)
+        assert len(result["nodes"]) == 3
+        assert result["total"] == 10

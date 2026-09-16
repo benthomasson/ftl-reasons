@@ -459,6 +459,7 @@ def cmd_status(args):
     status_filter = getattr(args, "status", None)
     premises_only = getattr(args, "premises", False)
     limit = getattr(args, "limit", None)
+    offset = getattr(args, "offset", 0)
     fmt = getattr(args, "format", "full")
 
     result = api.get_status(
@@ -467,6 +468,7 @@ def cmd_status(args):
         status_filter=status_filter,
         premises_only=premises_only,
         limit=limit,
+        offset=offset,
         **_backend_kwargs(args),
     )
 
@@ -1231,8 +1233,11 @@ def cmd_search(args):
     include_out = getattr(args, "show_out", False)
     sort = getattr(args, "sort", "relevance")
     namespace = getattr(args, "namespace", None)
+    limit = getattr(args, "limit", None)
+    offset = getattr(args, "offset", 0)
     result = api.search(args.query, visible_to=_parse_visible_to(args), format=fmt,
                         include_out=include_out, sort=sort, namespace=namespace,
+                        limit=limit, offset=offset,
                         **_backend_kwargs(args))
     print(result)
 
@@ -3089,6 +3094,7 @@ def main():
     p.add_argument("--status", choices=["IN", "OUT"], default=None, help="Filter by truth value")
     p.add_argument("--premises", action="store_true", help="Show only premises")
     p.add_argument("--limit", type=int, default=None, help="Max nodes to show")
+    p.add_argument("--offset", type=int, default=0, help="Number of nodes to skip")
     p.add_argument("--format", choices=["full", "names-only"], default="full",
                    help="Output format (default: full)")
     p.add_argument("--visible-to", metavar="TAG,TAG", help="Only show nodes whose access_tags are a subset of these tags")
@@ -3452,6 +3458,8 @@ def main():
     p.add_argument("--sort", choices=["relevance", "newest", "oldest"], default="relevance",
                    help="Result ordering (default: relevance)")
     p.add_argument("-n", "--namespace", help="Filter results to a namespace")
+    p.add_argument("--limit", type=int, default=None, help="Maximum number of matched results")
+    p.add_argument("--offset", type=int, default=0, help="Number of matched results to skip")
     p.add_argument("--visible-to", metavar="TAG,TAG", help="Only show nodes whose access_tags are a subset of these tags")
     p.add_argument("--show-out", action="store_true", help="Include OUT (retracted) beliefs in results")
 
