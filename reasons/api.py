@@ -2652,7 +2652,16 @@ def compact(budget: int = 500, truncate: bool = True, visible_to: list[str] | No
         result = list_nodes(status=status_filter, visible_to=visible_to,
                             db_path=db_path, pg_conninfo=pg_conninfo,
                             project_id=project_id)
-        return "\n".join(n["id"] for n in result["nodes"])
+        ids = [n["id"] for n in result["nodes"]]
+        lines = []
+        used = 0
+        for nid in ids:
+            cost = len(nid.split("-")) + 1
+            if used + cost > budget:
+                break
+            lines.append(nid)
+            used += cost
+        return "\n".join(lines)
     if pg_conninfo:
         return _pg_dispatch(pg_conninfo, project_id, "compact",
                             budget=budget, truncate=truncate, visible_to=visible_to,

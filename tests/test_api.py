@@ -1646,6 +1646,14 @@ class TestNamesOnlyFormat:
         assert "node-a" in lines
         assert "node-b" in lines
 
+    def test_compact_names_only_respects_budget(self, db_path):
+        for i in range(20):
+            api.add_node(f"belief-{i}", f"Belief number {i}", db_path=db_path)
+        result = api.compact(format="names-only", budget=10, db_path=db_path)
+        lines = result.strip().split("\n")
+        assert len(lines) < 20
+        assert len(lines) > 0
+
     def test_compact_names_only_excludes_out(self, db_path):
         api.add_node("in-node", "Stays in", db_path=db_path)
         api.add_node("out-node", "Goes out", db_path=db_path)
