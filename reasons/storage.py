@@ -74,7 +74,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(id, text, tokenize="port
 PROPOSALS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS proposals (
     id              TEXT PRIMARY KEY,
-    action          TEXT NOT NULL CHECK (action IN ('retract','supersede','add')),
+    action          TEXT NOT NULL CHECK (action IN ('retract','supersede','add','nogood')),
     target_id       TEXT NOT NULL,
     new_id          TEXT DEFAULT '',
     proposed_text   TEXT DEFAULT '',
@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS proposals (
                     CHECK (status IN ('pending','accepted','rejected','withdrawn','stale')),
     snapshot_json   TEXT DEFAULT '{}',
     impact_json     TEXT DEFAULT '{}',
+    tags_json       TEXT DEFAULT '[]',
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL,
     resolved_at     TEXT DEFAULT '',

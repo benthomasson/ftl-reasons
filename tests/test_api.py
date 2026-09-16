@@ -1347,6 +1347,137 @@ class TestWithdrawProposal:
             api.withdraw_proposal(r["proposal_id"], db_path=db_path)
 
 
+class TestProposeNogood:
+
+    def test_basic(self, db_path):
+        api.add_node("x", "X", db_path=db_path)
+        api.add_node("y", "Y", db_path=db_path)
+        r = api.propose_nogood(["x", "y"], reason="contradictory",
+                               proposer="bee", db_path=db_path)
+        assert r["action"] == "nogood"
+        assert r["status"] == "pending"
+        assert sorted(r["node_ids"]) == ["x", "y"]
+        assert r["proposal_id"].startswith("prop-")
+
+    def test_requires_two_nodes(self, db_path):
+        api.add_node("x", "X", db_path=db_path)
+        with pytest.raises(ValueError, match="at least 2"):
+            api.propose_nogood(["x"], db_path=db_path)
+
+    def test_missing_node(self, db_path):
+        api.add_node("x", "X", db_path=db_path)
+        with pytest.raises(KeyError, match="not found"):
+            api.propose_nogood(["x", "missing"], db_path=db_path)
+
+    def test_no_network_change(self, db_path):
+        api.add_node("x", "X", db_path=db_path)
+        api.add_node("y", "Y", db_path=db_path)
+        api.propose_nogood(["x", "y"], db_path=db_path)
+        nx = api.show_node("x", db_path=db_path)
+        ny = api.show_node("y", db_path=db_path)
+        assert nx["truth_value"] == "IN"
+        assert ny["truth_value"] == "IN"
+
+    def test_accept_nogood(self, db_path):
+        api.add_node("p", "P", db_path=db_path)
+        api.add_node("q", "Q", db_path=db_path)
+        r = api.propose_nogood(["p", "q"], db_path=db_path)
+        result = api.accept_proposal(r["proposal_id"], db_path=db_path)
+        assert result["applied"] is True
+        assert result["status"] == "accepted"
+
+    def test_accept_nogood_missing_node(self, db_path):
+        api.add_node("a", "A", db_path=db_path)
+        api.add_node("b", "B", db_path=db_path)
+        r = api.propose_nogood(["a", "b"], db_path=db_path)
+        api.retract_node("a", db_path=db_path)
+        with api._with_network(db_path, write=True) as net:
+            del net.nodes["a"]
+        result = api.accept_proposal(r["proposal_id"], db_path=db_path)
+        assert result["applied"] is False
+        assert result["status"] == "stale"
+
+    def test_auto_stale(self, db_path):
+        api.add_node("x", "X", db_path=db_path)
+        api.add_node("y", "Y", db_path=db_path)
+        r1 = api.propose_nogood(["x", "y"], db_path=db_path)
+        r2 = api.propose_nogood(["x", "y"], db_path=db_path)
+        detail = api.show_proposal(r1["proposal_id"], db_path=db_path)
+        assert detail["status"] == "stale"
+        detail2 = api.show_proposal(r2["proposal_id"], db_path=db_path)
+        assert detail2["status"] == "pending"
+
+    def test_show_in_list(self, db_path):
+        api.add_node("x", "X", db_path=db_path)
+        api.add_node("y", "Y", db_path=db_path)
+        api.propose_nogood(["x", "y"], db_path=db_path)
+        result = api.list_proposals(db_path=db_path)
+        assert result["count"] == 1
+        assert result["proposals"][0]["action"] == "nogood"
+
+
+class TestProposalTags:
+
+    def test_retract_with_tags(self, db_path):
+        api.add_node("a", "A", db_path=db_path)
+        r = api.propose_retraction("a", tags=["infra", "stale"],
+                                    db_path=db_path)
+        detail = api.show_proposal(r["proposal_id"], db_path=db_path)
+        assert detail["tags"] == ["infra", "stale"]
+
+    def test_supersede_with_tags(self, db_path):
+        api.add_node("a", "A", db_path=db_path)
+        r = api.propose_supersession("a", "A updated", tags=["review"],
+                                      db_path=db_path)
+        detail = api.show_proposal(r["proposal_id"], db_path=db_path)
+        assert detail["tags"] == ["review"]
+
+    def test_add_with_tags(self, db_path):
+        r = api.propose_addition("new-node", "New", tags=["draft"],
+                                  db_path=db_path)
+        detail = api.show_proposal(r["proposal_id"], db_path=db_path)
+        assert detail["tags"] == ["draft"]
+
+    def test_nogood_with_tags(self, db_path):
+        api.add_node("x", "X", db_path=db_path)
+        api.add_node("y", "Y", db_path=db_path)
+        r = api.propose_nogood(["x", "y"], tags=["contradiction"],
+                                db_path=db_path)
+        detail = api.show_proposal(r["proposal_id"], db_path=db_path)
+        assert detail["tags"] == ["contradiction"]
+
+    def test_no_tags_default_empty(self, db_path):
+        api.add_node("a", "A", db_path=db_path)
+        r = api.propose_retraction("a", db_path=db_path)
+        detail = api.show_proposal(r["proposal_id"], db_path=db_path)
+        assert detail["tags"] == []
+
+    def test_list_filter_by_tag(self, db_path):
+        api.add_node("a", "A", db_path=db_path)
+        api.add_node("b", "B", db_path=db_path)
+        api.propose_retraction("a", tags=["infra"], db_path=db_path)
+        api.propose_retraction("b", tags=["review"], db_path=db_path)
+        infra = api.list_proposals(tag="infra", db_path=db_path)
+        assert infra["count"] == 1
+        assert infra["proposals"][0]["target_id"] == "a"
+        review = api.list_proposals(tag="review", db_path=db_path)
+        assert review["count"] == 1
+        assert review["proposals"][0]["target_id"] == "b"
+
+    def test_tags_sorted(self, db_path):
+        api.add_node("a", "A", db_path=db_path)
+        r = api.propose_retraction("a", tags=["z-tag", "a-tag"],
+                                    db_path=db_path)
+        detail = api.show_proposal(r["proposal_id"], db_path=db_path)
+        assert detail["tags"] == ["a-tag", "z-tag"]
+
+    def test_tags_in_list_response(self, db_path):
+        api.add_node("a", "A", db_path=db_path)
+        api.propose_retraction("a", tags=["infra"], db_path=db_path)
+        result = api.list_proposals(db_path=db_path)
+        assert result["proposals"][0]["tags"] == ["infra"]
+
+
 class TestStoreLlmProposals:
 
     def test_stores_retract(self, db_path):

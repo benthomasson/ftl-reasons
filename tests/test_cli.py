@@ -1473,6 +1473,41 @@ class TestProposalLifecycle:
         out_new, _, _ = run_cli("show", "a-v2", db_path=db_path)
         assert "Better A" in out_new
 
+    def test_propose_nogood(self, db_path):
+        out, err, code = run_cli("propose-nogood", "a", "b",
+                                  "--reason", "Contradictory",
+                                  "--proposer", "bee",
+                                  db_path=db_path)
+        assert code == 0
+        assert "Created proposal" in out
+        assert "nogood" in out
+
+    def test_propose_nogood_too_few(self, db_path):
+        out, err, code = run_cli("propose-nogood", "a",
+                                  db_path=db_path)
+        assert code == 1
+        assert "at least 2" in err
+
+    def test_accept_nogood(self, db_path):
+        out, _, code = run_cli("propose-nogood", "a", "b",
+                                db_path=db_path)
+        assert code == 0
+        import re
+        prop_id = re.search(r"(prop-\S+)", out).group(1)
+        out2, _, code2 = run_cli("accept-proposal", prop_id,
+                                  db_path=db_path)
+        assert code2 == 0
+        assert "Accepted" in out2
+
+    def test_propose_with_tags(self, db_path):
+        out, err, code = run_cli("propose-retract", "a",
+                                  "--tags", "infra,review",
+                                  db_path=db_path)
+        assert code == 0
+        props_out, _, _ = run_cli("proposals", "--tag", "infra",
+                                   db_path=db_path)
+        assert "1 proposal(s)" in props_out
+
     def test_propose_update_store(self, db_path):
         import json
         mock_response = json.dumps([{

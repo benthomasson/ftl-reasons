@@ -4839,6 +4839,9 @@ def _proposals_db(db_path: str):
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.executescript(PROPOSALS_SCHEMA)
+    cols = [c[1] for c in conn.execute("PRAGMA table_info(proposals)").fetchall()]
+    if "tags_json" not in cols:
+        conn.execute("ALTER TABLE proposals ADD COLUMN tags_json TEXT DEFAULT '[]'")
     conn.commit()
     return conn
 
@@ -4879,6 +4882,7 @@ def propose_retraction(
     basis: str = "prior-knowledge",
     evidence: str = "",
     proposer: str = "",
+    tags: list[str] | None = None,
     db_path: str = DEFAULT_DB,
     pg_conninfo=None,
     project_id=None,
@@ -4916,12 +4920,14 @@ def propose_retraction(
         conn.execute(
             "INSERT INTO proposals "
             "(id, action, target_id, reason, failure_mode, basis, evidence, "
-            "proposer, status, snapshot_json, impact_json, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)",
+            "proposer, status, snapshot_json, impact_json, tags_json, "
+            "created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)",
             (
                 proposal_id, "retract", target_id, reason, failure_mode,
                 basis, evidence, proposer,
                 json.dumps(snapshot), json.dumps(impact),
+                json.dumps(sorted(tags) if tags else []),
                 now, now,
             ),
         )
@@ -4948,6 +4954,7 @@ def propose_supersession(
     basis: str = "prior-knowledge",
     evidence: str = "",
     proposer: str = "",
+    tags: list[str] | None = None,
     db_path: str = DEFAULT_DB,
     pg_conninfo=None,
     project_id=None,
@@ -4998,12 +5005,13 @@ def propose_supersession(
             "INSERT INTO proposals "
             "(id, action, target_id, new_id, proposed_text, reason, "
             "failure_mode, basis, evidence, proposer, status, "
-            "snapshot_json, impact_json, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)",
+            "snapshot_json, impact_json, tags_json, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)",
             (
                 proposal_id, "supersede", old_id, new_id, new_text,
                 reason, failure_mode, basis, evidence, proposer,
                 json.dumps(snapshot), json.dumps(impact),
+                json.dumps(sorted(tags) if tags else []),
                 now, now,
             ),
         )
@@ -5035,6 +5043,7 @@ def propose_addition(
     basis: str = "prior-knowledge",
     evidence: str = "",
     proposer: str = "",
+    tags: list[str] | None = None,
     db_path: str = DEFAULT_DB,
     pg_conninfo=None,
     project_id=None,
@@ -5073,13 +5082,14 @@ def propose_addition(
             "INSERT INTO proposals "
             "(id, action, target_id, new_id, proposed_text, reason, "
             "failure_mode, basis, evidence, proposer, status, "
-            "snapshot_json, impact_json, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)",
+            "snapshot_json, impact_json, tags_json, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)",
             (
                 proposal_id, "add", node_id, node_id, text,
                 reason, failure_mode, basis, evidence, proposer,
                 json.dumps(proposed),
                 json.dumps({"total_affected": 0}),
+                json.dumps(sorted(tags) if tags else []),
                 now, now,
             ),
         )
@@ -5096,24 +5106,97 @@ def propose_addition(
     }
 
 
-def list_proposals(
-    status: str = "pending",
-    target_id: str | None = None,
-    proposer: str | None = None,
+def propose_nogood(
+    node_ids: list[str],
+    reason: str = "",
+    basis: str = "prior-knowledge",
+    evidence: str = "",
+    proposer: str = "",
+    tags: list[str] | None = None,
     db_path: str = DEFAULT_DB,
     pg_conninfo=None,
     project_id=None,
 ) -> dict:
-    """List proposals, optionally filtered by status, target, or proposer."""
+    """Create a pending proposal to record a nogood (contradiction).
+
+    On accept, calls add_nogood() which triggers dependency-directed
+    backtracking to retract the weakest premise.
+    """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, project_id, "propose_nogood",
+                            node_ids=node_ids, reason=reason,
+                            basis=basis, evidence=evidence,
+                            proposer=proposer)
+
+    if len(node_ids) < 2:
+        raise ValueError("A nogood requires at least 2 node IDs")
+
+    with _with_network(db_path, write=False) as net:
+        for nid in node_ids:
+            if nid not in net.nodes:
+                raise KeyError(f"Node '{nid}' not found")
+
+        snapshot = {
+            "node_ids": sorted(node_ids),
+            "truth_values": {
+                nid: net.nodes[nid].truth_value for nid in node_ids
+            },
+        }
+
+    target_id = "-".join(sorted(node_ids))
+
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    conn = _proposals_db(db_path)
+    try:
+        staled = _stale_older_pending(conn, target_id, "nogood", now)
+        proposal_id = _next_proposal_id(conn, target_id, "nogood")
+        conn.execute(
+            "INSERT INTO proposals "
+            "(id, action, target_id, reason, basis, evidence, "
+            "proposer, status, snapshot_json, impact_json, tags_json, "
+            "created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)",
+            (
+                proposal_id, "nogood", target_id, reason,
+                basis, evidence, proposer,
+                json.dumps(snapshot),
+                json.dumps({"total_affected": 0}),
+                json.dumps(sorted(tags) if tags else []),
+                now, now,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    return {
+        "proposal_id": proposal_id,
+        "node_ids": sorted(node_ids),
+        "action": "nogood",
+        "status": "pending",
+        "staled": staled,
+    }
+
+
+def list_proposals(
+    status: str = "pending",
+    target_id: str | None = None,
+    proposer: str | None = None,
+    tag: str | None = None,
+    db_path: str = DEFAULT_DB,
+    pg_conninfo=None,
+    project_id=None,
+) -> dict:
+    """List proposals, optionally filtered by status, target, proposer, or tag."""
     if pg_conninfo:
         return _pg_dispatch(pg_conninfo, project_id, "list_proposals",
                             status=status, target_id=target_id,
-                            proposer=proposer)
+                            proposer=proposer, tag=tag)
 
     conn = _proposals_db(db_path)
     try:
         query = "SELECT id, action, target_id, new_id, status, proposer, " \
-                "basis, created_at, impact_json FROM proposals WHERE 1=1"
+                "basis, created_at, impact_json, tags_json FROM proposals WHERE 1=1"
         params: list = []
         if status:
             query += " AND status = ?"
@@ -5130,6 +5213,9 @@ def list_proposals(
         proposals = []
         for row in rows:
             impact = json.loads(row[8]) if row[8] else {}
+            row_tags = json.loads(row[9]) if row[9] else []
+            if tag and tag not in row_tags:
+                continue
             proposals.append({
                 "id": row[0],
                 "action": row[1],
@@ -5140,6 +5226,7 @@ def list_proposals(
                 "basis": row[6],
                 "created_at": row[7],
                 "impact": {"total_affected": impact.get("total_affected", 0)},
+                "tags": row_tags,
             })
         return {"count": len(proposals), "proposals": proposals}
     finally:
@@ -5163,7 +5250,7 @@ def show_proposal(
             "SELECT id, action, target_id, new_id, proposed_text, reason, "
             "failure_mode, basis, evidence, proposer, status, snapshot_json, "
             "impact_json, created_at, updated_at, resolved_at, resolved_by, "
-            "result_json FROM proposals WHERE id = ?",
+            "result_json, tags_json FROM proposals WHERE id = ?",
             (proposal_id,),
         ).fetchone()
         if not row:
@@ -5187,6 +5274,7 @@ def show_proposal(
             "resolved_at": row[15],
             "resolved_by": row[16],
             "result": json.loads(row[17]) if row[17] else {},
+            "tags": json.loads(row[18]) if row[18] else [],
         }
     finally:
         conn.close()
@@ -5326,6 +5414,19 @@ def accept_proposal(
             db_path=db_path,
         )
         result_data = {"supersede_result": supersede_result}
+
+    elif action == "nogood":
+        nogood_node_ids = snapshot.get("node_ids", [])
+        if not nogood_node_ids:
+            return _mark_stale("No node IDs in proposal snapshot")
+
+        with _with_network(db_path, write=False) as net:
+            for nid in nogood_node_ids:
+                if nid not in net.nodes:
+                    return _mark_stale(f"Node '{nid}' no longer exists")
+
+        nogood_result = add_nogood(nogood_node_ids, db_path=db_path)
+        result_data = {"nogood_result": nogood_result}
 
     else:
         raise ValueError(f"Unknown action '{action}'")
