@@ -2790,17 +2790,21 @@ def search(query: str, visible_to: list[str] | None = None, db_path: str = DEFAU
            namespace: str | None = None,
            limit: int | None = None,
            offset: int = 0,
+           regex: bool = False,
            pg_conninfo=None, project_id=None) -> str:
     """Search nodes using full-text search with neighbor expansion.
 
-    Uses SQLite FTS5 for ranked all-terms matching. Returns matched nodes
-    plus their neighbors (dependencies and dependents) formatted
-    as readable markdown.
+    Uses SQLite FTS5 for ranked all-terms matching by default. Returns matched nodes
+    plus their neighbors (dependencies and dependents) formatted as readable markdown.
+
+    Supports OR queries via pipes (|) and regex patterns via --regex flag.
 
     Falls back to substring matching if FTS5 table is not available.
 
     Args:
-        query: search terms (FTS5 matches all terms in any order)
+        query: search terms (FTS5 matches all terms in any order).
+               Use pipes (|) for OR logic: "term1|term2"
+               Use --regex for regex patterns: test.*plan
         visible_to: only return nodes whose access_tags are a subset
         db_path: path to RMS database
         format: output format — "markdown" (default), "json", "minimal", "compact", or "names-only"
@@ -2810,6 +2814,7 @@ def search(query: str, visible_to: list[str] | None = None, db_path: str = DEFAU
         namespace: filter results to a namespace prefix
         limit: maximum number of matched results (default: no limit)
         offset: number of matched results to skip (default: 0)
+        regex: if True, treat query as a regex pattern instead of FTS5 search
 
     Returns: formatted string with matched nodes and neighbors
     """
@@ -2820,11 +2825,17 @@ def search(query: str, visible_to: list[str] | None = None, db_path: str = DEFAU
                             query=query, visible_to=visible_to, format=format,
                             include_out=include_out)
     with _with_network(db_path) as net:
-        matched_ids = _fts_search(query, db_path)
+        if regex:
+            _warn_regex_experimental()
+            matched_ids = _regex_search(query, net)
+        elif "|" in query:
+            matched_ids = _or_search(query, db_path, net)
+        else:
+            matched_ids = _fts_search(query, db_path)
 
-        # Fallback to substring if FTS returned nothing or isn't available
-        if not matched_ids:
-            matched_ids = _substring_search(query, net)
+            # Fallback to substring if FTS returned nothing or isn't available
+            if not matched_ids:
+                matched_ids = _substring_search(query, net)
 
         if not matched_ids:
             return "No results found."
@@ -2989,6 +3000,45 @@ def _substring_search(query: str, net) -> list[str]:
         if q in nid.lower() or q in node.text.lower():
             results.append(nid)
     return results
+
+
+def _or_search(query: str, db_path: str, net) -> list[str]:
+    """Search with OR logic: split on pipes and union results."""
+    terms = [t.strip() for t in query.split("|") if t.strip()]
+    if not terms:
+        return []
+
+    all_results = set()
+    for term in terms:
+        matched = _fts_search(term, db_path)
+        if not matched:
+            matched = _substring_search(term, net)
+        all_results.update(matched)
+
+    return sorted(all_results)
+
+
+def _regex_search(query: str, net) -> list[str]:
+    """Search using regex pattern matching on node id and text."""
+    try:
+        pattern = re.compile(query, re.IGNORECASE)
+    except re.error as e:
+        raise ValueError(f"Invalid regex pattern: {e}")
+
+    results = []
+    for nid, node in sorted(net.nodes.items()):
+        if pattern.search(nid) or pattern.search(node.text):
+            results.append(nid)
+    return results
+
+
+def _warn_regex_experimental() -> None:
+    """Warn user about regex search being experimental."""
+    import sys
+    print(
+        "⚠️  Regex search is experimental and may be slow on large networks.",
+        file=sys.stderr
+    )
 
 
 def _format_markdown(net, matched_ids: list[str], neighbor_ids: set[str]) -> str:

@@ -1235,9 +1235,10 @@ def cmd_search(args):
     namespace = getattr(args, "namespace", None)
     limit = getattr(args, "limit", None)
     offset = getattr(args, "offset", 0)
+    regex = getattr(args, "regex", False)
     result = api.search(args.query, visible_to=_parse_visible_to(args), format=fmt,
                         include_out=include_out, sort=sort, namespace=namespace,
-                        limit=limit, offset=offset,
+                        limit=limit, offset=offset, regex=regex,
                         **_backend_kwargs(args))
     print(result)
 
@@ -3452,7 +3453,7 @@ def main():
 
     # search
     p = sub.add_parser("search", help="Search nodes using full-text search with neighbor expansion")
-    p.add_argument("query", help="Search terms (FTS5 all-terms matching)")
+    p.add_argument("query", help="Search terms (FTS5 all-terms matching). Use pipes for OR: term1|term2")
     p.add_argument("--format", choices=["markdown", "json", "minimal", "names-only"], default="markdown",
                    help="Output format (default: markdown)")
     p.add_argument("--sort", choices=["relevance", "newest", "oldest"], default="relevance",
@@ -3462,6 +3463,7 @@ def main():
     p.add_argument("--offset", type=int, default=0, help="Number of matched results to skip")
     p.add_argument("--visible-to", metavar="TAG,TAG", help="Only show nodes whose access_tags are a subset of these tags")
     p.add_argument("--show-out", action="store_true", help="Include OUT (retracted) beliefs in results")
+    p.add_argument("--regex", action="store_true", help="Treat query as a regex pattern (experimental, may be slow)")
 
     # lookup
     p = sub.add_parser("lookup", help="Simple keyword search over beliefs (no neighbor expansion)")

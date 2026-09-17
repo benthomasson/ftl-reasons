@@ -1623,6 +1623,67 @@ class TestStoreLlmProposals:
         assert detail["basis"] == "source-divergence"
 
 
+class TestOrSearch:
+
+    def test_search_with_pipes_or_logic(self, db_path):
+        api.add_node("alpha", "Finance report", db_path=db_path)
+        api.add_node("beta", "Legal review", db_path=db_path)
+        api.add_node("gamma", "Technical docs", db_path=db_path)
+        result = api.search("Finance|Legal", db_path=db_path)
+        assert "alpha" in result
+        assert "beta" in result
+        assert "gamma" not in result
+
+    def test_search_with_pipes_returns_union(self, db_path):
+        api.add_node("a", "Apple tree", db_path=db_path)
+        api.add_node("b", "Banana fruit", db_path=db_path)
+        api.add_node("c", "Cherry blossom", db_path=db_path)
+        result = api.search("Apple|Banana", db_path=db_path)
+        assert "a" in result
+        assert "b" in result
+        assert "c" not in result
+
+    def test_pipes_with_spaces(self, db_path):
+        api.add_node("x", "Xray data", db_path=db_path)
+        api.add_node("y", "Yellow note", db_path=db_path)
+        result = api.search("Xray | Yellow", db_path=db_path)
+        assert "x" in result
+        assert "y" in result
+
+
+class TestRegexSearch:
+
+    def test_regex_pattern_matching(self, db_path):
+        api.add_node("test-plan-a", "Test plan A", db_path=db_path)
+        api.add_node("test-plan-b", "Test plan B", db_path=db_path)
+        api.add_node("validate-x", "Validate X", db_path=db_path)
+        result = api.search("test.*plan", regex=True, db_path=db_path)
+        assert "test-plan-a" in result
+        assert "test-plan-b" in result
+        assert "validate-x" not in result
+
+    def test_regex_case_insensitive(self, db_path):
+        api.add_node("node1", "SNOWFLAKE validation", db_path=db_path)
+        api.add_node("node2", "snowflake test", db_path=db_path)
+        result = api.search("snowflake", regex=True, db_path=db_path)
+        assert "node1" in result
+        assert "node2" in result
+
+    def test_regex_invalid_pattern_raises(self, db_path):
+        api.add_node("test", "Test node", db_path=db_path)
+        with pytest.raises(ValueError):
+            api.search("[invalid(regex", regex=True, db_path=db_path)
+
+    def test_regex_alternation(self, db_path):
+        api.add_node("a", "ANSTRAT-2311 issue", db_path=db_path)
+        api.add_node("b", "ValidX status", db_path=db_path)
+        api.add_node("c", "Other thing", db_path=db_path)
+        result = api.search("ANSTRAT|ValidX", regex=True, db_path=db_path)
+        assert "a" in result
+        assert "b" in result
+        assert "c" not in result
+
+
 class TestNamesOnlyFormat:
 
     def test_search_names_only(self, db_path):
