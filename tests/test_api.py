@@ -1950,3 +1950,97 @@ class TestExportImportTagsSources:
         src_b = [s for s in node["sources"] if s["source_ref"] == "repo:b.md"][0]
         assert src_b["source_type"] == "code"
         assert src_b["label"] == "extra"
+
+
+class TestTagFiltering:
+
+    def test_list_filter_by_topic(self, db_path):
+        api.add_node("a", "About networking", db_path=db_path)
+        api.add_node("b", "About auth", db_path=db_path)
+        api.add_tags("a", ["topic:networking"], db_path=db_path)
+        api.add_tags("b", ["topic:auth"], db_path=db_path)
+        result = api.list_nodes(tag={"topic": ["networking"]}, db_path=db_path)
+        ids = [n["id"] for n in result["nodes"]]
+        assert "a" in ids
+        assert "b" not in ids
+
+    def test_list_filter_by_multiple_topics_or(self, db_path):
+        api.add_node("a", "Net", db_path=db_path)
+        api.add_node("b", "Auth", db_path=db_path)
+        api.add_node("c", "Other", db_path=db_path)
+        api.add_tags("a", ["topic:networking"], db_path=db_path)
+        api.add_tags("b", ["topic:auth"], db_path=db_path)
+        result = api.list_nodes(tag={"topic": ["networking", "auth"]}, db_path=db_path)
+        ids = [n["id"] for n in result["nodes"]]
+        assert "a" in ids
+        assert "b" in ids
+        assert "c" not in ids
+
+    def test_list_filter_by_topic_and_status(self, db_path):
+        api.add_node("a", "Net reviewed", db_path=db_path)
+        api.add_node("b", "Net pending", db_path=db_path)
+        api.add_tags("a", ["topic:networking", "status:verified"], db_path=db_path)
+        api.add_tags("b", ["topic:networking", "status:needs-review"], db_path=db_path)
+        result = api.list_nodes(tag={"topic": ["networking"], "status": ["verified"]}, db_path=db_path)
+        ids = [n["id"] for n in result["nodes"]]
+        assert "a" in ids
+        assert "b" not in ids
+
+    def test_list_filter_by_exact_tag(self, db_path):
+        api.add_node("a", "Tagged", db_path=db_path)
+        api.add_tags("a", ["origin:code-review"], db_path=db_path)
+        result = api.list_nodes(tag={"tag": ["origin:code-review"]}, db_path=db_path)
+        ids = [n["id"] for n in result["nodes"]]
+        assert "a" in ids
+
+    def test_list_filter_no_match(self, db_path):
+        api.add_node("a", "No tags", db_path=db_path)
+        result = api.list_nodes(tag={"topic": ["nonexistent"]}, db_path=db_path)
+        assert result["nodes"] == []
+
+    def test_search_filter_by_tag(self, db_path):
+        api.add_node("net-belief", "networking timeout issue", db_path=db_path)
+        api.add_node("auth-belief", "auth timeout issue", db_path=db_path)
+        api.add_tags("net-belief", ["topic:networking"], db_path=db_path)
+        api.add_tags("auth-belief", ["topic:auth"], db_path=db_path)
+        result = api.search("timeout", tag={"topic": ["networking"]},
+                            db_path=db_path, format="names-only")
+        assert "net-belief" in result
+        assert "auth-belief" not in result
+
+    def test_list_filter_by_origin(self, db_path):
+        api.add_node("a", "From code review", db_path=db_path)
+        api.add_node("b", "From exploration", db_path=db_path)
+        api.add_tags("a", ["origin:code-review"], db_path=db_path)
+        api.add_tags("b", ["origin:exploration"], db_path=db_path)
+        result = api.list_nodes(tag={"origin": ["code-review"]}, db_path=db_path)
+        ids = [n["id"] for n in result["nodes"]]
+        assert "a" in ids
+        assert "b" not in ids
+
+    def test_list_filter_by_priority(self, db_path):
+        api.add_node("a", "Critical", db_path=db_path)
+        api.add_node("b", "Low", db_path=db_path)
+        api.add_tags("a", ["priority:critical"], db_path=db_path)
+        api.add_tags("b", ["priority:low"], db_path=db_path)
+        result = api.list_nodes(tag={"priority": ["critical"]}, db_path=db_path)
+        ids = [n["id"] for n in result["nodes"]]
+        assert "a" in ids
+        assert "b" not in ids
+
+    def test_list_filter_by_stream(self, db_path):
+        api.add_node("a", "Auth rewrite", db_path=db_path)
+        api.add_tags("a", ["stream:auth-rewrite"], db_path=db_path)
+        result = api.list_nodes(tag={"stream": ["auth-rewrite"]}, db_path=db_path)
+        ids = [n["id"] for n in result["nodes"]]
+        assert "a" in ids
+
+    def test_list_filter_by_workflow_status(self, db_path):
+        api.add_node("a", "Reviewed", db_path=db_path)
+        api.add_node("b", "Pending", db_path=db_path)
+        api.add_tags("a", ["status:verified"], db_path=db_path)
+        api.add_tags("b", ["status:needs-review"], db_path=db_path)
+        result = api.list_nodes(tag={"status": ["needs-review"]}, db_path=db_path)
+        ids = [n["id"] for n in result["nodes"]]
+        assert "b" in ids
+        assert "a" not in ids

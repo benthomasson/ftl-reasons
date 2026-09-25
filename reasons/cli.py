@@ -1272,6 +1272,19 @@ def _parse_visible_to(args):
     return None
 
 
+def _parse_tag_filters(args) -> dict[str, list[str]] | None:
+    """Build tag filter dict from CLI args."""
+    filters: dict[str, list[str]] = {}
+    for key in ("topic", "origin", "priority", "stream", "tag"):
+        vals = getattr(args, key, None)
+        if vals:
+            filters[key] = vals
+    ws = getattr(args, "workflow_status", None)
+    if ws:
+        filters["status"] = ws
+    return filters or None
+
+
 def _backend_kwargs(args):
     pg = getattr(args, "pg", None) or os.environ.get("REASONS_PG_CONNINFO")
     pid = getattr(args, "project_id", None) or os.environ.get("REASONS_PROJECT_ID")
@@ -1300,6 +1313,7 @@ def cmd_search(args):
     regex = getattr(args, "regex", False)
     result = api.search(args.query, visible_to=_parse_visible_to(args), format=fmt,
                         include_out=include_out, sort=sort, namespace=namespace,
+                        tag=_parse_tag_filters(args),
                         limit=limit, offset=offset, regex=regex,
                         **_backend_kwargs(args))
     print(result)
@@ -2053,6 +2067,7 @@ def cmd_list(args):
         by_impact=sort == "impact",
         sort=sort,
         label=args.label,
+        tag=_parse_tag_filters(args),
         limit=args.limit,
         offset=args.offset,
         **_backend_kwargs(args),
@@ -3546,6 +3561,12 @@ def main():
     p.add_argument("--visible-to", metavar="TAG,TAG", help="Only show nodes whose access_tags are a subset of these tags")
     p.add_argument("--show-out", action="store_true", help="Include OUT (retracted) beliefs in results")
     p.add_argument("--regex", action="store_true", help="Treat query as a regex pattern (experimental, may be slow)")
+    p.add_argument("--topic", action="append", metavar="TOPIC", help="Filter by topic tag (can repeat)")
+    p.add_argument("--workflow-status", action="append", metavar="STATUS", help="Filter by workflow status tag (can repeat)")
+    p.add_argument("--origin", action="append", metavar="ORIGIN", help="Filter by origin/provenance tag (can repeat)")
+    p.add_argument("--priority", action="append", metavar="PRIORITY", help="Filter by priority tag (can repeat)")
+    p.add_argument("--stream", action="append", metavar="STREAM", help="Filter by workstream tag (can repeat)")
+    p.add_argument("--tag", action="append", metavar="PREFIX:VALUE", help="Filter by exact prefixed tag (can repeat)")
 
     # lookup
     p = sub.add_parser("lookup", help="Simple keyword search over beliefs (no neighbor expansion)")
@@ -3878,6 +3899,12 @@ def main():
                    choices=["id", "created", "updated", "impact", "depth"],
                    help="Sort order (default: id)")
     p.add_argument("--label", help="Filter to nodes with a justification matching this label")
+    p.add_argument("--topic", action="append", metavar="TOPIC", help="Filter by topic tag (can repeat)")
+    p.add_argument("--workflow-status", action="append", metavar="STATUS", help="Filter by workflow status tag (can repeat)")
+    p.add_argument("--origin", action="append", metavar="ORIGIN", help="Filter by origin/provenance tag (can repeat)")
+    p.add_argument("--priority", action="append", metavar="PRIORITY", help="Filter by priority tag (can repeat)")
+    p.add_argument("--stream", action="append", metavar="STREAM", help="Filter by workstream tag (can repeat)")
+    p.add_argument("--tag", action="append", metavar="PREFIX:VALUE", help="Filter by exact prefixed tag (can repeat)")
     p.add_argument("--format", choices=["full", "names-only"], default="full",
                    help="Output format (default: full)")
     p.add_argument("--limit", type=int, default=None, help="Maximum number of nodes to return")
