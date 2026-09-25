@@ -344,18 +344,6 @@ def add_node(
             "premise_count": max_premises,
         }
 
-    if access_tags:
-        conn = sqlite3.connect(db_path)
-        try:
-            for t in sorted(set(access_tags)):
-                conn.execute(
-                    "INSERT OR IGNORE INTO node_tags (node_id, tag) VALUES (?, ?)",
-                    (node_id, f"access:{t}"),
-                )
-            conn.commit()
-        finally:
-            conn.close()
-
     return result
 
 

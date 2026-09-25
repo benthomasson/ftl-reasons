@@ -1849,6 +1849,22 @@ class TestNodeTags:
         assert "access:internal" in result["tags"]
         assert "access:security" in result["tags"]
 
+    def test_tags_survive_retract(self, db_path):
+        api.add_node("survive", "Will be retracted", db_path=db_path)
+        api.add_tags("survive", ["topic:test", "status:reviewed"], db_path=db_path)
+        api.retract_node("survive", db_path=db_path)
+        result = api.get_tags("survive", db_path=db_path)
+        assert "topic:test" in result["tags"]
+        assert "status:reviewed" in result["tags"]
+
+    def test_tags_survive_assert(self, db_path):
+        api.add_node("sa", "Will be asserted", db_path=db_path)
+        api.add_tags("sa", ["topic:x"], db_path=db_path)
+        api.retract_node("sa", db_path=db_path)
+        api.assert_node("sa", db_path=db_path)
+        result = api.get_tags("sa", db_path=db_path)
+        assert "topic:x" in result["tags"]
+
 
 class TestNodeSources:
 
@@ -1868,6 +1884,14 @@ class TestNodeSources:
         api.add_source("multi-src", "repo:b.md", source_type="document", db_path=db_path)
         node = api.show_node("multi-src", db_path=db_path)
         assert len(node["sources"]) == 2
+
+    def test_sources_survive_retract(self, db_path):
+        api.add_node("src-survive", "Will be retracted", db_path=db_path)
+        api.add_source("src-survive", "repo:a.md", source_type="code", db_path=db_path)
+        api.retract_node("src-survive", db_path=db_path)
+        node = api.show_node("src-survive", db_path=db_path)
+        src_refs = [s["source_ref"] for s in node["sources"]]
+        assert "repo:a.md" in src_refs
 
     def test_show_node_includes_sources(self, db_path):
         api.add_node("show-src", "With source", source="repo:main.py", db_path=db_path)

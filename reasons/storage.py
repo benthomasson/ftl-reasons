@@ -227,6 +227,18 @@ class Storage:
     def save(self, network: Network) -> None:
         """Persist the entire network state to SQLite."""
         with self.conn:
+            # Snapshot externally-added tags/sources before clearing.
+            # add_tags()/add_source() write directly to these tables,
+            # bypassing the in-memory Network, so we must preserve them.
+            ext_tags = self.conn.execute(
+                "SELECT node_id, tag FROM node_tags"
+            ).fetchall()
+            ext_sources = self.conn.execute(
+                "SELECT node_id, source_type, source_ref, source_url, "
+                "source_hash, pinned_sha, pinned_lines, label, added_at "
+                "FROM node_sources"
+            ).fetchall()
+
             # Clear and rewrite (simple strategy for small networks)
             self.conn.execute("DELETE FROM node_tags")
             self.conn.execute("DELETE FROM node_sources")
@@ -300,6 +312,25 @@ class Storage:
                             node.metadata.get("pinned_sha", ""),
                             node.metadata.get("pinned_lines", ""),
                         ),
+                    )
+
+            # Restore externally-added tags/sources for nodes still in network
+            node_ids = set(network.nodes.keys())
+            for nid, tag in ext_tags:
+                if nid in node_ids:
+                    self.conn.execute(
+                        "INSERT OR IGNORE INTO node_tags (node_id, tag) VALUES (?, ?)",
+                        (nid, tag),
+                    )
+            for row in ext_sources:
+                nid = row[0]
+                if nid in node_ids:
+                    self.conn.execute(
+                        "INSERT OR IGNORE INTO node_sources "
+                        "(node_id, source_type, source_ref, source_url, source_hash, "
+                        "pinned_sha, pinned_lines, label, added_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        row,
                     )
 
             for nogood in network.nogoods:
