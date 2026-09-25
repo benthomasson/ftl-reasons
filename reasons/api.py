@@ -46,6 +46,62 @@ def _is_visible(node, visible_to: list[str]) -> bool:
     return all(t in visible_set for t in tags)
 
 
+def _get_node_tags(db_path: str, node_ids: list[str] | None = None) -> dict[str, list[str]]:
+    """Load tags from node_tags table. Returns {node_id: [tag, ...]}."""
+    conn = sqlite3.connect(db_path)
+    try:
+        if node_ids is not None and len(node_ids) > 0:
+            placeholders = ",".join("?" * len(node_ids))
+            rows = conn.execute(
+                f"SELECT node_id, tag FROM node_tags WHERE node_id IN ({placeholders})",
+                node_ids,
+            ).fetchall()
+        elif node_ids is not None:
+            return {}
+        else:
+            rows = conn.execute("SELECT node_id, tag FROM node_tags").fetchall()
+        result: dict[str, list[str]] = {}
+        for nid, tag in rows:
+            result.setdefault(nid, []).append(tag)
+        return result
+    finally:
+        conn.close()
+
+
+def _filter_by_tags(node_ids: list[str], tag_filters: dict[str, list[str]], db_path: str) -> list[str]:
+    """Filter node IDs by tag criteria.
+
+    tag_filters maps filter keys to value lists:
+      {"topic": ["networking"], "status": ["needs-review"], "tag": ["topic:networking"]}
+
+    For "tag" key: exact match (user provides full prefixed tag).
+    For prefix keys: auto-prefixes and does contains match.
+    All filter groups are ANDed. Within a group, values are ORed.
+    """
+    if not tag_filters:
+        return node_ids
+
+    all_tags = _get_node_tags(db_path, node_ids)
+
+    result = []
+    for nid in node_ids:
+        node_tags = all_tags.get(nid, [])
+        match = True
+        for filter_key, filter_values in tag_filters.items():
+            if filter_key == "tag":
+                if not any(v in node_tags for v in filter_values):
+                    match = False
+                    break
+            else:
+                prefixed = [f"{filter_key}:{v}" for v in filter_values]
+                if not any(p in node_tags for p in prefixed):
+                    match = False
+                    break
+        if match:
+            result.append(nid)
+    return result
+
+
 def _resolve_namespace(node_id: str, namespace: str | None) -> str:
     """Prefix node_id with namespace if provided and not already namespaced.
 
@@ -2961,6 +3017,7 @@ def search(query: str, visible_to: list[str] | None = None, db_path: str = DEFAU
            include_out: bool = False,
            sort: str = "relevance",
            namespace: str | None = None,
+           tag: dict[str, list[str]] | None = None,
            limit: int | None = None,
            offset: int = 0,
            regex: bool = False,
@@ -3033,6 +3090,12 @@ def search(query: str, visible_to: list[str] | None = None, db_path: str = DEFAU
                 nid for nid in matched_ids
                 if nid in net.nodes and _is_visible(net.nodes[nid], visible_to)
             ]
+            if not matched_ids:
+                return "No results found."
+
+        # Filter by tags
+        if tag:
+            matched_ids = _filter_by_tags(matched_ids, tag, db_path)
             if not matched_ids:
                 return "No results found."
 
@@ -3338,6 +3401,7 @@ def list_nodes(
     by_impact: bool = False,
     sort: str | None = None,
     label: str | None = None,
+    tag: dict[str, list[str]] | None = None,
     limit: int | None = None,
     offset: int = 0,
     db_path: str = DEFAULT_DB,
@@ -3364,6 +3428,8 @@ def list_nodes(
             unsupported.append("never_reviewed")
         if by_impact:
             unsupported.append("by_impact")
+        if tag:
+            unsupported.append("tag")
         if unsupported:
             raise NotImplementedError(
                 f"{', '.join(unsupported)} not supported with PostgreSQL")
@@ -3435,6 +3501,9 @@ def list_nodes(
                 "updated_at": node.updated_at or "",
                 "depth": depth,
             })
+        if tag:
+            matching_ids = set(_filter_by_tags([n["id"] for n in nodes], tag, db_path))
+            nodes = [n for n in nodes if n["id"] in matching_ids]
         if sort == "created":
             nodes.sort(key=lambda n: n["created_at"] or "", reverse=True)
         elif sort == "updated":
