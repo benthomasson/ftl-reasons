@@ -337,12 +337,26 @@ def add_node(
         )
         jtype = justifications[0].type if justifications else "premise"
         max_premises = max((len(j.antecedents) for j in justifications), default=0)
-        return {
+        result = {
             "node_id": node_id,
             "truth_value": node.truth_value,
             "type": jtype,
             "premise_count": max_premises,
         }
+
+    if access_tags:
+        conn = sqlite3.connect(db_path)
+        try:
+            for t in sorted(set(access_tags)):
+                conn.execute(
+                    "INSERT OR IGNORE INTO node_tags (node_id, tag) VALUES (?, ?)",
+                    (node_id, f"access:{t}"),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+    return result
 
 
 def add_justification(
@@ -828,7 +842,7 @@ def show_node(node_id: str, visible_to: list[str] | None = None, db_path: str = 
             raise PermissionError(
                 f"Node '{node_id}' requires access tags not in {visible_to}"
             )
-        return {
+        result = {
             "id": node.id,
             "text": node.text,
             "truth_value": node.truth_value,
@@ -850,6 +864,125 @@ def show_node(node_id: str, visible_to: list[str] | None = None, db_path: str = 
             "verified_at": node.verified_at,
             "retracted_at": node.retracted_at,
         }
+
+        conn = sqlite3.connect(db_path)
+        try:
+            result["tags"] = [r[0] for r in conn.execute(
+                "SELECT tag FROM node_tags WHERE node_id = ? ORDER BY tag",
+                (node_id,),
+            ).fetchall()]
+            result["sources"] = [
+                {
+                    "source_type": row[0], "source_ref": row[1],
+                    "source_url": row[2], "source_hash": row[3],
+                    "pinned_sha": row[4], "pinned_lines": row[5],
+                    "label": row[6], "added_at": row[7],
+                }
+                for row in conn.execute(
+                    "SELECT source_type, source_ref, source_url, source_hash, "
+                    "pinned_sha, pinned_lines, label, added_at "
+                    "FROM node_sources WHERE node_id = ? ORDER BY rowid",
+                    (node_id,),
+                ).fetchall()
+            ]
+        finally:
+            conn.close()
+
+        return result
+
+
+def add_tags(node_id: str, tags: list[str], db_path: str = DEFAULT_DB,
+             pg_conninfo=None, project_id=None) -> dict:
+    """Add tags to a node. Returns {"node_id": str, "tags": list[str]}."""
+    if pg_conninfo:
+        raise NotImplementedError("add_tags is not supported with PostgreSQL yet")
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute("SELECT id FROM nodes WHERE id = ?", (node_id,)).fetchone()
+        if not row:
+            raise KeyError(f"Node '{node_id}' not found")
+        for tag in tags:
+            conn.execute(
+                "INSERT OR IGNORE INTO node_tags (node_id, tag) VALUES (?, ?)",
+                (node_id, tag),
+            )
+        conn.commit()
+        all_tags = [r[0] for r in conn.execute(
+            "SELECT tag FROM node_tags WHERE node_id = ? ORDER BY tag", (node_id,)
+        ).fetchall()]
+        return {"node_id": node_id, "tags": all_tags}
+    finally:
+        conn.close()
+
+
+def remove_tags(node_id: str, tags: list[str], db_path: str = DEFAULT_DB,
+                pg_conninfo=None, project_id=None) -> dict:
+    """Remove tags from a node. Returns {"node_id": str, "tags": list[str], "removed": list[str]}."""
+    if pg_conninfo:
+        raise NotImplementedError("remove_tags is not supported with PostgreSQL yet")
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute("SELECT id FROM nodes WHERE id = ?", (node_id,)).fetchone()
+        if not row:
+            raise KeyError(f"Node '{node_id}' not found")
+        removed = []
+        for tag in tags:
+            affected = conn.execute(
+                "DELETE FROM node_tags WHERE node_id = ? AND tag = ?",
+                (node_id, tag),
+            ).rowcount
+            if affected:
+                removed.append(tag)
+        conn.commit()
+        all_tags = [r[0] for r in conn.execute(
+            "SELECT tag FROM node_tags WHERE node_id = ? ORDER BY tag", (node_id,)
+        ).fetchall()]
+        return {"node_id": node_id, "tags": all_tags, "removed": removed}
+    finally:
+        conn.close()
+
+
+def get_tags(node_id: str, db_path: str = DEFAULT_DB,
+             pg_conninfo=None, project_id=None) -> dict:
+    """Get all tags for a node. Returns {"node_id": str, "tags": list[str]}."""
+    if pg_conninfo:
+        raise NotImplementedError("get_tags is not supported with PostgreSQL yet")
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute("SELECT id FROM nodes WHERE id = ?", (node_id,)).fetchone()
+        if not row:
+            raise KeyError(f"Node '{node_id}' not found")
+        all_tags = [r[0] for r in conn.execute(
+            "SELECT tag FROM node_tags WHERE node_id = ? ORDER BY tag", (node_id,)
+        ).fetchall()]
+        return {"node_id": node_id, "tags": all_tags}
+    finally:
+        conn.close()
+
+
+def add_source(node_id: str, source_ref: str, source_type: str = "",
+               source_url: str = "", label: str = "",
+               db_path: str = DEFAULT_DB,
+               pg_conninfo=None, project_id=None) -> dict:
+    """Add a source to a node. Returns {"node_id": str, "source_id": int}."""
+    if pg_conninfo:
+        raise NotImplementedError("add_source is not supported with PostgreSQL yet")
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute("SELECT id FROM nodes WHERE id = ?", (node_id,)).fetchone()
+        if not row:
+            raise KeyError(f"Node '{node_id}' not found")
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        cursor = conn.execute(
+            "INSERT INTO node_sources "
+            "(node_id, source_type, source_ref, source_url, label, added_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (node_id, source_type, source_ref, source_url, label, now),
+        )
+        conn.commit()
+        return {"node_id": node_id, "source_id": cursor.lastrowid}
+    finally:
+        conn.close()
 
 
 def explain_node(node_id: str, visible_to: list[str] | None = None, db_path: str = DEFAULT_DB,

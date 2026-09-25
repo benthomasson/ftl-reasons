@@ -1790,3 +1790,88 @@ class TestStatusPagination:
         result = api.get_status(limit=3, offset=2, db_path=db_path)
         assert len(result["nodes"]) == 3
         assert result["total"] == 10
+
+
+class TestNodeTags:
+
+    def test_add_tags(self, db_path):
+        api.add_node("tagged-node", "A tagged node", db_path=db_path)
+        result = api.add_tags("tagged-node", ["topic:networking", "access:internal"], db_path=db_path)
+        assert result["node_id"] == "tagged-node"
+        assert "topic:networking" in result["tags"]
+        assert "access:internal" in result["tags"]
+
+    def test_add_tags_idempotent(self, db_path):
+        api.add_node("n1", "Node", db_path=db_path)
+        api.add_tags("n1", ["topic:x"], db_path=db_path)
+        result = api.add_tags("n1", ["topic:x"], db_path=db_path)
+        assert result["tags"].count("topic:x") == 1
+
+    def test_add_tags_missing_node(self, db_path):
+        with pytest.raises(KeyError):
+            api.add_tags("nonexistent", ["topic:x"], db_path=db_path)
+
+    def test_remove_tags(self, db_path):
+        api.add_node("n2", "Node", db_path=db_path)
+        api.add_tags("n2", ["topic:a", "topic:b", "topic:c"], db_path=db_path)
+        result = api.remove_tags("n2", ["topic:b"], db_path=db_path)
+        assert "topic:b" not in result["tags"]
+        assert "topic:b" in result["removed"]
+        assert "topic:a" in result["tags"]
+
+    def test_remove_nonexistent_tag(self, db_path):
+        api.add_node("n3", "Node", db_path=db_path)
+        result = api.remove_tags("n3", ["topic:nope"], db_path=db_path)
+        assert result["removed"] == []
+
+    def test_get_tags(self, db_path):
+        api.add_node("n4", "Node", db_path=db_path)
+        api.add_tags("n4", ["access:secret", "topic:auth"], db_path=db_path)
+        result = api.get_tags("n4", db_path=db_path)
+        assert "access:secret" in result["tags"]
+        assert "topic:auth" in result["tags"]
+
+    def test_get_tags_empty(self, db_path):
+        api.add_node("n5", "Node", db_path=db_path)
+        result = api.get_tags("n5", db_path=db_path)
+        assert result["tags"] == []
+
+    def test_show_node_includes_tags(self, db_path):
+        api.add_node("show-tags", "Has tags", db_path=db_path)
+        api.add_tags("show-tags", ["topic:test"], db_path=db_path)
+        node = api.show_node("show-tags", db_path=db_path)
+        assert "tags" in node
+        assert "topic:test" in node["tags"]
+
+    def test_access_tags_migrated_on_add(self, db_path):
+        api.add_node("at-node", "Access tagged", access_tags=["internal", "security"], db_path=db_path)
+        result = api.get_tags("at-node", db_path=db_path)
+        assert "access:internal" in result["tags"]
+        assert "access:security" in result["tags"]
+
+
+class TestNodeSources:
+
+    def test_add_source(self, db_path):
+        api.add_node("src-node", "Has sources", db_path=db_path)
+        result = api.add_source("src-node", "repo:path/file.md", source_type="code", db_path=db_path)
+        assert result["node_id"] == "src-node"
+        assert result["source_id"] > 0
+
+    def test_add_source_missing_node(self, db_path):
+        with pytest.raises(KeyError):
+            api.add_source("nonexistent", "repo:file.md", db_path=db_path)
+
+    def test_add_multiple_sources(self, db_path):
+        api.add_node("multi-src", "Multiple sources", db_path=db_path)
+        api.add_source("multi-src", "repo:a.md", source_type="code", db_path=db_path)
+        api.add_source("multi-src", "repo:b.md", source_type="document", db_path=db_path)
+        node = api.show_node("multi-src", db_path=db_path)
+        assert len(node["sources"]) == 2
+
+    def test_show_node_includes_sources(self, db_path):
+        api.add_node("show-src", "With source", source="repo:main.py", db_path=db_path)
+        node = api.show_node("show-src", db_path=db_path)
+        assert "sources" in node
+        assert len(node["sources"]) >= 1
+        assert node["sources"][0]["source_ref"] == "repo:main.py"
