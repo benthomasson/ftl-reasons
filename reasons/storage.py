@@ -69,6 +69,27 @@ CREATE TABLE IF NOT EXISTS network_meta (
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(id, text, tokenize="porter unicode61 tokenchars '-_'");
+
+CREATE TABLE IF NOT EXISTS node_tags (
+    node_id TEXT NOT NULL REFERENCES nodes(id),
+    tag TEXT NOT NULL,
+    PRIMARY KEY (node_id, tag)
+);
+CREATE INDEX IF NOT EXISTS idx_node_tags_tag ON node_tags(tag);
+
+CREATE TABLE IF NOT EXISTS node_sources (
+    rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+    node_id TEXT NOT NULL REFERENCES nodes(id),
+    source_type TEXT NOT NULL DEFAULT '',
+    source_ref TEXT NOT NULL DEFAULT '',
+    source_url TEXT DEFAULT '',
+    source_hash TEXT DEFAULT '',
+    pinned_sha TEXT DEFAULT '',
+    pinned_lines TEXT DEFAULT '',
+    label TEXT DEFAULT '',
+    added_at TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_node_sources_node ON node_sources(node_id);
 """
 
 PROPOSALS_SCHEMA = """
@@ -112,6 +133,10 @@ class Storage:
         self._init_schema()
 
     def _init_schema(self) -> None:
+        # Check which tables exist before SCHEMA creates them (for migration)
+        pre_tables = set(r[0] for r in self.conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall())
         self.conn.executescript(SCHEMA)
         # Migrate existing databases: add source_url if missing
         cols = [c[1] for c in self.conn.execute("PRAGMA table_info(nodes)").fetchall()]
@@ -127,6 +152,42 @@ class Storage:
         j_cols = [c[1] for c in self.conn.execute("PRAGMA table_info(justifications)").fetchall()]
         if "content_hash" not in j_cols:
             self.conn.execute("ALTER TABLE justifications ADD COLUMN content_hash TEXT DEFAULT ''")
+        # Migrate: populate node_tags / node_sources for existing databases
+        # Tables already created by SCHEMA above; populate data only on first upgrade
+        if "node_tags" not in pre_tables:
+            for nid, meta_json in self.conn.execute(
+                "SELECT id, metadata_json FROM nodes"
+            ).fetchall():
+                meta = json.loads(meta_json) if meta_json else {}
+                for t in meta.get("access_tags", []):
+                    self.conn.execute(
+                        "INSERT OR IGNORE INTO node_tags (node_id, tag) VALUES (?, ?)",
+                        (nid, f"access:{t}"),
+                    )
+            self.conn.commit()
+        if "node_sources" not in pre_tables:
+            for nid, source, source_url, source_hash, meta_json in self.conn.execute(
+                "SELECT id, source, source_url, source_hash, metadata_json FROM nodes"
+            ).fetchall():
+                if not source:
+                    continue
+                meta = json.loads(meta_json) if meta_json else {}
+                self.conn.execute(
+                    "INSERT INTO node_sources "
+                    "(node_id, source_type, source_ref, source_url, source_hash, pinned_sha, pinned_lines) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        nid,
+                        meta.get("source_type", ""),
+                        source,
+                        source_url or "",
+                        source_hash or "",
+                        meta.get("pinned_sha", ""),
+                        meta.get("pinned_lines", ""),
+                    ),
+                )
+            self.conn.commit()
+
         if self._is_new:
             now = datetime.now(timezone.utc).isoformat(timespec="seconds")
             project_name = self._project_name or self.db_path.stem
@@ -145,7 +206,21 @@ class Storage:
     def save(self, network: Network) -> None:
         """Persist the entire network state to SQLite."""
         with self.conn:
+            # Snapshot externally-added tags/sources before clearing.
+            # add_tags()/add_source() write directly to these tables,
+            # bypassing the in-memory Network, so we must preserve them.
+            ext_tags = self.conn.execute(
+                "SELECT node_id, tag FROM node_tags"
+            ).fetchall()
+            ext_sources = self.conn.execute(
+                "SELECT node_id, source_type, source_ref, source_url, "
+                "source_hash, pinned_sha, pinned_lines, label, added_at "
+                "FROM node_sources"
+            ).fetchall()
+
             # Clear and rewrite (simple strategy for small networks)
+            self.conn.execute("DELETE FROM node_tags")
+            self.conn.execute("DELETE FROM node_sources")
             self.conn.execute("DELETE FROM justifications")
             self.conn.execute("DROP TABLE IF EXISTS nodes_fts")
             self.conn.execute('CREATE VIRTUAL TABLE nodes_fts USING fts5(id, text, tokenize="porter unicode61 tokenchars \'-_\'")')
@@ -188,6 +263,55 @@ class Storage:
                         "INSERT INTO justifications (node_id, type, antecedents_json, outlist_json, label, content_hash) "
                         "VALUES (?, ?, ?, ?, ?, ?)",
                         (node.id, j.type, json.dumps(j.antecedents), json.dumps(j.outlist), j.label, j.content_hash),
+                    )
+
+            # Sync node_tags and node_sources (already cleared above before nodes)
+            written_sources = set()
+            for node in network.nodes.values():
+                for t in node.metadata.get("access_tags", []):
+                    self.conn.execute(
+                        "INSERT OR IGNORE INTO node_tags (node_id, tag) VALUES (?, ?)",
+                        (node.id, f"access:{t}"),
+                    )
+                for t in node.metadata.get("tags", []):
+                    self.conn.execute(
+                        "INSERT OR IGNORE INTO node_tags (node_id, tag) VALUES (?, ?)",
+                        (node.id, t),
+                    )
+                if node.source:
+                    self.conn.execute(
+                        "INSERT INTO node_sources "
+                        "(node_id, source_type, source_ref, source_url, source_hash, pinned_sha, pinned_lines) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            node.id,
+                            node.metadata.get("source_type", ""),
+                            node.source,
+                            node.source_url or "",
+                            node.source_hash or "",
+                            node.metadata.get("pinned_sha", ""),
+                            node.metadata.get("pinned_lines", ""),
+                        ),
+                    )
+                    written_sources.add((node.id, node.source))
+
+            # Restore externally-added tags/sources for nodes still in network
+            node_ids = set(network.nodes.keys())
+            for nid, tag in ext_tags:
+                if nid in node_ids:
+                    self.conn.execute(
+                        "INSERT OR IGNORE INTO node_tags (node_id, tag) VALUES (?, ?)",
+                        (nid, tag),
+                    )
+            for row in ext_sources:
+                nid, src_ref = row[0], row[2]
+                if nid in node_ids and (nid, src_ref) not in written_sources:
+                    self.conn.execute(
+                        "INSERT INTO node_sources "
+                        "(node_id, source_type, source_ref, source_url, source_hash, "
+                        "pinned_sha, pinned_lines, label, added_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        row,
                     )
 
             for nogood in network.nogoods:

@@ -568,8 +568,70 @@ def cmd_show(args):
         for label, val in timestamps:
             print(f"{label}: {val}")
 
+    if node.get("tags"):
+        print(f"\nTags: {', '.join(node['tags'])}")
+
+    if node.get("sources"):
+        print(f"\nSources ({len(node['sources'])}):")
+        for s in node["sources"]:
+            parts = [s["source_ref"]]
+            if s.get("source_type"):
+                parts.append(f"[{s['source_type']}]")
+            if s.get("label"):
+                parts.append(f"({s['label']})")
+            print(f"  {' '.join(parts)}")
+
     if node["dependents"]:
         print(f"\nDependents: {', '.join(node['dependents'])}")
+
+
+def cmd_tag(args):
+    try:
+        result = api.add_tags(args.node_id, args.tags, **_backend_kwargs(args))
+    except KeyError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    print(f"Tags for {result['node_id']}: {', '.join(result['tags'])}")
+
+
+def cmd_untag(args):
+    try:
+        result = api.remove_tags(args.node_id, args.tags, **_backend_kwargs(args))
+    except KeyError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    if result["removed"]:
+        print(f"Removed: {', '.join(result['removed'])}")
+    print(f"Tags for {result['node_id']}: {', '.join(result['tags']) or '(none)'}")
+
+
+def cmd_tags(args):
+    try:
+        result = api.get_tags(args.node_id, **_backend_kwargs(args))
+    except KeyError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    if not result["tags"]:
+        print(f"{args.node_id} has no tags.")
+        return
+    for tag in result["tags"]:
+        print(f"  {tag}")
+
+
+def cmd_add_source(args):
+    try:
+        result = api.add_source(
+            args.node_id,
+            args.source_ref,
+            source_type=getattr(args, "type", ""),
+            source_url=getattr(args, "url", ""),
+            label=getattr(args, "label", ""),
+            **_backend_kwargs(args),
+        )
+    except KeyError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    print(f"Added source #{result['source_id']} to {result['node_id']}")
 
 
 def cmd_explain(args):
@@ -3105,6 +3167,26 @@ def main():
     p.add_argument("node_id", help="Node to show")
     p.add_argument("--visible-to", metavar="TAG,TAG", help="Only show if access_tags are a subset of these tags")
 
+    # tag / untag / tags
+    p = sub.add_parser("tag", help="Add tags to a node")
+    p.add_argument("node_id", help="Node to tag")
+    p.add_argument("tags", nargs="+", help="Tags to add (e.g. topic:networking access:internal)")
+
+    p = sub.add_parser("untag", help="Remove tags from a node")
+    p.add_argument("node_id", help="Node to untag")
+    p.add_argument("tags", nargs="+", help="Tags to remove")
+
+    p = sub.add_parser("tags", help="List tags for a node")
+    p.add_argument("node_id", help="Node to show tags for")
+
+    # add-source
+    p = sub.add_parser("add-source", help="Add a source to a node")
+    p.add_argument("node_id", help="Node to add source to")
+    p.add_argument("source_ref", help="Source reference (e.g. repo:path/file.md)")
+    p.add_argument("--type", default="", help="Source type (code, document, git-commit, etc.)")
+    p.add_argument("--url", default="", help="Source URL")
+    p.add_argument("--label", default="", help="Source label")
+
     # explain
     p = sub.add_parser("explain", help="Explain why a node is IN or OUT")
     p.add_argument("--format", choices=["full", "names-only"], default="full",
@@ -3822,6 +3904,10 @@ def main():
         "what-if": cmd_what_if,
         "status": cmd_status,
         "show": cmd_show,
+        "tag": cmd_tag,
+        "untag": cmd_untag,
+        "tags": cmd_tags,
+        "add-source": cmd_add_source,
         "explain": cmd_explain,
         "nogood": cmd_nogood,
         "propagate": cmd_propagate,
