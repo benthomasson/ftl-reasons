@@ -3051,6 +3051,8 @@ def search(query: str, visible_to: list[str] | None = None, db_path: str = DEFAU
     if pg_conninfo:
         if depth != 1:
             raise NotImplementedError("depth is not supported with PostgreSQL")
+        if tag:
+            raise NotImplementedError("tag filtering is not supported with PostgreSQL")
         return _pg_dispatch(pg_conninfo, project_id, "search",
                             query=query, visible_to=visible_to, format=format,
                             include_out=include_out)

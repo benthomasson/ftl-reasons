@@ -2034,3 +2034,13 @@ class TestTagFiltering:
         result = api.list_nodes(tag={"stream": ["auth-rewrite"]}, db_path=db_path)
         ids = [n["id"] for n in result["nodes"]]
         assert "a" in ids
+
+    def test_list_filter_by_workflow_status(self, db_path):
+        api.add_node("a", "Reviewed", db_path=db_path)
+        api.add_node("b", "Pending", db_path=db_path)
+        api.add_tags("a", ["status:verified"], db_path=db_path)
+        api.add_tags("b", ["status:needs-review"], db_path=db_path)
+        result = api.list_nodes(tag={"status": ["needs-review"]}, db_path=db_path)
+        ids = [n["id"] for n in result["nodes"]]
+        assert "b" in ids
+        assert "a" not in ids
