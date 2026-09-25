@@ -133,6 +133,10 @@ class Storage:
         self._init_schema()
 
     def _init_schema(self) -> None:
+        # Check which tables exist before SCHEMA creates them (for migration)
+        pre_tables = set(r[0] for r in self.conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall())
         self.conn.executescript(SCHEMA)
         # Migrate existing databases: add source_url if missing
         cols = [c[1] for c in self.conn.execute("PRAGMA table_info(nodes)").fetchall()]
@@ -148,19 +152,9 @@ class Storage:
         j_cols = [c[1] for c in self.conn.execute("PRAGMA table_info(justifications)").fetchall()]
         if "content_hash" not in j_cols:
             self.conn.execute("ALTER TABLE justifications ADD COLUMN content_hash TEXT DEFAULT ''")
-        # Migrate: create node_tags / node_sources if missing
-        tables = [r[0] for r in self.conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        ).fetchall()]
-        if "node_tags" not in tables:
-            self.conn.executescript("""
-                CREATE TABLE IF NOT EXISTS node_tags (
-                    node_id TEXT NOT NULL REFERENCES nodes(id),
-                    tag TEXT NOT NULL,
-                    PRIMARY KEY (node_id, tag)
-                );
-                CREATE INDEX IF NOT EXISTS idx_node_tags_tag ON node_tags(tag);
-            """)
+        # Migrate: populate node_tags / node_sources for existing databases
+        # Tables already created by SCHEMA above; populate data only on first upgrade
+        if "node_tags" not in pre_tables:
             for nid, meta_json in self.conn.execute(
                 "SELECT id, metadata_json FROM nodes"
             ).fetchall():
@@ -171,22 +165,7 @@ class Storage:
                         (nid, f"access:{t}"),
                     )
             self.conn.commit()
-        if "node_sources" not in tables:
-            self.conn.executescript("""
-                CREATE TABLE IF NOT EXISTS node_sources (
-                    rowid INTEGER PRIMARY KEY AUTOINCREMENT,
-                    node_id TEXT NOT NULL REFERENCES nodes(id),
-                    source_type TEXT NOT NULL DEFAULT '',
-                    source_ref TEXT NOT NULL DEFAULT '',
-                    source_url TEXT DEFAULT '',
-                    source_hash TEXT DEFAULT '',
-                    pinned_sha TEXT DEFAULT '',
-                    pinned_lines TEXT DEFAULT '',
-                    label TEXT DEFAULT '',
-                    added_at TEXT DEFAULT ''
-                );
-                CREATE INDEX IF NOT EXISTS idx_node_sources_node ON node_sources(node_id);
-            """)
+        if "node_sources" not in pre_tables:
             for nid, source, source_url, source_hash, meta_json in self.conn.execute(
                 "SELECT id, source, source_url, source_hash, metadata_json FROM nodes"
             ).fetchall():
