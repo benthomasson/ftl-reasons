@@ -1893,9 +1893,19 @@ class TestNodeSources:
         src_refs = [s["source_ref"] for s in node["sources"]]
         assert "repo:a.md" in src_refs
 
+    def test_sources_no_duplication_after_save(self, db_path):
+        api.add_node("dup-src", "Has both source types", source="repo:a.md", db_path=db_path)
+        api.add_source("dup-src", "repo:b.md", source_type="document", db_path=db_path)
+        api.retract_node("dup-src", db_path=db_path)
+        node = api.show_node("dup-src", db_path=db_path)
+        assert len(node["sources"]) == 2
+        refs = [s["source_ref"] for s in node["sources"]]
+        assert "repo:a.md" in refs
+        assert "repo:b.md" in refs
+
     def test_show_node_includes_sources(self, db_path):
         api.add_node("show-src", "With source", source="repo:main.py", db_path=db_path)
         node = api.show_node("show-src", db_path=db_path)
         assert "sources" in node
-        assert len(node["sources"]) >= 1
+        assert len(node["sources"]) == 1
         assert node["sources"][0]["source_ref"] == "repo:main.py"

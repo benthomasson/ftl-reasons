@@ -287,6 +287,7 @@ class Storage:
                     )
 
             # Sync node_tags and node_sources (already cleared above before nodes)
+            written_sources = set()
             for node in network.nodes.values():
                 for t in node.metadata.get("access_tags", []):
                     self.conn.execute(
@@ -313,6 +314,7 @@ class Storage:
                             node.metadata.get("pinned_lines", ""),
                         ),
                     )
+                    written_sources.add((node.id, node.source))
 
             # Restore externally-added tags/sources for nodes still in network
             node_ids = set(network.nodes.keys())
@@ -323,10 +325,10 @@ class Storage:
                         (nid, tag),
                     )
             for row in ext_sources:
-                nid = row[0]
-                if nid in node_ids:
+                nid, src_ref = row[0], row[2]
+                if nid in node_ids and (nid, src_ref) not in written_sources:
                     self.conn.execute(
-                        "INSERT OR IGNORE INTO node_sources "
+                        "INSERT INTO node_sources "
                         "(node_id, source_type, source_ref, source_url, source_hash, "
                         "pinned_sha, pinned_lines, label, added_at) "
                         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
