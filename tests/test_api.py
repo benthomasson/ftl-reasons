@@ -1909,3 +1909,44 @@ class TestNodeSources:
         assert "sources" in node
         assert len(node["sources"]) == 1
         assert node["sources"][0]["source_ref"] == "repo:main.py"
+
+
+class TestExportImportTagsSources:
+
+    def test_export_includes_tags_and_sources(self, db_path):
+        api.add_node("exp-node", "Exportable", source="repo:f.md", db_path=db_path)
+        api.add_tags("exp-node", ["topic:test", "access:internal"], db_path=db_path)
+        api.add_source("exp-node", "repo:extra.md", source_type="document", db_path=db_path)
+        result = api.export_network(db_path=db_path)
+        node = result["nodes"]["exp-node"]
+        assert "topic:test" in node["tags"]
+        assert "access:internal" in node["tags"]
+        assert len(node["sources"]) == 2
+        refs = [s["source_ref"] for s in node["sources"]]
+        assert "repo:f.md" in refs
+        assert "repo:extra.md" in refs
+
+    def test_round_trip_preserves_tags_and_sources(self, db_path, tmp_path):
+        import json
+        api.add_node("rt-node", "Round trip", source="repo:a.md", db_path=db_path)
+        api.add_tags("rt-node", ["topic:net", "status:verified"], db_path=db_path)
+        api.add_source("rt-node", "repo:b.md", source_type="code", label="extra", db_path=db_path)
+
+        exported = api.export_network(db_path=db_path)
+        json_file = tmp_path / "network.json"
+        json_file.write_text(json.dumps(exported))
+
+        db2 = str(tmp_path / "imported.db")
+        api.import_json(str(json_file), db_path=db2)
+
+        tags = api.get_tags("rt-node", db_path=db2)
+        assert "topic:net" in tags["tags"]
+        assert "status:verified" in tags["tags"]
+
+        node = api.show_node("rt-node", db_path=db2)
+        refs = [s["source_ref"] for s in node["sources"]]
+        assert "repo:a.md" in refs
+        assert "repo:b.md" in refs
+        src_b = [s for s in node["sources"] if s["source_ref"] == "repo:b.md"][0]
+        assert src_b["source_type"] == "code"
+        assert src_b["label"] == "extra"
