@@ -22,7 +22,7 @@ except ImportError:
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS rms_nodes (
     id TEXT NOT NULL,
-    project_id UUID NOT NULL,
+    domain_id UUID NOT NULL,
     text TEXT NOT NULL,
     truth_value TEXT NOT NULL DEFAULT 'IN' CHECK (truth_value IN ('IN', 'OUT')),
     source TEXT DEFAULT '',
@@ -35,32 +35,32 @@ CREATE TABLE IF NOT EXISTS rms_nodes (
     reviewed_at TIMESTAMPTZ,
     verified_at TIMESTAMPTZ,
     retracted_at TIMESTAMPTZ,
-    PRIMARY KEY (id, project_id)
+    PRIMARY KEY (id, domain_id)
 );
 
 CREATE TABLE IF NOT EXISTS rms_justifications (
     id SERIAL PRIMARY KEY,
     node_id TEXT NOT NULL,
-    project_id UUID NOT NULL,
+    domain_id UUID NOT NULL,
     type TEXT NOT NULL CHECK (type IN ('SL', 'CP')),
     antecedents JSONB NOT NULL DEFAULT '[]',
     outlist JSONB NOT NULL DEFAULT '[]',
     label TEXT DEFAULT '',
-    FOREIGN KEY (node_id, project_id) REFERENCES rms_nodes(id, project_id) ON DELETE CASCADE
+    FOREIGN KEY (node_id, domain_id) REFERENCES rms_nodes(id, domain_id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS rms_nogoods (
     id TEXT NOT NULL,
-    project_id UUID NOT NULL,
+    domain_id UUID NOT NULL,
     nodes JSONB NOT NULL DEFAULT '[]',
     discovered TEXT DEFAULT '',
     resolution TEXT DEFAULT '',
-    PRIMARY KEY (id, project_id)
+    PRIMARY KEY (id, domain_id)
 );
 
 CREATE TABLE IF NOT EXISTS rms_propagation_log (
     id SERIAL PRIMARY KEY,
-    project_id UUID NOT NULL,
+    domain_id UUID NOT NULL,
     timestamp TEXT NOT NULL,
     action TEXT NOT NULL,
     target TEXT NOT NULL,
@@ -69,18 +69,18 @@ CREATE TABLE IF NOT EXISTS rms_propagation_log (
 
 CREATE TABLE IF NOT EXISTS rms_network_meta (
     key TEXT NOT NULL,
-    project_id UUID NOT NULL,
+    domain_id UUID NOT NULL,
     value TEXT NOT NULL,
-    PRIMARY KEY (key, project_id)
+    PRIMARY KEY (key, domain_id)
 );
 """
 
 INDEXES = """
-CREATE INDEX IF NOT EXISTS idx_rms_nodes_project ON rms_nodes(project_id);
-CREATE INDEX IF NOT EXISTS idx_rms_nodes_status ON rms_nodes(project_id, truth_value);
-CREATE INDEX IF NOT EXISTS idx_rms_justifications_node ON rms_justifications(node_id, project_id);
-CREATE INDEX IF NOT EXISTS idx_rms_nogoods_project ON rms_nogoods(project_id);
-CREATE INDEX IF NOT EXISTS idx_rms_log_project ON rms_propagation_log(project_id);
+CREATE INDEX IF NOT EXISTS idx_rms_nodes_domain ON rms_nodes(domain_id);
+CREATE INDEX IF NOT EXISTS idx_rms_nodes_status ON rms_nodes(domain_id, truth_value);
+CREATE INDEX IF NOT EXISTS idx_rms_justifications_node ON rms_justifications(node_id, domain_id);
+CREATE INDEX IF NOT EXISTS idx_rms_nogoods_domain ON rms_nogoods(domain_id);
+CREATE INDEX IF NOT EXISTS idx_rms_log_domain ON rms_propagation_log(domain_id);
 CREATE INDEX IF NOT EXISTS idx_rms_nodes_fts ON rms_nodes USING gin(to_tsvector('english', text));
 CREATE INDEX IF NOT EXISTS idx_rms_justifications_antecedents ON rms_justifications USING gin(antecedents);
 CREATE INDEX IF NOT EXISTS idx_rms_justifications_outlist ON rms_justifications USING gin(outlist);
@@ -101,7 +101,7 @@ class PgApi:
     Each method executes as a SQL transaction. No in-memory Network object.
     """
 
-    def __init__(self, conninfo, project_id):
+    def __init__(self, conninfo, domain_id):
         _require_psycopg()
         if isinstance(conninfo, str):
             self.conn = psycopg.connect(conninfo, autocommit=False)
@@ -109,7 +109,7 @@ class PgApi:
         else:
             self.conn = conninfo
             self._owns_conn = False
-        self.project_id = str(project_id)
+        self.domain_id = str(domain_id)
 
     def close(self):
         if self._owns_conn:
@@ -146,7 +146,7 @@ class PgApi:
                 if not cur.fetchone():
                     cur.execute(f"ALTER TABLE rms_nodes ADD COLUMN {col} TIMESTAMPTZ")
             now = datetime.now(timezone.utc).isoformat(timespec="seconds")
-            pname = project_name or self.project_id
+            pname = project_name or self.domain_id
             for key, val in [
                 ("schema_version", SCHEMA_VERSION),
                 ("project_name", pname),
@@ -154,13 +154,13 @@ class PgApi:
                 ("updated_at", now),
             ]:
                 cur.execute(
-                    "INSERT INTO rms_network_meta (key, project_id, value) "
+                    "INSERT INTO rms_network_meta (key, domain_id, value) "
                     "VALUES (%s, %s, %s) "
-                    "ON CONFLICT (key, project_id) DO NOTHING",
-                    (key, self.project_id, val),
+                    "ON CONFLICT (key, domain_id) DO NOTHING",
+                    (key, self.domain_id, val),
                 )
         self.conn.commit()
-        return {"project_id": self.project_id, "created": True}
+        return {"domain_id": self.domain_id, "created": True}
 
     # ── Core mutations ──────────────────────────────────────────
 
@@ -172,7 +172,7 @@ class PgApi:
         Does NOT commit, validate refs, or inherit access tags.
         Caller is responsible for transaction management.
         """
-        pid = self.project_id
+        pid = self.domain_id
         now_ts = datetime.now(timezone.utc)
         now = date or now_ts.isoformat(timespec="seconds")
         meta = metadata or {}
@@ -180,7 +180,7 @@ class PgApi:
         ts_updated = updated_at or ts_created
 
         cur.execute(
-            "INSERT INTO rms_nodes (id, project_id, text, source, source_url, "
+            "INSERT INTO rms_nodes (id, domain_id, text, source, source_url, "
             "source_hash, date, metadata, created_at, updated_at) "
             "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
             (node_id, pid, text, source, source_url, source_hash, now,
@@ -190,7 +190,7 @@ class PgApi:
         if justifications:
             for j in justifications:
                 cur.execute(
-                    "INSERT INTO rms_justifications (node_id, project_id, type, "
+                    "INSERT INTO rms_justifications (node_id, domain_id, type, "
                     "antecedents, outlist, label) "
                     "VALUES (%s, %s, %s, %s, %s, %s)",
                     (node_id, pid, j["type"],
@@ -205,7 +205,7 @@ class PgApi:
             truth = "IN"
 
         cur.execute(
-            "UPDATE rms_nodes SET truth_value = %s WHERE id = %s AND project_id = %s",
+            "UPDATE rms_nodes SET truth_value = %s WHERE id = %s AND domain_id = %s",
             (truth, node_id, pid),
         )
 
@@ -215,7 +215,7 @@ class PgApi:
     def add_node(self, node_id, text, sl="", cp="", unless="", label="",
                  source="", source_url="", access_tags=None,
                  namespace=None, example=None):
-        pid = self.project_id
+        pid = self.domain_id
         metadata = {}
         if access_tags:
             metadata["access_tags"] = sorted(access_tags)
@@ -229,7 +229,7 @@ class PgApi:
 
         with self.conn.cursor() as cur:
             cur.execute(
-                "SELECT 1 FROM rms_nodes WHERE id = %s AND project_id = %s",
+                "SELECT 1 FROM rms_nodes WHERE id = %s AND domain_id = %s",
                 (node_id, pid),
             )
             if cur.fetchone():
@@ -272,9 +272,9 @@ class PgApi:
                 self._inherit_access_tags(cur, node_id, justifications)
 
             cur.execute(
-                "SELECT COUNT(*) FROM rms_nodes WHERE project_id = %s "
+                "SELECT COUNT(*) FROM rms_nodes WHERE domain_id = %s "
                 "AND NOT EXISTS (SELECT 1 FROM rms_justifications j "
-                "WHERE j.node_id = rms_nodes.id AND j.project_id = rms_nodes.project_id)",
+                "WHERE j.node_id = rms_nodes.id AND j.domain_id = rms_nodes.domain_id)",
                 (pid,),
             )
             premise_count = cur.fetchone()[0]
@@ -289,14 +289,14 @@ class PgApi:
 
     def add_justification(self, node_id, sl="", cp="", unless="", label="",
                           namespace=None):
-        pid = self.project_id
+        pid = self.domain_id
 
         if namespace and ":" not in node_id:
             node_id = f"{namespace}:{node_id}"
 
         with self.conn.cursor() as cur:
             cur.execute(
-                "SELECT truth_value FROM rms_nodes WHERE id = %s AND project_id = %s",
+                "SELECT truth_value FROM rms_nodes WHERE id = %s AND domain_id = %s",
                 (node_id, pid),
             )
             row = cur.fetchone()
@@ -323,7 +323,7 @@ class PgApi:
 
             for j in justifications:
                 cur.execute(
-                    "INSERT INTO rms_justifications (node_id, project_id, type, antecedents, outlist, label) "
+                    "INSERT INTO rms_justifications (node_id, domain_id, type, antecedents, outlist, label) "
                     "VALUES (%s, %s, %s, %s, %s, %s)",
                     (node_id, pid, j["type"],
                      json.dumps(j["antecedents"]), json.dumps(j["outlist"]), j["label"]),
@@ -336,7 +336,7 @@ class PgApi:
 
             if old_value != new_value:
                 cur.execute(
-                    "UPDATE rms_nodes SET truth_value = %s WHERE id = %s AND project_id = %s",
+                    "UPDATE rms_nodes SET truth_value = %s WHERE id = %s AND domain_id = %s",
                     (new_value, node_id, pid),
                 )
                 changed.append(node_id)
@@ -355,11 +355,11 @@ class PgApi:
         }
 
     def retract_node(self, node_id, reason=""):
-        pid = self.project_id
+        pid = self.domain_id
 
         with self.conn.cursor() as cur:
             cur.execute(
-                "SELECT truth_value, metadata FROM rms_nodes WHERE id = %s AND project_id = %s",
+                "SELECT truth_value, metadata FROM rms_nodes WHERE id = %s AND domain_id = %s",
                 (node_id, pid),
             )
             row = cur.fetchone()
@@ -379,7 +379,7 @@ class PgApi:
             if old_value == "OUT":
                 cur.execute(
                     "UPDATE rms_nodes SET metadata = %s, retracted_at = %s, updated_at = %s "
-                    "WHERE id = %s AND project_id = %s",
+                    "WHERE id = %s AND domain_id = %s",
                     (json.dumps(metadata), now, now, node_id, pid),
                 )
                 self.conn.commit()
@@ -388,7 +388,7 @@ class PgApi:
             cur.execute(
                 "UPDATE rms_nodes SET truth_value = 'OUT', metadata = %s, "
                 "retracted_at = %s, updated_at = %s "
-                "WHERE id = %s AND project_id = %s",
+                "WHERE id = %s AND domain_id = %s",
                 (json.dumps(metadata), now, now, node_id, pid),
             )
             self._log(cur, "retract", node_id, reason or "OUT")
@@ -400,11 +400,11 @@ class PgApi:
         return {"changed": all_changed, "went_out": [node_id] + went_out, "went_in": went_in}
 
     def assert_node(self, node_id):
-        pid = self.project_id
+        pid = self.domain_id
 
         with self.conn.cursor() as cur:
             cur.execute(
-                "SELECT truth_value, metadata FROM rms_nodes WHERE id = %s AND project_id = %s",
+                "SELECT truth_value, metadata FROM rms_nodes WHERE id = %s AND domain_id = %s",
                 (node_id, pid),
             )
             row = cur.fetchone()
@@ -423,7 +423,7 @@ class PgApi:
             cur.execute(
                 "UPDATE rms_nodes SET truth_value = 'IN', metadata = %s, "
                 "retracted_at = NULL, updated_at = %s "
-                "WHERE id = %s AND project_id = %s",
+                "WHERE id = %s AND domain_id = %s",
                 (json.dumps(metadata), now, node_id, pid),
             )
             self._log(cur, "assert", node_id, "IN")
@@ -437,11 +437,11 @@ class PgApi:
     # ── What-if simulation ──────────────────────────────────────
 
     def what_if_retract(self, node_id):
-        pid = self.project_id
+        pid = self.domain_id
         try:
             with self.conn.cursor() as cur:
                 cur.execute(
-                    "SELECT truth_value FROM rms_nodes WHERE id = %s AND project_id = %s",
+                    "SELECT truth_value FROM rms_nodes WHERE id = %s AND domain_id = %s",
                     (node_id, pid),
                 )
                 row = cur.fetchone()
@@ -454,14 +454,14 @@ class PgApi:
                     }
 
                 cur.execute(
-                    "SELECT id, truth_value FROM rms_nodes WHERE project_id = %s",
+                    "SELECT id, truth_value FROM rms_nodes WHERE domain_id = %s",
                     (pid,),
                 )
                 before = {r[0]: r[1] for r in cur.fetchall()}
 
                 cur.execute(
                     "UPDATE rms_nodes SET truth_value = 'OUT' "
-                    "WHERE id = %s AND project_id = %s",
+                    "WHERE id = %s AND domain_id = %s",
                     (node_id, pid),
                 )
                 went_out, went_in = self._propagate(cur, node_id)
@@ -482,11 +482,11 @@ class PgApi:
         }
 
     def what_if_assert(self, node_id):
-        pid = self.project_id
+        pid = self.domain_id
         try:
             with self.conn.cursor() as cur:
                 cur.execute(
-                    "SELECT truth_value FROM rms_nodes WHERE id = %s AND project_id = %s",
+                    "SELECT truth_value FROM rms_nodes WHERE id = %s AND domain_id = %s",
                     (node_id, pid),
                 )
                 row = cur.fetchone()
@@ -499,14 +499,14 @@ class PgApi:
                     }
 
                 cur.execute(
-                    "SELECT id, truth_value FROM rms_nodes WHERE project_id = %s",
+                    "SELECT id, truth_value FROM rms_nodes WHERE domain_id = %s",
                     (pid,),
                 )
                 before = {r[0]: r[1] for r in cur.fetchall()}
 
                 cur.execute(
                     "UPDATE rms_nodes SET truth_value = 'IN' "
-                    "WHERE id = %s AND project_id = %s",
+                    "WHERE id = %s AND domain_id = %s",
                     (node_id, pid),
                 )
                 went_out, went_in = self._propagate(cur, node_id)
@@ -527,7 +527,7 @@ class PgApi:
         }
 
     def _collect_what_if_results(self, cur, changed, before, source_id):
-        pid = self.project_id
+        pid = self.domain_id
         retracted = []
         restored = []
         if not changed:
@@ -535,7 +535,7 @@ class PgApi:
 
         cur.execute(
             "SELECT id, text, truth_value FROM rms_nodes "
-            "WHERE project_id = %s AND id = ANY(%s)",
+            "WHERE domain_id = %s AND id = ANY(%s)",
             (pid, list(changed)),
         )
         after_states = {r[0]: (r[1], r[2]) for r in cur.fetchall()}
@@ -580,18 +580,18 @@ class PgApi:
         return result
 
     def defend(self, target_id, challenge_id, reason, defense_id=None):
-        pid = self.project_id
+        pid = self.domain_id
 
         with self.conn.cursor() as cur:
             # Verify target and challenge exist
             cur.execute(
-                "SELECT 1 FROM rms_nodes WHERE id = %s AND project_id = %s",
+                "SELECT 1 FROM rms_nodes WHERE id = %s AND domain_id = %s",
                 (target_id, pid),
             )
             if not cur.fetchone():
                 raise KeyError(f"Node '{target_id}' not found")
             cur.execute(
-                "SELECT 1 FROM rms_nodes WHERE id = %s AND project_id = %s",
+                "SELECT 1 FROM rms_nodes WHERE id = %s AND domain_id = %s",
                 (challenge_id, pid),
             )
             if not cur.fetchone():
@@ -603,7 +603,7 @@ class PgApi:
                 suffix = 1
                 while True:
                     cur.execute(
-                        "SELECT 1 FROM rms_nodes WHERE id = %s AND project_id = %s",
+                        "SELECT 1 FROM rms_nodes WHERE id = %s AND domain_id = %s",
                         (defense_id, pid),
                     )
                     if not cur.fetchone():
@@ -612,7 +612,7 @@ class PgApi:
                     defense_id = f"defense-{challenge_id}-{suffix}"
             else:
                 cur.execute(
-                    "SELECT 1 FROM rms_nodes WHERE id = %s AND project_id = %s",
+                    "SELECT 1 FROM rms_nodes WHERE id = %s AND domain_id = %s",
                     (defense_id, pid),
                 )
                 if cur.fetchone():
@@ -623,7 +623,7 @@ class PgApi:
 
             # Update defense node metadata
             cur.execute(
-                "SELECT metadata FROM rms_nodes WHERE id = %s AND project_id = %s",
+                "SELECT metadata FROM rms_nodes WHERE id = %s AND domain_id = %s",
                 (defense_id, pid),
             )
             meta = cur.fetchone()[0]
@@ -632,7 +632,7 @@ class PgApi:
             meta["defense_target"] = challenge_id
             meta["defends"] = target_id
             cur.execute(
-                "UPDATE rms_nodes SET metadata = %s WHERE id = %s AND project_id = %s",
+                "UPDATE rms_nodes SET metadata = %s WHERE id = %s AND domain_id = %s",
                 (json.dumps(meta), defense_id, pid),
             )
 
@@ -647,13 +647,13 @@ class PgApi:
     # ── Read operations ─────────────────────────────────────────
 
     def get_status(self, visible_to=None):
-        pid = self.project_id
+        pid = self.domain_id
         with self.conn.cursor() as cur:
             cur.execute(
                 "SELECT n.id, n.text, n.truth_value, n.metadata, "
                 "(SELECT COUNT(*) FROM rms_justifications j "
-                " WHERE j.node_id = n.id AND j.project_id = n.project_id) AS jcount "
-                "FROM rms_nodes n WHERE n.project_id = %s ORDER BY n.id",
+                " WHERE j.node_id = n.id AND j.domain_id = n.domain_id) AS jcount "
+                "FROM rms_nodes n WHERE n.domain_id = %s ORDER BY n.id",
                 (pid,),
             )
             rows = cur.fetchall()
@@ -676,12 +676,12 @@ class PgApi:
         return {"nodes": nodes, "in_count": in_count, "total": len(nodes)}
 
     def show_node(self, node_id, visible_to=None):
-        pid = self.project_id
+        pid = self.domain_id
         with self.conn.cursor() as cur:
             cur.execute(
                 "SELECT id, text, truth_value, source, source_url, source_hash, metadata, "
                 "created_at, updated_at, reviewed_at, verified_at, retracted_at "
-                "FROM rms_nodes WHERE id = %s AND project_id = %s",
+                "FROM rms_nodes WHERE id = %s AND domain_id = %s",
                 (node_id, pid),
             )
             row = cur.fetchone()
@@ -698,7 +698,7 @@ class PgApi:
 
             cur.execute(
                 "SELECT type, antecedents, outlist, label FROM rms_justifications "
-                "WHERE node_id = %s AND project_id = %s ORDER BY id",
+                "WHERE node_id = %s AND domain_id = %s ORDER BY id",
                 (node_id, pid),
             )
             justifications = []
@@ -734,7 +734,7 @@ class PgApi:
         }
 
     def search(self, query, visible_to=None, format="markdown", include_out=False):
-        pid = self.project_id
+        pid = self.domain_id
 
         with self.conn.cursor() as cur:
             # plainto_tsquery handles arbitrary user input safely
@@ -742,7 +742,7 @@ class PgApi:
                 cur.execute(
                     "SELECT id, text, truth_value, source, metadata "
                     "FROM rms_nodes "
-                    "WHERE project_id = %s "
+                    "WHERE domain_id = %s "
                     "AND (to_tsvector('english', text) @@ plainto_tsquery('english', %s) "
                     "     OR id ILIKE %s) "
                     "ORDER BY ts_rank(to_tsvector('english', text), "
@@ -753,7 +753,7 @@ class PgApi:
             else:
                 cur.execute(
                     "SELECT id, text, truth_value, source, metadata "
-                    "FROM rms_nodes WHERE project_id = %s AND id ILIKE %s LIMIT 20",
+                    "FROM rms_nodes WHERE domain_id = %s AND id ILIKE %s LIMIT 20",
                     (pid, f"%{query}%"),
                 )
 
@@ -800,7 +800,7 @@ class PgApi:
         from pathlib import Path
         from .check_stale import hash_file, resolve_source_path
 
-        pid = self.project_id
+        pid = self.domain_id
         repo_paths = None
         if repos:
             repo_paths = {k: Path(v) for k, v in repos.items()}
@@ -811,13 +811,13 @@ class PgApi:
             if force:
                 cur.execute(
                     "SELECT id, source, source_hash, metadata FROM rms_nodes "
-                    "WHERE project_id = %s AND source != '' AND source IS NOT NULL",
+                    "WHERE domain_id = %s AND source != '' AND source IS NOT NULL",
                     (pid,),
                 )
             else:
                 cur.execute(
                     "SELECT id, source, source_hash, metadata FROM rms_nodes "
-                    "WHERE project_id = %s AND source != '' AND source IS NOT NULL "
+                    "WHERE domain_id = %s AND source != '' AND source IS NOT NULL "
                     "AND (source_hash = '' OR source_hash IS NULL)",
                     (pid,),
                 )
@@ -845,7 +845,7 @@ class PgApi:
                 for item in results:
                     cur.execute(
                         "UPDATE rms_nodes SET source_hash = %s "
-                        "WHERE id = %s AND project_id = %s",
+                        "WHERE id = %s AND domain_id = %s",
                         (item["hash"], item["node_id"], pid),
                     )
             self.conn.commit()
@@ -857,7 +857,7 @@ class PgApi:
         from pathlib import Path
         from .check_stale import hash_file, resolve_source_path
 
-        pid = self.project_id
+        pid = self.domain_id
         repo_paths = None
         if repos:
             repo_paths = {k: Path(v) for k, v in repos.items()}
@@ -867,7 +867,7 @@ class PgApi:
         with self.conn.cursor() as cur:
             cur.execute(
                 "SELECT id, source, source_hash, metadata FROM rms_nodes "
-                "WHERE project_id = %s AND truth_value = 'IN' "
+                "WHERE domain_id = %s AND truth_value = 'IN' "
                 "AND source != '' AND source IS NOT NULL "
                 "AND source_hash != '' AND source_hash IS NOT NULL",
                 (pid,),
@@ -924,7 +924,7 @@ class PgApi:
                 for new_hash, nid in upgrades_to_commit:
                     cur.execute(
                         "UPDATE rms_nodes SET source_hash = %s "
-                        "WHERE id = %s AND project_id = %s",
+                        "WHERE id = %s AND domain_id = %s",
                         (new_hash, nid, pid),
                     )
             self.conn.commit()
@@ -942,7 +942,7 @@ class PgApi:
         relaxation over full belief blocks."""
         from reasons.api import _STOP_WORDS
 
-        pid = self.project_id
+        pid = self.domain_id
         raw_terms = re.findall(r'\w+', query)
         query_terms = [t.lower() for t in raw_terms
                        if t.lower() not in _STOP_WORDS and len(t) > 1]
@@ -953,14 +953,14 @@ class PgApi:
             cur.execute(
                 "SELECT n.id, n.text, n.truth_value, n.source, n.source_hash, "
                 "n.date, n.metadata FROM rms_nodes n "
-                "WHERE n.project_id = %s ORDER BY n.id",
+                "WHERE n.domain_id = %s ORDER BY n.id",
                 (pid,),
             )
             node_rows = cur.fetchall()
 
             cur.execute(
                 "SELECT node_id, antecedents, outlist FROM rms_justifications "
-                "WHERE project_id = %s",
+                "WHERE domain_id = %s",
                 (pid,),
             )
             just_rows = cur.fetchall()
@@ -1046,13 +1046,13 @@ class PgApi:
 
     def add_repo(self, name, path):
         """Register a repo name/path for source tracking."""
-        pid = self.project_id
+        pid = self.domain_id
         key = f"repo:{name}"
         with self.conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO rms_network_meta (key, project_id, value) "
+                "INSERT INTO rms_network_meta (key, domain_id, value) "
                 "VALUES (%s, %s, %s) "
-                "ON CONFLICT (key, project_id) DO UPDATE SET value = EXCLUDED.value",
+                "ON CONFLICT (key, domain_id) DO UPDATE SET value = EXCLUDED.value",
                 (key, pid, path),
             )
         self.conn.commit()
@@ -1060,11 +1060,11 @@ class PgApi:
 
     def list_repos(self):
         """List all registered repos."""
-        pid = self.project_id
+        pid = self.domain_id
         with self.conn.cursor() as cur:
             cur.execute(
                 "SELECT key, value FROM rms_network_meta "
-                "WHERE project_id = %s AND key LIKE 'repo:%%'",
+                "WHERE domain_id = %s AND key LIKE 'repo:%%'",
                 (pid,),
             )
             rows = cur.fetchall()
@@ -1084,12 +1084,12 @@ class PgApi:
         import sys
         from .api import NEGATIVE_TERMS, NEGATIVE_CLASSIFY_PROMPT, NEGATIVE_BATCH_SIZE
 
-        pid = self.project_id
+        pid = self.domain_id
 
         with self.conn.cursor() as cur:
             cur.execute(
                 "SELECT id, text, metadata FROM rms_nodes "
-                "WHERE project_id = %s AND truth_value = 'IN' "
+                "WHERE domain_id = %s AND truth_value = 'IN' "
                 "ORDER BY id",
                 (pid,),
             )
@@ -1171,8 +1171,8 @@ class PgApi:
         if limit is not None:
             limit = max(1, limit)
         offset = max(0, offset)
-        pid = self.project_id
-        conditions = ["n.project_id = %s"]
+        pid = self.domain_id
+        conditions = ["n.domain_id = %s"]
         params = [pid]
 
         if status:
@@ -1182,7 +1182,7 @@ class PgApi:
         if premises_only:
             conditions.append(
                 "NOT EXISTS (SELECT 1 FROM rms_justifications j "
-                "WHERE j.node_id = n.id AND j.project_id = n.project_id)"
+                "WHERE j.node_id = n.id AND j.domain_id = n.domain_id)"
             )
 
         if namespace:
@@ -1192,7 +1192,7 @@ class PgApi:
         if label:
             conditions.append(
                 "EXISTS (SELECT 1 FROM rms_justifications j "
-                "WHERE j.node_id = n.id AND j.project_id = n.project_id "
+                "WHERE j.node_id = n.id AND j.domain_id = n.domain_id "
                 "AND j.label = %s)"
             )
             params.append(label)
@@ -1210,10 +1210,10 @@ class PgApi:
             conditions.append(
                 "(EXISTS (SELECT 1 FROM rms_justifications j, "
                 "jsonb_array_elements_text(j.antecedents) ae(v) "
-                "WHERE j.project_id = %s AND ae.v = n.id) "
+                "WHERE j.domain_id = %s AND ae.v = n.id) "
                 "OR EXISTS (SELECT 1 FROM rms_justifications j, "
                 "jsonb_array_elements_text(j.outlist) oe(v) "
-                "WHERE j.project_id = %s AND oe.v = n.id))"
+                "WHERE j.domain_id = %s AND oe.v = n.id))"
             )
             params.extend([pid, pid])
 
@@ -1230,7 +1230,7 @@ class PgApi:
             query = (
                 f"SELECT n.id, n.text, n.truth_value, n.metadata, "
                 f"(SELECT COUNT(*) FROM rms_justifications j "
-                f" WHERE j.node_id = n.id AND j.project_id = n.project_id) AS jcount "
+                f" WHERE j.node_id = n.id AND j.domain_id = n.domain_id) AS jcount "
                 f"FROM rms_nodes n WHERE {where} ORDER BY n.id"
             )
             query_params = list(params)
@@ -1256,15 +1256,15 @@ class PgApi:
         return {"nodes": nodes, "count": total}
 
     def list_gated(self, visible_to=None):
-        pid = self.project_id
+        pid = self.domain_id
 
         with self.conn.cursor() as cur:
             # Find OUT nodes that have justifications with IN outlist nodes
             cur.execute(
                 "SELECT n.id, n.text, n.metadata, j.outlist "
                 "FROM rms_nodes n "
-                "JOIN rms_justifications j ON j.node_id = n.id AND j.project_id = n.project_id "
-                "WHERE n.project_id = %s AND n.truth_value = 'OUT' "
+                "JOIN rms_justifications j ON j.node_id = n.id AND j.domain_id = n.domain_id "
+                "WHERE n.domain_id = %s AND n.truth_value = 'OUT' "
                 "AND j.outlist != '[]'::jsonb",
                 (pid,),
             )
@@ -1285,7 +1285,7 @@ class PgApi:
             if all_outlist_ids:
                 cur.execute(
                     "SELECT id, text, truth_value, metadata FROM rms_nodes "
-                    "WHERE project_id = %s AND id = ANY(%s)",
+                    "WHERE domain_id = %s AND id = ANY(%s)",
                     (pid, list(all_outlist_ids)),
                 )
                 outlist_info = {}
@@ -1322,10 +1322,10 @@ class PgApi:
 
     def topics(self, limit=20):
         from reasons.api import _TOPIC_STOP_WORDS
-        pid = self.project_id
+        pid = self.domain_id
         with self.conn.cursor() as cur:
             cur.execute(
-                "SELECT id FROM rms_nodes WHERE project_id = %s", (pid,),
+                "SELECT id FROM rms_nodes WHERE domain_id = %s", (pid,),
             )
             node_ids = [row[0] for row in cur.fetchall()]
         word_counts: dict[str, int] = {}
@@ -1340,13 +1340,13 @@ class PgApi:
         }
 
     def export_network(self, visible_to=None):
-        pid = self.project_id
+        pid = self.domain_id
         with self.conn.cursor() as cur:
             cur.execute(
                 "SELECT id, text, truth_value, source, source_url, source_hash, "
                 "date, metadata, created_at, updated_at, reviewed_at, "
                 "verified_at, retracted_at "
-                "FROM rms_nodes WHERE project_id = %s ORDER BY id",
+                "FROM rms_nodes WHERE domain_id = %s ORDER BY id",
                 (pid,),
             )
             def _fmt_ts(val):
@@ -1380,7 +1380,7 @@ class PgApi:
             if nodes:
                 cur.execute(
                     "SELECT node_id, type, antecedents, outlist, label "
-                    "FROM rms_justifications WHERE project_id = %s "
+                    "FROM rms_justifications WHERE domain_id = %s "
                     "AND node_id = ANY(%s) ORDER BY id",
                     (pid, list(nodes.keys())),
                 )
@@ -1400,7 +1400,7 @@ class PgApi:
 
             cur.execute(
                 "SELECT id, nodes, discovered, resolution FROM rms_nogoods "
-                "WHERE project_id = %s ORDER BY id",
+                "WHERE domain_id = %s ORDER BY id",
                 (pid,),
             )
             nogoods = []
@@ -1424,7 +1424,7 @@ class PgApi:
         stored_meta = {}
         with self.conn.cursor() as cur2:
             cur2.execute(
-                "SELECT key, value FROM rms_network_meta WHERE project_id = %s",
+                "SELECT key, value FROM rms_network_meta WHERE domain_id = %s",
                 (pid,),
             )
             for key, value in cur2.fetchall():
@@ -1438,10 +1438,10 @@ class PgApi:
         return {"meta": meta, "nodes": nodes, "nogoods": nogoods, "repos": repos}
 
     def remove_justification(self, node_id, index):
-        pid = self.project_id
+        pid = self.domain_id
         with self.conn.cursor() as cur:
             cur.execute(
-                "SELECT truth_value FROM rms_nodes WHERE id = %s AND project_id = %s",
+                "SELECT truth_value FROM rms_nodes WHERE id = %s AND domain_id = %s",
                 (node_id, pid),
             )
             row = cur.fetchone()
@@ -1451,7 +1451,7 @@ class PgApi:
 
             cur.execute(
                 "SELECT id, type, antecedents, outlist, label "
-                "FROM rms_justifications WHERE node_id = %s AND project_id = %s "
+                "FROM rms_justifications WHERE node_id = %s AND domain_id = %s "
                 "ORDER BY id",
                 (node_id, pid),
             )
@@ -1489,7 +1489,7 @@ class PgApi:
             if old_value != new_value:
                 cur.execute(
                     "UPDATE rms_nodes SET truth_value = %s "
-                    "WHERE id = %s AND project_id = %s",
+                    "WHERE id = %s AND domain_id = %s",
                     (new_value, node_id, pid),
                 )
                 changed.append(node_id)
@@ -1510,10 +1510,10 @@ class PgApi:
         }
 
     def set_metadata(self, node_id, key, value):
-        pid = self.project_id
+        pid = self.domain_id
         with self.conn.cursor() as cur:
             cur.execute(
-                "SELECT metadata FROM rms_nodes WHERE id = %s AND project_id = %s",
+                "SELECT metadata FROM rms_nodes WHERE id = %s AND domain_id = %s",
                 (node_id, pid),
             )
             row = cur.fetchone()
@@ -1524,17 +1524,17 @@ class PgApi:
             now = datetime.now(timezone.utc).isoformat(timespec="seconds")
             cur.execute(
                 "UPDATE rms_nodes SET metadata = %s, updated_at = %s "
-                "WHERE id = %s AND project_id = %s",
+                "WHERE id = %s AND domain_id = %s",
                 (json.dumps(meta), now, node_id, pid),
             )
         self.conn.commit()
         return {"node_id": node_id, "key": key}
 
     def convert_to_premise(self, node_id):
-        pid = self.project_id
+        pid = self.domain_id
         with self.conn.cursor() as cur:
             cur.execute(
-                "SELECT truth_value FROM rms_nodes WHERE id = %s AND project_id = %s",
+                "SELECT truth_value FROM rms_nodes WHERE id = %s AND domain_id = %s",
                 (node_id, pid),
             )
             row = cur.fetchone()
@@ -1544,14 +1544,14 @@ class PgApi:
 
             cur.execute(
                 "SELECT COUNT(*) FROM rms_justifications "
-                "WHERE node_id = %s AND project_id = %s",
+                "WHERE node_id = %s AND domain_id = %s",
                 (node_id, pid),
             )
             old_count = cur.fetchone()[0]
 
             cur.execute(
                 "DELETE FROM rms_justifications "
-                "WHERE node_id = %s AND project_id = %s",
+                "WHERE node_id = %s AND domain_id = %s",
                 (node_id, pid),
             )
 
@@ -1559,7 +1559,7 @@ class PgApi:
             if old_value != "IN":
                 cur.execute(
                     "UPDATE rms_nodes SET truth_value = 'IN' "
-                    "WHERE id = %s AND project_id = %s",
+                    "WHERE id = %s AND domain_id = %s",
                     (node_id, pid),
                 )
                 changed.append(node_id)
@@ -1580,22 +1580,22 @@ class PgApi:
 
     def get_belief_set(self):
         """Return all node IDs currently IN."""
-        pid = self.project_id
+        pid = self.domain_id
         with self.conn.cursor() as cur:
             cur.execute(
                 "SELECT id FROM rms_nodes "
-                "WHERE project_id = %s AND truth_value = 'IN'",
+                "WHERE domain_id = %s AND truth_value = 'IN'",
                 (pid,),
             )
             return [row[0] for row in cur.fetchall()]
 
     def propagate(self):
         """Recompute truth values for all derived nodes to a fixpoint."""
-        pid = self.project_id
+        pid = self.domain_id
         all_changed = set()
         with self.conn.cursor() as cur:
             cur.execute(
-                "SELECT COUNT(*) FROM rms_nodes WHERE project_id = %s",
+                "SELECT COUNT(*) FROM rms_nodes WHERE domain_id = %s",
                 (pid,),
             )
             max_iterations = cur.fetchone()[0] + 1
@@ -1605,8 +1605,8 @@ class PgApi:
                     "SELECT DISTINCT n.id, n.truth_value, n.metadata "
                     "FROM rms_nodes n "
                     "JOIN rms_justifications j "
-                    "  ON j.node_id = n.id AND j.project_id = n.project_id "
-                    "WHERE n.project_id = %s",
+                    "  ON j.node_id = n.id AND j.domain_id = n.domain_id "
+                    "WHERE n.domain_id = %s",
                     (pid,),
                 )
                 rows = cur.fetchall()
@@ -1621,7 +1621,7 @@ class PgApi:
                     if old_tv != new_tv:
                         cur.execute(
                             "UPDATE rms_nodes SET truth_value = %s "
-                            "WHERE id = %s AND project_id = %s",
+                            "WHERE id = %s AND domain_id = %s",
                             (new_tv, node_id, pid),
                         )
                         self._log(cur, "recompute", node_id, new_tv)
@@ -1636,11 +1636,11 @@ class PgApi:
 
     def supersede(self, old_id, new_id):
         """Mark old_id as superseded by new_id using the outlist mechanism."""
-        pid = self.project_id
+        pid = self.domain_id
         with self.conn.cursor() as cur:
             cur.execute(
                 "SELECT truth_value, metadata FROM rms_nodes "
-                "WHERE id = %s AND project_id = %s",
+                "WHERE id = %s AND domain_id = %s",
                 (old_id, pid),
             )
             row = cur.fetchone()
@@ -1652,7 +1652,7 @@ class PgApi:
 
             cur.execute(
                 "SELECT metadata FROM rms_nodes "
-                "WHERE id = %s AND project_id = %s",
+                "WHERE id = %s AND domain_id = %s",
                 (new_id, pid),
             )
             row = cur.fetchone()
@@ -1664,7 +1664,7 @@ class PgApi:
 
             cur.execute(
                 "SELECT id, outlist FROM rms_justifications "
-                "WHERE node_id = %s AND project_id = %s",
+                "WHERE node_id = %s AND domain_id = %s",
                 (old_id, pid),
             )
             just_rows = cur.fetchall()
@@ -1672,7 +1672,7 @@ class PgApi:
                 cur.execute(
                     "UPDATE rms_justifications "
                     "SET outlist = outlist || %s::jsonb "
-                    "WHERE node_id = %s AND project_id = %s "
+                    "WHERE node_id = %s AND domain_id = %s "
                     "AND NOT outlist @> %s::jsonb",
                     (json.dumps([new_id]), old_id, pid,
                      json.dumps([new_id])),
@@ -1680,7 +1680,7 @@ class PgApi:
             else:
                 cur.execute(
                     "INSERT INTO rms_justifications "
-                    "(node_id, project_id, type, antecedents, outlist, label) "
+                    "(node_id, domain_id, type, antecedents, outlist, label) "
                     "VALUES (%s, %s, 'SL', '[]', %s, '')",
                     (old_id, pid, json.dumps([new_id])),
                 )
@@ -1688,7 +1688,7 @@ class PgApi:
             old_meta["superseded_by"] = new_id
             cur.execute(
                 "UPDATE rms_nodes SET metadata = %s "
-                "WHERE id = %s AND project_id = %s",
+                "WHERE id = %s AND domain_id = %s",
                 (json.dumps(old_meta), old_id, pid),
             )
 
@@ -1698,7 +1698,7 @@ class PgApi:
             new_meta["supersedes"] = supersedes
             cur.execute(
                 "UPDATE rms_nodes SET metadata = %s "
-                "WHERE id = %s AND project_id = %s",
+                "WHERE id = %s AND domain_id = %s",
                 (json.dumps(new_meta), new_id, pid),
             )
 
@@ -1707,7 +1707,7 @@ class PgApi:
             if old_tv != new_tv:
                 cur.execute(
                     "UPDATE rms_nodes SET truth_value = %s "
-                    "WHERE id = %s AND project_id = %s",
+                    "WHERE id = %s AND domain_id = %s",
                     (new_tv, old_id, pid),
                 )
                 self._log(cur, "supersede", old_id,
@@ -1725,14 +1725,14 @@ class PgApi:
 
     def summarize(self, summary_id, text, over, source=""):
         """Create a summary node that abstracts over a group of nodes."""
-        pid = self.project_id
+        pid = self.domain_id
         now = datetime.now().isoformat(timespec="seconds")
 
         with self.conn.cursor() as cur:
             if over:
                 cur.execute(
                     "SELECT id FROM rms_nodes "
-                    "WHERE project_id = %s AND id = ANY(%s)",
+                    "WHERE domain_id = %s AND id = ANY(%s)",
                     (pid, list(over)),
                 )
                 found = {row[0] for row in cur.fetchall()}
@@ -1743,7 +1743,7 @@ class PgApi:
 
             cur.execute(
                 "SELECT 1 FROM rms_nodes "
-                "WHERE id = %s AND project_id = %s",
+                "WHERE id = %s AND domain_id = %s",
                 (summary_id, pid),
             )
             if cur.fetchone():
@@ -1752,7 +1752,7 @@ class PgApi:
             metadata = {"summarizes": list(over)}
             cur.execute(
                 "INSERT INTO rms_nodes "
-                "(id, project_id, text, source, date, metadata) "
+                "(id, domain_id, text, source, date, metadata) "
                 "VALUES (%s, %s, %s, %s, %s, %s)",
                 (summary_id, pid, text, source, now, json.dumps(metadata)),
             )
@@ -1760,7 +1760,7 @@ class PgApi:
             justifications = [{"antecedents": list(over), "outlist": []}]
             cur.execute(
                 "INSERT INTO rms_justifications "
-                "(node_id, project_id, type, antecedents, outlist, label) "
+                "(node_id, domain_id, type, antecedents, outlist, label) "
                 "VALUES (%s, %s, 'SL', %s, '[]', 'summarizes')",
                 (summary_id, pid, json.dumps(list(over))),
             )
@@ -1770,7 +1770,7 @@ class PgApi:
             truth = self._compute_truth(cur, summary_id)
             cur.execute(
                 "UPDATE rms_nodes SET truth_value = %s "
-                "WHERE id = %s AND project_id = %s",
+                "WHERE id = %s AND domain_id = %s",
                 (truth, summary_id, pid),
             )
             self._log(cur, "add", summary_id, truth)
@@ -1778,7 +1778,7 @@ class PgApi:
             for nid in over:
                 cur.execute(
                     "SELECT metadata FROM rms_nodes "
-                    "WHERE id = %s AND project_id = %s",
+                    "WHERE id = %s AND domain_id = %s",
                     (nid, pid),
                 )
                 row = cur.fetchone()
@@ -1791,7 +1791,7 @@ class PgApi:
                 meta["summarized_by"] = covered
                 cur.execute(
                     "UPDATE rms_nodes SET metadata = %s "
-                    "WHERE id = %s AND project_id = %s",
+                    "WHERE id = %s AND domain_id = %s",
                     (json.dumps(meta), nid, pid),
                 )
 
@@ -1803,12 +1803,12 @@ class PgApi:
         }
 
     def get_log(self, last=None):
-        pid = self.project_id
+        pid = self.domain_id
         with self.conn.cursor() as cur:
             if last:
                 cur.execute(
                     "SELECT timestamp, action, target, value FROM rms_propagation_log "
-                    "WHERE project_id = %s ORDER BY id DESC LIMIT %s",
+                    "WHERE domain_id = %s ORDER BY id DESC LIMIT %s",
                     (pid, last),
                 )
                 entries = [
@@ -1818,7 +1818,7 @@ class PgApi:
             else:
                 cur.execute(
                     "SELECT timestamp, action, target, value FROM rms_propagation_log "
-                    "WHERE project_id = %s ORDER BY id",
+                    "WHERE domain_id = %s ORDER BY id",
                     (pid,),
                 )
                 entries = [
@@ -1830,13 +1830,13 @@ class PgApi:
     def compact(self, budget=500, truncate=True, visible_to=None, include_out=False):
         from datetime import date as _date
 
-        pid = self.project_id
+        pid = self.domain_id
 
         with self.conn.cursor() as cur:
             # Fetch all nodes
             cur.execute(
                 "SELECT id, text, truth_value, source, metadata "
-                "FROM rms_nodes WHERE project_id = %s ORDER BY id",
+                "FROM rms_nodes WHERE domain_id = %s ORDER BY id",
                 (pid,),
             )
             all_nodes = []
@@ -1856,7 +1856,7 @@ class PgApi:
             # Fetch nogoods (filter by visible_to — hide nogoods referencing inaccessible nodes)
             cur.execute(
                 "SELECT id, nodes, resolution FROM rms_nogoods "
-                "WHERE project_id = %s ORDER BY id",
+                "WHERE domain_id = %s ORDER BY id",
                 (pid,),
             )
             visible_ids = {n["id"] for n in all_nodes}
@@ -1874,7 +1874,7 @@ class PgApi:
                 "SELECT je.value AS referenced_id, COUNT(DISTINCT j.node_id) AS dep_count "
                 "FROM rms_justifications j, "
                 "jsonb_array_elements_text(j.antecedents) je(value) "
-                "WHERE j.project_id = %s GROUP BY je.value",
+                "WHERE j.domain_id = %s GROUP BY je.value",
                 (pid,),
             )
             dep_counts = {r[0]: r[1] for r in cur.fetchall()}
@@ -1882,7 +1882,7 @@ class PgApi:
                 "SELECT je.value AS referenced_id, COUNT(DISTINCT j.node_id) AS dep_count "
                 "FROM rms_justifications j, "
                 "jsonb_array_elements_text(j.outlist) je(value) "
-                "WHERE j.project_id = %s GROUP BY je.value",
+                "WHERE j.domain_id = %s GROUP BY je.value",
                 (pid,),
             )
             for row in cur.fetchall():
@@ -1892,7 +1892,7 @@ class PgApi:
             cur.execute(
                 "SELECT DISTINCT ON (node_id) node_id, antecedents, label "
                 "FROM rms_justifications "
-                "WHERE project_id = %s ORDER BY node_id, id",
+                "WHERE domain_id = %s ORDER BY node_id, id",
                 (pid,),
             )
             first_just = {}
@@ -2033,12 +2033,12 @@ class PgApi:
     # ── Nogoods + explain ───────────────────────────────────────
 
     def add_nogood(self, node_ids):
-        pid = self.project_id
+        pid = self.domain_id
 
         with self.conn.cursor() as cur:
             # Verify all nodes exist
             cur.execute(
-                "SELECT id, truth_value FROM rms_nodes WHERE project_id = %s AND id = ANY(%s)",
+                "SELECT id, truth_value FROM rms_nodes WHERE domain_id = %s AND id = ANY(%s)",
                 (pid, node_ids),
             )
             found = {r[0]: r[1] for r in cur.fetchall()}
@@ -2050,7 +2050,7 @@ class PgApi:
             slug = "-".join(sorted(node_ids))
             nogood_id = f"nogood-{slug}"
             cur.execute(
-                "SELECT id FROM rms_nogoods WHERE id = %s AND project_id = %s",
+                "SELECT id FROM rms_nogoods WHERE id = %s AND domain_id = %s",
                 (nogood_id, pid),
             )
             if cur.fetchone():
@@ -2058,7 +2058,7 @@ class PgApi:
                 while True:
                     candidate = f"{nogood_id}-{suffix}"
                     cur.execute(
-                        "SELECT id FROM rms_nogoods WHERE id = %s AND project_id = %s",
+                        "SELECT id FROM rms_nogoods WHERE id = %s AND domain_id = %s",
                         (candidate, pid),
                     )
                     if not cur.fetchone():
@@ -2067,7 +2067,7 @@ class PgApi:
                     suffix += 1
 
             cur.execute(
-                "INSERT INTO rms_nogoods (id, project_id, nodes, discovered) "
+                "INSERT INTO rms_nogoods (id, domain_id, nodes, discovered) "
                 "VALUES (%s, %s, %s, %s)",
                 (nogood_id, pid, json.dumps(node_ids),
                  datetime.now().isoformat(timespec="seconds")),
@@ -2097,7 +2097,7 @@ class PgApi:
 
             # Retract the victim
             cur.execute(
-                "SELECT metadata FROM rms_nodes WHERE id = %s AND project_id = %s",
+                "SELECT metadata FROM rms_nodes WHERE id = %s AND domain_id = %s",
                 (victim_id, pid),
             )
             meta = cur.fetchone()[0]
@@ -2106,7 +2106,7 @@ class PgApi:
             meta["_retracted"] = True
             cur.execute(
                 "UPDATE rms_nodes SET truth_value = 'OUT', metadata = %s "
-                "WHERE id = %s AND project_id = %s",
+                "WHERE id = %s AND domain_id = %s",
                 (json.dumps(meta), victim_id, pid),
             )
             self._log(cur, "retract", victim_id, f"backtrack for {nogood_id}")
@@ -2123,14 +2123,14 @@ class PgApi:
         return {"culprits": culprits}
 
     def explain_node(self, node_id, visible_to=None):
-        pid = self.project_id
+        pid = self.domain_id
 
         with self.conn.cursor() as cur:
             steps = self._explain_recursive(cur, node_id, visible_to, set())
         return {"steps": steps}
 
     def trace_assumptions(self, node_id, visible_to=None):
-        pid = self.project_id
+        pid = self.domain_id
         premises = []
         visited = set()
 
@@ -2141,11 +2141,11 @@ class PgApi:
 
     def trace_access_tags(self, node_id, visible_to=None):
         """Trace access_tags union through the dependency chain."""
-        pid = self.project_id
+        pid = self.domain_id
         with self.conn.cursor() as cur:
             cur.execute(
                 "SELECT metadata FROM rms_nodes "
-                "WHERE id = %s AND project_id = %s",
+                "WHERE id = %s AND domain_id = %s",
                 (node_id, pid),
             )
             row = cur.fetchone()
@@ -2168,14 +2168,14 @@ class PgApi:
 
     def ensure_namespace(self, namespace):
         """Ensure a namespace premise node exists (namespace:active)."""
-        pid = self.project_id
+        pid = self.domain_id
         active_id = f"{namespace}:active"
         now = datetime.now().isoformat(timespec="seconds")
 
         with self.conn.cursor() as cur:
             cur.execute(
                 "SELECT 1 FROM rms_nodes "
-                "WHERE id = %s AND project_id = %s",
+                "WHERE id = %s AND domain_id = %s",
                 (active_id, pid),
             )
             if cur.fetchone():
@@ -2185,7 +2185,7 @@ class PgApi:
             metadata = {"agent": namespace, "role": "agent_premise"}
             cur.execute(
                 "INSERT INTO rms_nodes "
-                "(id, project_id, text, source, date, metadata, truth_value) "
+                "(id, domain_id, text, source, date, metadata, truth_value) "
                 "VALUES (%s, %s, %s, '', %s, %s, 'IN')",
                 (active_id, pid,
                  f"Agent '{namespace}' beliefs are trusted",
@@ -2199,11 +2199,11 @@ class PgApi:
 
     def list_namespaces(self):
         """List all namespaces with belief counts."""
-        pid = self.project_id
+        pid = self.domain_id
         with self.conn.cursor() as cur:
             cur.execute(
                 "SELECT id, truth_value FROM rms_nodes "
-                "WHERE project_id = %s AND id LIKE '%%:active' "
+                "WHERE domain_id = %s AND id LIKE '%%:active' "
                 "AND metadata->>'role' = 'agent_premise' "
                 "ORDER BY id",
                 (pid,),
@@ -2217,7 +2217,7 @@ class PgApi:
                     "SELECT COUNT(*), "
                     "COUNT(*) FILTER (WHERE truth_value = 'IN') "
                     "FROM rms_nodes "
-                    "WHERE project_id = %s AND id LIKE %s AND id != %s",
+                    "WHERE domain_id = %s AND id LIKE %s AND id != %s",
                     (pid, f"{ns}:%", active_id),
                 )
                 total, in_count = cur.fetchone()
@@ -2239,7 +2239,7 @@ class PgApi:
         Uses topological sort to add nodes in dependency order,
         then propagates truth values and applies overrides.
         """
-        pid = self.project_id
+        pid = self.domain_id
         remaining = dict(data.get("nodes", {}))
         nodes_imported = 0
         skipped = 0
@@ -2250,16 +2250,16 @@ class PgApi:
                 for key in ("schema_version", "project_name", "created_at"):
                     if key in imported_meta and imported_meta[key]:
                         cur.execute(
-                            "INSERT INTO rms_network_meta (key, project_id, value) "
+                            "INSERT INTO rms_network_meta (key, domain_id, value) "
                             "VALUES (%s, %s, %s) "
-                            "ON CONFLICT (key, project_id) DO UPDATE SET value = EXCLUDED.value",
+                            "ON CONFLICT (key, domain_id) DO UPDATE SET value = EXCLUDED.value",
                             (key, pid, str(imported_meta[key])),
                         )
             self.conn.commit()
 
         with self.conn.cursor() as cur:
             cur.execute(
-                "SELECT id FROM rms_nodes WHERE project_id = %s", (pid,),
+                "SELECT id FROM rms_nodes WHERE domain_id = %s", (pid,),
             )
             added = {r[0] for r in cur.fetchall()}
 
@@ -2329,7 +2329,7 @@ class PgApi:
                 target_tv = ndata.get("truth_value", "IN")
                 cur.execute(
                     "SELECT truth_value FROM rms_nodes "
-                    "WHERE id = %s AND project_id = %s",
+                    "WHERE id = %s AND domain_id = %s",
                     (nid, pid),
                 )
                 row = cur.fetchone()
@@ -2338,7 +2338,7 @@ class PgApi:
                         cur.execute(
                             "UPDATE rms_nodes SET truth_value = 'OUT', "
                             "metadata = metadata || %s "
-                            "WHERE id = %s AND project_id = %s",
+                            "WHERE id = %s AND domain_id = %s",
                             (json.dumps({"_retracted": True}), nid, pid),
                         )
                         self._log(cur, "retract", nid, "OUT")
@@ -2346,7 +2346,7 @@ class PgApi:
                         cur.execute(
                             "UPDATE rms_nodes SET truth_value = 'IN', "
                             "metadata = metadata - '_retracted' "
-                            "WHERE id = %s AND project_id = %s",
+                            "WHERE id = %s AND domain_id = %s",
                             (nid, pid),
                         )
                         self._log(cur, "assert", nid, "IN")
@@ -2363,20 +2363,20 @@ class PgApi:
                     ts_params.extend([nid, pid])
                     cur.execute(
                         f"UPDATE rms_nodes SET {', '.join(ts_updates)} "
-                        f"WHERE id = %s AND project_id = %s",
+                        f"WHERE id = %s AND domain_id = %s",
                         ts_params,
                     )
 
             nogoods_imported = 0
             for ng_data in data.get("nogoods", []):
                 cur.execute(
-                    "SELECT 1 FROM rms_nogoods WHERE id = %s AND project_id = %s",
+                    "SELECT 1 FROM rms_nogoods WHERE id = %s AND domain_id = %s",
                     (ng_data["id"], pid),
                 )
                 if cur.fetchone():
                     continue
                 cur.execute(
-                    "INSERT INTO rms_nogoods (id, project_id, nodes, discovered, resolution) "
+                    "INSERT INTO rms_nogoods (id, domain_id, nodes, discovered, resolution) "
                     "VALUES (%s, %s, %s, %s, %s)",
                     (ng_data["id"], pid,
                      json.dumps(ng_data.get("nodes", [])),
@@ -2398,14 +2398,14 @@ class PgApi:
                 for key in ("schema_version", "project_name", "created_at"):
                     if key in frontmatter and frontmatter[key]:
                         cur.execute(
-                            "INSERT INTO rms_network_meta (key, project_id, value) "
+                            "INSERT INTO rms_network_meta (key, domain_id, value) "
                             "VALUES (%s, %s, %s) "
-                            "ON CONFLICT (key, project_id) DO UPDATE SET value = EXCLUDED.value",
-                            (key, self.project_id, frontmatter[key]),
+                            "ON CONFLICT (key, domain_id) DO UPDATE SET value = EXCLUDED.value",
+                            (key, self.domain_id, frontmatter[key]),
                         )
             self.conn.commit()
 
-        pid = self.project_id
+        pid = self.domain_id
         claims = parse_beliefs(beliefs_text)
 
         claim_by_id = {c["id"]: c for c in claims}
@@ -2436,7 +2436,7 @@ class PgApi:
 
         with self.conn.cursor() as cur:
             cur.execute(
-                "SELECT id FROM rms_nodes WHERE project_id = %s", (pid,),
+                "SELECT id FROM rms_nodes WHERE domain_id = %s", (pid,),
             )
             existing = {r[0] for r in cur.fetchall()}
 
@@ -2488,7 +2488,7 @@ class PgApi:
                     cur.execute(
                         "UPDATE rms_nodes SET truth_value = 'OUT', "
                         "metadata = metadata || %s "
-                        "WHERE id = %s AND project_id = %s",
+                        "WHERE id = %s AND domain_id = %s",
                         (json.dumps({"_retracted": True}), nid, pid),
                     )
                     self._log(cur, "retract", nid, "OUT")
@@ -2501,7 +2501,7 @@ class PgApi:
             nogoods = parse_nogoods(nogoods_text)
             with self.conn.cursor() as cur:
                 cur.execute(
-                    "SELECT id FROM rms_nodes WHERE project_id = %s", (pid,),
+                    "SELECT id FROM rms_nodes WHERE domain_id = %s", (pid,),
                 )
                 all_nodes = {r[0] for r in cur.fetchall()}
 
@@ -2509,12 +2509,12 @@ class PgApi:
                     valid_nodes = [a for a in ng["affects"] if a in all_nodes]
                     if len(valid_nodes) >= 2:
                         cur.execute(
-                            "SELECT 1 FROM rms_nogoods WHERE id = %s AND project_id = %s",
+                            "SELECT 1 FROM rms_nogoods WHERE id = %s AND domain_id = %s",
                             (ng["id"], pid),
                         )
                         if not cur.fetchone():
                             cur.execute(
-                                "INSERT INTO rms_nogoods (id, project_id, nodes, "
+                                "INSERT INTO rms_nogoods (id, domain_id, nodes, "
                                 "discovered, resolution) VALUES (%s, %s, %s, %s, %s)",
                                 (ng["id"], pid, json.dumps(valid_nodes),
                                  ng["discovered"], ng["resolution"]),
@@ -2536,7 +2536,7 @@ class PgApi:
         """
         from .import_agent import _topo_sort_claims
 
-        pid = self.project_id
+        pid = self.domain_id
         prefix = f"{agent_name}:"
         active_id = f"{agent_name}:active"
         inactive_id = f"{agent_name}:inactive"
@@ -2546,7 +2546,7 @@ class PgApi:
 
         with self.conn.cursor() as cur:
             cur.execute(
-                "SELECT 1 FROM rms_nodes WHERE id = %s AND project_id = %s",
+                "SELECT 1 FROM rms_nodes WHERE id = %s AND domain_id = %s",
                 (inactive_id, pid),
             )
             if not cur.fetchone():
@@ -2571,7 +2571,7 @@ class PgApi:
 
         with self.conn.cursor() as cur:
             cur.execute(
-                "SELECT id FROM rms_nodes WHERE project_id = %s", (pid,),
+                "SELECT id FROM rms_nodes WHERE domain_id = %s", (pid,),
             )
             existing = {r[0] for r in cur.fetchall()}
 
@@ -2622,7 +2622,7 @@ class PgApi:
                     cur.execute(
                         "UPDATE rms_nodes SET truth_value = 'OUT', "
                         "metadata = metadata || %s "
-                        "WHERE id = %s AND project_id = %s",
+                        "WHERE id = %s AND domain_id = %s",
                         (json.dumps({"_retracted": True}), node_id, pid),
                     )
 
@@ -2636,7 +2636,7 @@ class PgApi:
                     cur.execute(
                         "UPDATE rms_nodes SET truth_value = 'OUT', "
                         "metadata = metadata || %s "
-                        "WHERE id = %s AND project_id = %s",
+                        "WHERE id = %s AND domain_id = %s",
                         (json.dumps({"_retracted": True}), nid, pid),
                     )
                     self._log(cur, "retract", nid, "OUT")
@@ -2666,7 +2666,7 @@ class PgApi:
         """
         from .import_agent import _topo_sort_claims
 
-        pid = self.project_id
+        pid = self.domain_id
         prefix = f"{agent_name}:"
         active_id = f"{agent_name}:active"
         inactive_id = f"{agent_name}:inactive"
@@ -2676,7 +2676,7 @@ class PgApi:
 
         with self.conn.cursor() as cur:
             cur.execute(
-                "SELECT 1 FROM rms_nodes WHERE id = %s AND project_id = %s",
+                "SELECT 1 FROM rms_nodes WHERE id = %s AND domain_id = %s",
                 (inactive_id, pid),
             )
             if not cur.fetchone():
@@ -2699,7 +2699,7 @@ class PgApi:
 
         with self.conn.cursor() as cur:
             cur.execute(
-                "SELECT id FROM rms_nodes WHERE project_id = %s AND id LIKE %s",
+                "SELECT id FROM rms_nodes WHERE domain_id = %s AND id LIKE %s",
                 (pid, f"{prefix}%"),
             )
             local_agent_ids = {r[0] for r in cur.fetchall()} - infra_ids
@@ -2714,7 +2714,7 @@ class PgApi:
 
         with self.conn.cursor() as cur:
             cur.execute(
-                "SELECT id FROM rms_nodes WHERE project_id = %s", (pid,),
+                "SELECT id FROM rms_nodes WHERE domain_id = %s", (pid,),
             )
             existing = {r[0] for r in cur.fetchall()}
 
@@ -2742,7 +2742,7 @@ class PgApi:
                     cur.execute(
                         "SELECT text, source, source_url, source_hash, date, "
                         "truth_value, metadata FROM rms_nodes "
-                        "WHERE id = %s AND project_id = %s",
+                        "WHERE id = %s AND domain_id = %s",
                         (node_id, pid),
                     )
                     row = cur.fetchone()
@@ -2773,7 +2773,7 @@ class PgApi:
                         set_parts = [f"{k} = %s" for k in updates]
                         cur.execute(
                             f"UPDATE rms_nodes SET {', '.join(set_parts)} "
-                            f"WHERE id = %s AND project_id = %s",
+                            f"WHERE id = %s AND domain_id = %s",
                             (*updates.values(), node_id, pid),
                         )
 
@@ -2785,7 +2785,7 @@ class PgApi:
 
                     cur.execute(
                         "SELECT type, antecedents, outlist, label "
-                        "FROM rms_justifications WHERE node_id = %s AND project_id = %s "
+                        "FROM rms_justifications WHERE node_id = %s AND domain_id = %s "
                         "ORDER BY id",
                         (node_id, pid),
                     )
@@ -2814,13 +2814,13 @@ class PgApi:
                     if justs_changed:
                         cur.execute(
                             "DELETE FROM rms_justifications "
-                            "WHERE node_id = %s AND project_id = %s",
+                            "WHERE node_id = %s AND domain_id = %s",
                             (node_id, pid),
                         )
                         for j in justs:
                             cur.execute(
                                 "INSERT INTO rms_justifications "
-                                "(node_id, project_id, type, antecedents, outlist, label) "
+                                "(node_id, domain_id, type, antecedents, outlist, label) "
                                 "VALUES (%s, %s, %s, %s, %s, %s)",
                                 (node_id, pid, j["type"],
                                  json.dumps(j["antecedents"]),
@@ -2837,7 +2837,7 @@ class PgApi:
                             changed = True
                         cur.execute(
                             "UPDATE rms_nodes SET truth_value = 'OUT', "
-                            "metadata = %s WHERE id = %s AND project_id = %s",
+                            "metadata = %s WHERE id = %s AND domain_id = %s",
                             (json.dumps(new_meta), node_id, pid),
                         )
                     else:
@@ -2849,7 +2849,7 @@ class PgApi:
                             changed = True
                         cur.execute(
                             "UPDATE rms_nodes SET metadata = %s "
-                            "WHERE id = %s AND project_id = %s",
+                            "WHERE id = %s AND domain_id = %s",
                             (json.dumps(new_meta), node_id, pid),
                         )
 
@@ -2883,7 +2883,7 @@ class PgApi:
                         cur.execute(
                             "UPDATE rms_nodes SET truth_value = 'OUT', "
                             "metadata = metadata || %s "
-                            "WHERE id = %s AND project_id = %s",
+                            "WHERE id = %s AND domain_id = %s",
                             (json.dumps({"_retracted": True}), node_id, pid),
                         )
 
@@ -2896,7 +2896,7 @@ class PgApi:
                 for node_id in sorted(removed_ids):
                     cur.execute(
                         "SELECT truth_value, metadata FROM rms_nodes "
-                        "WHERE id = %s AND project_id = %s",
+                        "WHERE id = %s AND domain_id = %s",
                         (node_id, pid),
                     )
                     row = cur.fetchone()
@@ -2909,7 +2909,7 @@ class PgApi:
                         cur.execute(
                             "UPDATE rms_nodes SET truth_value = 'OUT', "
                             "metadata = metadata || %s "
-                            "WHERE id = %s AND project_id = %s",
+                            "WHERE id = %s AND domain_id = %s",
                             (json.dumps({"_retracted": True}), node_id, pid),
                         )
                         self._log(cur, "retract", node_id, "OUT")
@@ -2917,7 +2917,7 @@ class PgApi:
                     elif not meta.get("_retracted"):
                         cur.execute(
                             "UPDATE rms_nodes SET metadata = metadata || %s "
-                            "WHERE id = %s AND project_id = %s",
+                            "WHERE id = %s AND domain_id = %s",
                             (json.dumps({"_retracted": True}), node_id, pid),
                         )
                         beliefs_removed += 1
@@ -2928,7 +2928,7 @@ class PgApi:
                 for node_id in assert_after:
                     cur.execute(
                         "UPDATE rms_nodes SET metadata = metadata - '_retracted' "
-                        "WHERE id = %s AND project_id = %s",
+                        "WHERE id = %s AND domain_id = %s",
                         (node_id, pid),
                     )
             self.conn.commit()
@@ -2941,7 +2941,7 @@ class PgApi:
                 for node_id in retract_after:
                     cur.execute(
                         "SELECT truth_value FROM rms_nodes "
-                        "WHERE id = %s AND project_id = %s",
+                        "WHERE id = %s AND domain_id = %s",
                         (node_id, pid),
                     )
                     row = cur.fetchone()
@@ -2949,14 +2949,14 @@ class PgApi:
                         cur.execute(
                             "UPDATE rms_nodes SET truth_value = 'OUT', "
                             "metadata = metadata || %s "
-                            "WHERE id = %s AND project_id = %s",
+                            "WHERE id = %s AND domain_id = %s",
                             (json.dumps({"_retracted": True}), node_id, pid),
                         )
                         self._log(cur, "retract", node_id, "OUT")
                     else:
                         cur.execute(
                             "UPDATE rms_nodes SET metadata = metadata || %s "
-                            "WHERE id = %s AND project_id = %s",
+                            "WHERE id = %s AND domain_id = %s",
                             (json.dumps({"_retracted": True}), node_id, pid),
                         )
                     beliefs_retracted += 1
@@ -2982,15 +2982,15 @@ class PgApi:
 
     def _import_agent_nogoods(self, prefix, nogoods):
         """Import prefixed nogoods for an agent."""
-        pid = self.project_id
+        pid = self.domain_id
         count = 0
         with self.conn.cursor() as cur:
             cur.execute(
-                "SELECT id FROM rms_nodes WHERE project_id = %s", (pid,),
+                "SELECT id FROM rms_nodes WHERE domain_id = %s", (pid,),
             )
             all_nodes = {r[0] for r in cur.fetchall()}
             cur.execute(
-                "SELECT id FROM rms_nogoods WHERE project_id = %s", (pid,),
+                "SELECT id FROM rms_nogoods WHERE domain_id = %s", (pid,),
             )
             existing_nogoods = {r[0] for r in cur.fetchall()}
 
@@ -3000,7 +3000,7 @@ class PgApi:
                 nogood_id = f"{prefix}{ng['id']}"
                 if len(valid_nodes) >= 2 and nogood_id not in existing_nogoods:
                     cur.execute(
-                        "INSERT INTO rms_nogoods (id, project_id, nodes, "
+                        "INSERT INTO rms_nogoods (id, domain_id, nodes, "
                         "discovered, resolution) VALUES (%s, %s, %s, %s, %s)",
                         (nogood_id, pid, json.dumps(valid_nodes),
                          ng.get("discovered", ""), ng.get("resolution", "")),
@@ -3021,7 +3021,7 @@ class PgApi:
         went_in = []
         queue = deque([changed_id])
         visited = {changed_id}
-        pid = self.project_id
+        pid = self.domain_id
 
         while queue:
             batch = []
@@ -3037,7 +3037,7 @@ class PgApi:
             # Fetch current state of all dependents
             cur.execute(
                 "SELECT id, truth_value, metadata FROM rms_nodes "
-                "WHERE project_id = %s AND id = ANY(%s)",
+                "WHERE domain_id = %s AND id = ANY(%s)",
                 (pid, list(dep_ids)),
             )
             dep_states = {}
@@ -3050,7 +3050,7 @@ class PgApi:
             # Fetch all justifications for these dependents
             cur.execute(
                 "SELECT node_id, type, antecedents, outlist FROM rms_justifications "
-                "WHERE project_id = %s AND node_id = ANY(%s)",
+                "WHERE domain_id = %s AND node_id = ANY(%s)",
                 (pid, list(dep_ids)),
             )
             justs_by_node = {}
@@ -3070,7 +3070,7 @@ class PgApi:
             if all_referenced:
                 cur.execute(
                     "SELECT id, truth_value FROM rms_nodes "
-                    "WHERE project_id = %s AND id = ANY(%s)",
+                    "WHERE domain_id = %s AND id = ANY(%s)",
                     (pid, list(all_referenced)),
                 )
                 for row in cur.fetchall():
@@ -3104,7 +3104,7 @@ class PgApi:
                 if old_tv != new_tv:
                     cur.execute(
                         "UPDATE rms_nodes SET truth_value = %s "
-                        "WHERE id = %s AND project_id = %s",
+                        "WHERE id = %s AND domain_id = %s",
                         (new_tv, dep_id, pid),
                     )
                     self._log(cur, "propagate", dep_id, new_tv)
@@ -3120,10 +3120,10 @@ class PgApi:
 
     def _compute_truth(self, cur, node_id):
         """Compute truth value from justifications."""
-        pid = self.project_id
+        pid = self.domain_id
         cur.execute(
             "SELECT type, antecedents, outlist FROM rms_justifications "
-            "WHERE node_id = %s AND project_id = %s",
+            "WHERE node_id = %s AND domain_id = %s",
             (node_id, pid),
         )
         justs = cur.fetchall()
@@ -3147,7 +3147,7 @@ class PgApi:
         if all_refs:
             cur.execute(
                 "SELECT id, truth_value FROM rms_nodes "
-                "WHERE project_id = %s AND id = ANY(%s)",
+                "WHERE domain_id = %s AND id = ANY(%s)",
                 (pid, list(all_refs)),
             )
             for row in cur.fetchall():
@@ -3161,11 +3161,11 @@ class PgApi:
         return "OUT"
 
     def _challenge_internal(self, cur, target_id, reason, challenge_id):
-        pid = self.project_id
+        pid = self.domain_id
 
         # Verify target exists
         cur.execute(
-            "SELECT truth_value, metadata FROM rms_nodes WHERE id = %s AND project_id = %s",
+            "SELECT truth_value, metadata FROM rms_nodes WHERE id = %s AND domain_id = %s",
             (target_id, pid),
         )
         row = cur.fetchone()
@@ -3182,7 +3182,7 @@ class PgApi:
             suffix = 1
             while True:
                 cur.execute(
-                    "SELECT 1 FROM rms_nodes WHERE id = %s AND project_id = %s",
+                    "SELECT 1 FROM rms_nodes WHERE id = %s AND domain_id = %s",
                     (challenge_id, pid),
                 )
                 if not cur.fetchone():
@@ -3191,7 +3191,7 @@ class PgApi:
                 challenge_id = f"challenge-{target_id}-{suffix}"
         else:
             cur.execute(
-                "SELECT 1 FROM rms_nodes WHERE id = %s AND project_id = %s",
+                "SELECT 1 FROM rms_nodes WHERE id = %s AND domain_id = %s",
                 (challenge_id, pid),
             )
             if cur.fetchone():
@@ -3201,7 +3201,7 @@ class PgApi:
         now = datetime.now().isoformat(timespec="seconds")
         challenge_meta = {"challenge_target": target_id}
         cur.execute(
-            "INSERT INTO rms_nodes (id, project_id, text, truth_value, source, date, metadata) "
+            "INSERT INTO rms_nodes (id, domain_id, text, truth_value, source, date, metadata) "
             "VALUES (%s, %s, %s, 'IN', 'challenge', %s, %s)",
             (challenge_id, pid, reason, now, json.dumps(challenge_meta)),
         )
@@ -3209,7 +3209,7 @@ class PgApi:
 
         # Add challenge to target's outlist
         cur.execute(
-            "SELECT COUNT(*) FROM rms_justifications WHERE node_id = %s AND project_id = %s",
+            "SELECT COUNT(*) FROM rms_justifications WHERE node_id = %s AND domain_id = %s",
             (target_id, pid),
         )
         has_justifications = cur.fetchone()[0] > 0
@@ -3217,12 +3217,12 @@ class PgApi:
         if has_justifications:
             cur.execute(
                 "UPDATE rms_justifications SET outlist = outlist || %s::jsonb "
-                "WHERE node_id = %s AND project_id = %s",
+                "WHERE node_id = %s AND domain_id = %s",
                 (json.dumps([challenge_id]), target_id, pid),
             )
         else:
             cur.execute(
-                "INSERT INTO rms_justifications (node_id, project_id, type, antecedents, outlist, label) "
+                "INSERT INTO rms_justifications (node_id, domain_id, type, antecedents, outlist, label) "
                 "VALUES (%s, %s, 'SL', '[]', %s, '')",
                 (target_id, pid, json.dumps([challenge_id])),
             )
@@ -3232,7 +3232,7 @@ class PgApi:
         challenges.append(challenge_id)
         target_meta["challenges"] = challenges
         cur.execute(
-            "UPDATE rms_nodes SET metadata = %s WHERE id = %s AND project_id = %s",
+            "UPDATE rms_nodes SET metadata = %s WHERE id = %s AND domain_id = %s",
             (json.dumps(target_meta), target_id, pid),
         )
 
@@ -3242,7 +3242,7 @@ class PgApi:
 
         if old_value != new_value:
             cur.execute(
-                "UPDATE rms_nodes SET truth_value = %s WHERE id = %s AND project_id = %s",
+                "UPDATE rms_nodes SET truth_value = %s WHERE id = %s AND domain_id = %s",
                 (new_value, target_id, pid),
             )
             changed.append(target_id)
@@ -3259,14 +3259,14 @@ class PgApi:
         """Find nodes that have any of node_ids in their antecedents or outlist."""
         if not node_ids:
             return set()
-        pid = self.project_id
+        pid = self.domain_id
         # Use JSONB containment: antecedents @> '["node_id"]'
         dep_ids = set()
         for nid in node_ids:
             needle = json.dumps([nid])
             cur.execute(
                 "SELECT DISTINCT node_id FROM rms_justifications "
-                "WHERE project_id = %s "
+                "WHERE domain_id = %s "
                 "AND (antecedents @> %s::jsonb OR outlist @> %s::jsonb)",
                 (pid, needle, needle),
             )
@@ -3276,20 +3276,20 @@ class PgApi:
 
     def _log(self, cur, action, target, value):
         cur.execute(
-            "INSERT INTO rms_propagation_log (project_id, timestamp, action, target, value) "
+            "INSERT INTO rms_propagation_log (domain_id, timestamp, action, target, value) "
             "VALUES (%s, %s, %s, %s, %s)",
-            (self.project_id, datetime.now().isoformat(timespec="seconds"),
+            (self.domain_id, datetime.now().isoformat(timespec="seconds"),
              action, target, value),
         )
 
     # ── Internal: nogoods + explain ─────────────────────────────
 
     def _find_culprits_internal(self, cur, nogood_node_ids):
-        pid = self.project_id
+        pid = self.domain_id
 
         # Get truth values
         cur.execute(
-            "SELECT id, truth_value FROM rms_nodes WHERE project_id = %s AND id = ANY(%s)",
+            "SELECT id, truth_value FROM rms_nodes WHERE domain_id = %s AND id = ANY(%s)",
             (pid, nogood_node_ids),
         )
         node_tvs = {r[0]: r[1] for r in cur.fetchall()}
@@ -3326,10 +3326,10 @@ class PgApi:
         return candidates
 
     def _entrenchment(self, cur, node_id):
-        pid = self.project_id
+        pid = self.domain_id
         cur.execute(
             "SELECT source, source_hash, metadata FROM rms_nodes "
-            "WHERE id = %s AND project_id = %s",
+            "WHERE id = %s AND domain_id = %s",
             (node_id, pid),
         )
         row = cur.fetchone()
@@ -3344,7 +3344,7 @@ class PgApi:
         # Premises are more entrenched
         cur.execute(
             "SELECT COUNT(*) FROM rms_justifications "
-            "WHERE node_id = %s AND project_id = %s",
+            "WHERE node_id = %s AND domain_id = %s",
             (node_id, pid),
         )
         if cur.fetchone()[0] == 0:
@@ -3374,11 +3374,11 @@ class PgApi:
         if node_id in visited:
             return
         visited.add(node_id)
-        pid = self.project_id
+        pid = self.domain_id
 
         cur.execute(
             "SELECT type, antecedents FROM rms_justifications "
-            "WHERE node_id = %s AND project_id = %s",
+            "WHERE node_id = %s AND domain_id = %s",
             (node_id, pid),
         )
         justs = cur.fetchall()
@@ -3398,11 +3398,11 @@ class PgApi:
         if node_id in visited:
             return
         visited.add(node_id)
-        pid = self.project_id
+        pid = self.domain_id
 
         cur.execute(
             "SELECT metadata FROM rms_nodes "
-            "WHERE id = %s AND project_id = %s",
+            "WHERE id = %s AND domain_id = %s",
             (node_id, pid),
         )
         row = cur.fetchone()
@@ -3415,7 +3415,7 @@ class PgApi:
 
         cur.execute(
             "SELECT antecedents FROM rms_justifications "
-            "WHERE node_id = %s AND project_id = %s",
+            "WHERE node_id = %s AND domain_id = %s",
             (node_id, pid),
         )
         for (ants,) in cur.fetchall():
@@ -3429,11 +3429,11 @@ class PgApi:
         if node_id in visited:
             return []
         visited.add(node_id)
-        pid = self.project_id
+        pid = self.domain_id
 
         cur.execute(
             "SELECT truth_value, metadata FROM rms_nodes "
-            "WHERE id = %s AND project_id = %s",
+            "WHERE id = %s AND domain_id = %s",
             (node_id, pid),
         )
         row = cur.fetchone()
@@ -3448,7 +3448,7 @@ class PgApi:
 
         cur.execute(
             "SELECT type, antecedents, outlist, label FROM rms_justifications "
-            "WHERE node_id = %s AND project_id = %s ORDER BY id",
+            "WHERE node_id = %s AND domain_id = %s ORDER BY id",
             (node_id, pid),
         )
         justs = cur.fetchall()
@@ -3500,7 +3500,7 @@ class PgApi:
                 if all_refs:
                     cur.execute(
                         "SELECT id, truth_value FROM rms_nodes "
-                        "WHERE project_id = %s AND id = ANY(%s)",
+                        "WHERE domain_id = %s AND id = ANY(%s)",
                         (pid, list(all_refs)),
                     )
                     truth_cache = {r[0]: r[1] for r in cur.fetchall()}
@@ -3522,13 +3522,13 @@ class PgApi:
         return steps
 
     def _justification_valid_cached(self, cur, antecedents, outlist):
-        pid = self.project_id
+        pid = self.domain_id
         all_refs = set(antecedents) | set(outlist)
         if not all_refs:
             return True
         cur.execute(
             "SELECT id, truth_value FROM rms_nodes "
-            "WHERE project_id = %s AND id = ANY(%s)",
+            "WHERE domain_id = %s AND id = ANY(%s)",
             (pid, list(all_refs)),
         )
         truth_cache = {r[0]: r[1] for r in cur.fetchall()}
@@ -3541,14 +3541,14 @@ class PgApi:
 
     def _expand_neighbors(self, cur, matched_ids, visible_to):
         """Expand matched nodes to include 1-hop neighbors."""
-        pid = self.project_id
+        pid = self.domain_id
         neighbor_ids = set()
 
         # Get justifications for matched nodes (dependencies)
         if matched_ids:
             cur.execute(
                 "SELECT antecedents FROM rms_justifications "
-                "WHERE project_id = %s AND node_id = ANY(%s)",
+                "WHERE domain_id = %s AND node_id = ANY(%s)",
                 (pid, matched_ids),
             )
             for row in cur.fetchall():
@@ -3570,7 +3570,7 @@ class PgApi:
         # Fetch neighbor data
         cur.execute(
             "SELECT id, text, truth_value, source, metadata FROM rms_nodes "
-            "WHERE project_id = %s AND id = ANY(%s) ORDER BY id",
+            "WHERE domain_id = %s AND id = ANY(%s) ORDER BY id",
             (pid, list(neighbor_ids)),
         )
         neighbors = []
@@ -3657,8 +3657,8 @@ class PgApi:
         if not all_ids:
             return
         cur.execute(
-            "SELECT id FROM rms_nodes WHERE project_id = %s AND id = ANY(%s)",
-            (self.project_id, list(all_ids)),
+            "SELECT id FROM rms_nodes WHERE domain_id = %s AND id = ANY(%s)",
+            (self.domain_id, list(all_ids)),
         )
         found = {row[0] for row in cur.fetchall()}
         missing = all_ids - found
@@ -3694,7 +3694,7 @@ class PgApi:
         return all(t in visible_to for t in tags)
 
     def _inherit_access_tags(self, cur, node_id, justifications):
-        pid = self.project_id
+        pid = self.domain_id
         all_ant_ids = set()
         for j in justifications:
             all_ant_ids.update(j["antecedents"])
@@ -3703,7 +3703,7 @@ class PgApi:
             return
 
         cur.execute(
-            "SELECT metadata FROM rms_nodes WHERE project_id = %s AND id = ANY(%s)",
+            "SELECT metadata FROM rms_nodes WHERE domain_id = %s AND id = ANY(%s)",
             (pid, list(all_ant_ids)),
         )
         inherited = set()
@@ -3717,7 +3717,7 @@ class PgApi:
             return
 
         cur.execute(
-            "SELECT metadata FROM rms_nodes WHERE id = %s AND project_id = %s",
+            "SELECT metadata FROM rms_nodes WHERE id = %s AND domain_id = %s",
             (node_id, pid),
         )
         row = cur.fetchone()
@@ -3730,6 +3730,6 @@ class PgApi:
         meta["access_tags"] = sorted(merged)
 
         cur.execute(
-            "UPDATE rms_nodes SET metadata = %s WHERE id = %s AND project_id = %s",
+            "UPDATE rms_nodes SET metadata = %s WHERE id = %s AND domain_id = %s",
             (json.dumps(meta), node_id, pid),
         )
