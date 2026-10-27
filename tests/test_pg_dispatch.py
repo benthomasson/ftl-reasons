@@ -39,23 +39,23 @@ class TestPgDispatch:
 class TestBackendKwargs:
 
     def test_sqlite_default(self):
-        args = argparse.Namespace(db="reasons.db", pg=None, project_id=None)
+        args = argparse.Namespace(db="reasons.db", pg=None, domain_id=None)
         env = {k: v for k, v in __import__("os").environ.items()
                if k not in ("REASONS_PG_CONNINFO", "REASONS_PROJECT_ID")}
         with patch.dict("os.environ", env, clear=True):
             result = _backend_kwargs(args)
         assert result == {"db_path": "reasons.db"}
 
-    def test_pg_with_project_id(self):
+    def test_pg_with_domain_id(self):
         args = argparse.Namespace(db="reasons.db", pg="postgresql://localhost/test",
-                                  project_id="abc-123")
+                                  domain_id="abc-123")
         result = _backend_kwargs(args)
         assert result == {"pg_conninfo": "postgresql://localhost/test",
-                          "project_id": "abc-123"}
+                          "domain_id": "abc-123"}
 
-    def test_pg_missing_project_id_exits(self):
+    def test_pg_missing_domain_id_exits(self):
         args = argparse.Namespace(db="reasons.db", pg="postgresql://localhost/test",
-                                  project_id=None)
+                                  domain_id=None)
         env = {k: v for k, v in __import__("os").environ.items()
                if k not in ("REASONS_PG_CONNINFO", "REASONS_PROJECT_ID")}
         with patch.dict("os.environ", env, clear=True):
@@ -63,19 +63,19 @@ class TestBackendKwargs:
                 _backend_kwargs(args)
 
     def test_env_var_fallback(self):
-        args = argparse.Namespace(db="reasons.db", pg=None, project_id=None)
+        args = argparse.Namespace(db="reasons.db", pg=None, domain_id=None)
         with patch.dict("os.environ", {"REASONS_PG_CONNINFO": "postgresql://env",
                                         "REASONS_PROJECT_ID": "env-proj"}):
             result = _backend_kwargs(args)
-        assert result == {"pg_conninfo": "postgresql://env", "project_id": "env-proj"}
+        assert result == {"pg_conninfo": "postgresql://env", "domain_id": "env-proj"}
 
     def test_cli_overrides_env(self):
         args = argparse.Namespace(db="reasons.db", pg="postgresql://cli",
-                                  project_id="cli-proj")
+                                  domain_id="cli-proj")
         with patch.dict("os.environ", {"REASONS_PG_CONNINFO": "postgresql://env",
                                         "REASONS_PROJECT_ID": "env-proj"}):
             result = _backend_kwargs(args)
-        assert result == {"pg_conninfo": "postgresql://cli", "project_id": "cli-proj"}
+        assert result == {"pg_conninfo": "postgresql://cli", "domain_id": "cli-proj"}
 
 
 class TestRequireSqlite:
@@ -166,41 +166,41 @@ class TestExportMarkdownPgPath:
 
     def test_produces_markdown(self):
         with patch("reasons.api.export_network", return_value=self.EXPORT_DATA):
-            md = export_markdown(pg_conninfo="postgresql://...", project_id="test")
+            md = export_markdown(pg_conninfo="postgresql://...", domain_id="test")
         assert isinstance(md, str)
         assert len(md) > 0
 
     def test_contains_node_ids(self):
         with patch("reasons.api.export_network", return_value=self.EXPORT_DATA):
-            md = export_markdown(pg_conninfo="postgresql://...", project_id="test")
+            md = export_markdown(pg_conninfo="postgresql://...", domain_id="test")
         assert "premise-a" in md
         assert "derived-b" in md
         assert "gated-c" in md
 
     def test_contains_node_text(self):
         with patch("reasons.api.export_network", return_value=self.EXPORT_DATA):
-            md = export_markdown(pg_conninfo="postgresql://...", project_id="test")
+            md = export_markdown(pg_conninfo="postgresql://...", domain_id="test")
         assert "Alpha premise" in md
         assert "Beta derived from alpha" in md
 
     def test_contains_justification_refs(self):
         with patch("reasons.api.export_network", return_value=self.EXPORT_DATA):
-            md = export_markdown(pg_conninfo="postgresql://...", project_id="test")
+            md = export_markdown(pg_conninfo="postgresql://...", domain_id="test")
         assert "premise-a" in md
 
     def test_contains_source_info(self):
         with patch("reasons.api.export_network", return_value=self.EXPORT_DATA):
-            md = export_markdown(pg_conninfo="postgresql://...", project_id="test")
+            md = export_markdown(pg_conninfo="postgresql://...", domain_id="test")
         assert "test.py" in md
 
     def test_contains_nogoods(self):
         with patch("reasons.api.export_network", return_value=self.EXPORT_DATA):
-            md = export_markdown(pg_conninfo="postgresql://...", project_id="test")
+            md = export_markdown(pg_conninfo="postgresql://...", domain_id="test")
         assert "nogood" in md.lower()
 
     def test_dependents_reconstructed(self):
         with patch("reasons.api.export_network", return_value=self.EXPORT_DATA):
-            md = export_markdown(pg_conninfo="postgresql://...", project_id="test")
+            md = export_markdown(pg_conninfo="postgresql://...", domain_id="test")
         # premise-a is an antecedent of derived-b and gated-c,
         # so it should show dependents in the markdown
         assert "derived-b" in md
@@ -209,7 +209,7 @@ class TestExportMarkdownPgPath:
     def test_empty_network(self):
         empty = {"meta": {}, "nodes": {}, "nogoods": [], "repos": {}}
         with patch("reasons.api.export_network", return_value=empty):
-            md = export_markdown(pg_conninfo="postgresql://...", project_id="test")
+            md = export_markdown(pg_conninfo="postgresql://...", domain_id="test")
         assert isinstance(md, str)
 
 
@@ -227,14 +227,14 @@ class TestImportJsonDispatch:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = import_json(str(json_file),
-                                 pg_conninfo="postgresql://...", project_id="test")
+                                 pg_conninfo="postgresql://...", domain_id="test")
         mock_pg.import_json.assert_called_once_with(data=data)
         assert result["nodes_imported"] == 1
 
     def test_file_not_found(self):
         with pytest.raises(FileNotFoundError):
             import_json("/nonexistent.json",
-                        pg_conninfo="postgresql://...", project_id="test")
+                        pg_conninfo="postgresql://...", domain_id="test")
 
 
 class TestImportBeliefsDispatch:
@@ -252,7 +252,7 @@ class TestImportBeliefsDispatch:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = import_beliefs(str(beliefs_file),
-                                    pg_conninfo="postgresql://...", project_id="test")
+                                    pg_conninfo="postgresql://...", domain_id="test")
         mock_pg.import_beliefs.assert_called_once()
         call_kwargs = mock_pg.import_beliefs.call_args[1]
         assert "alpha" in call_kwargs["beliefs_text"].lower()
@@ -277,7 +277,7 @@ class TestImportAgentDispatch:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = import_agent("remote", str(beliefs_file),
-                                  pg_conninfo="postgresql://...", project_id="test")
+                                  pg_conninfo="postgresql://...", domain_id="test")
         mock_pg.import_agent.assert_called_once()
         call_kwargs = mock_pg.import_agent.call_args[1]
         assert call_kwargs["agent_name"] == "remote"
@@ -302,7 +302,7 @@ class TestImportAgentDispatch:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = import_agent("remote", str(json_file),
-                                  pg_conninfo="postgresql://...", project_id="test")
+                                  pg_conninfo="postgresql://...", domain_id="test")
         mock_pg.import_agent.assert_called_once()
         call_kwargs = mock_pg.import_agent.call_args[1]
         assert call_kwargs["agent_name"] == "remote"
@@ -327,7 +327,7 @@ class TestSyncAgentDispatch:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = sync_agent("remote", str(beliefs_file),
-                                pg_conninfo="postgresql://...", project_id="test")
+                                pg_conninfo="postgresql://...", domain_id="test")
         mock_pg.sync_agent.assert_called_once()
         assert result["beliefs_added"] == 1
 
@@ -343,7 +343,7 @@ class TestImportCliNoLongerBlocked:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = import_json(str(json_file),
-                                 pg_conninfo="postgresql://...", project_id="test")
+                                 pg_conninfo="postgresql://...", domain_id="test")
         assert result["nodes_imported"] == 0
 
     def test_import_beliefs_accepts_pg(self, tmp_path):
@@ -358,7 +358,7 @@ class TestImportCliNoLongerBlocked:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = import_beliefs(str(f),
-                                    pg_conninfo="postgresql://...", project_id="test")
+                                    pg_conninfo="postgresql://...", domain_id="test")
         assert result["claims_imported"] == 0
 
 
@@ -370,7 +370,7 @@ class TestHashSourcesDispatch:
         with patch("reasons.pg.PgApi") as MockPgApi:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
-            result = hash_sources(pg_conninfo="postgresql://...", project_id="test")
+            result = hash_sources(pg_conninfo="postgresql://...", domain_id="test")
         mock_pg.hash_sources.assert_called_once_with(force=False, repos=None)
         assert result == {"hashed": [], "count": 0}
 
@@ -381,7 +381,7 @@ class TestHashSourcesDispatch:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = hash_sources(force=True, repos={"myrepo": "/tmp/repo"},
-                                  pg_conninfo="postgresql://...", project_id="test")
+                                  pg_conninfo="postgresql://...", domain_id="test")
         mock_pg.hash_sources.assert_called_once_with(
             force=True, repos={"myrepo": "/tmp/repo"})
         assert result["count"] == 1
@@ -397,7 +397,7 @@ class TestCheckStaleDispatch:
         with patch("reasons.pg.PgApi") as MockPgApi:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
-            result = check_stale(pg_conninfo="postgresql://...", project_id="test")
+            result = check_stale(pg_conninfo="postgresql://...", domain_id="test")
         mock_pg.check_stale.assert_called_once_with(repos=None, upgrade_hashes=False, git_aware=False)
         assert result["checked"] == 5
 
@@ -410,7 +410,7 @@ class TestCheckStaleDispatch:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = check_stale(upgrade_hashes=True,
-                                 pg_conninfo="postgresql://...", project_id="test")
+                                 pg_conninfo="postgresql://...", domain_id="test")
         mock_pg.check_stale.assert_called_once_with(repos=None, upgrade_hashes=True, git_aware=False)
         assert result["upgraded"] == 2
 
@@ -423,7 +423,7 @@ class TestLookupDispatch:
         with patch("reasons.pg.PgApi") as MockPgApi:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
-            result = lookup("alpha", pg_conninfo="postgresql://...", project_id="test")
+            result = lookup("alpha", pg_conninfo="postgresql://...", domain_id="test")
         mock_pg.lookup.assert_called_once_with(query="alpha", visible_to=None,
                                                   include_out=False)
         assert "alpha" in result.lower()
@@ -435,7 +435,7 @@ class TestLookupDispatch:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = lookup("secret", visible_to=["admin"],
-                            pg_conninfo="postgresql://...", project_id="test")
+                            pg_conninfo="postgresql://...", domain_id="test")
         mock_pg.lookup.assert_called_once_with(query="secret", visible_to=["admin"],
                                                   include_out=False)
 
@@ -448,7 +448,7 @@ class TestMaintenanceCliNoLongerBlocked:
         with patch("reasons.pg.PgApi") as MockPgApi:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
-            result = hash_sources(pg_conninfo="postgresql://...", project_id="test")
+            result = hash_sources(pg_conninfo="postgresql://...", domain_id="test")
         assert result["count"] == 0
 
     def test_check_stale_accepts_pg(self):
@@ -459,7 +459,7 @@ class TestMaintenanceCliNoLongerBlocked:
         with patch("reasons.pg.PgApi") as MockPgApi:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
-            result = check_stale(pg_conninfo="postgresql://...", project_id="test")
+            result = check_stale(pg_conninfo="postgresql://...", domain_id="test")
         assert result["stale_count"] == 0
 
     def test_lookup_accepts_pg(self):
@@ -468,7 +468,7 @@ class TestMaintenanceCliNoLongerBlocked:
         with patch("reasons.pg.PgApi") as MockPgApi:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
-            result = lookup("test", pg_conninfo="postgresql://...", project_id="test")
+            result = lookup("test", pg_conninfo="postgresql://...", domain_id="test")
         assert "No beliefs" in result
 
 
@@ -481,7 +481,7 @@ class TestAddRepoDispatch:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = add_repo("myrepo", "/tmp/repo",
-                              pg_conninfo="postgresql://...", project_id="test")
+                              pg_conninfo="postgresql://...", domain_id="test")
         mock_pg.add_repo.assert_called_once_with(name="myrepo", path="/tmp/repo")
         assert result == {"name": "myrepo", "path": "/tmp/repo"}
 
@@ -494,7 +494,7 @@ class TestListReposDispatch:
         with patch("reasons.pg.PgApi") as MockPgApi:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
-            result = list_repos(pg_conninfo="postgresql://...", project_id="test")
+            result = list_repos(pg_conninfo="postgresql://...", domain_id="test")
         mock_pg.list_repos.assert_called_once_with()
         assert result["repos"] == {"myrepo": "/tmp/repo"}
 
@@ -504,7 +504,7 @@ class TestListReposDispatch:
         with patch("reasons.pg.PgApi") as MockPgApi:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
-            result = list_repos(pg_conninfo="postgresql://...", project_id="test")
+            result = list_repos(pg_conninfo="postgresql://...", domain_id="test")
         assert result["repos"] == {}
 
 
@@ -519,7 +519,7 @@ class TestListNegativeDispatch:
         with patch("reasons.pg.PgApi") as MockPgApi:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
-            result = list_negative(pg_conninfo="postgresql://...", project_id="test")
+            result = list_negative(pg_conninfo="postgresql://...", domain_id="test")
         mock_pg.list_negative.assert_called_once_with(visible_to=None, model="claude",
                                                           skip_llm=False)
         assert result["count"] == 1
@@ -533,7 +533,7 @@ class TestListNegativeDispatch:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = list_negative(visible_to=["admin"], model="gemini",
-                                   pg_conninfo="postgresql://...", project_id="test")
+                                   pg_conninfo="postgresql://...", domain_id="test")
         mock_pg.list_negative.assert_called_once_with(
             visible_to=["admin"], model="gemini", skip_llm=False)
         assert result["total"] == 5
@@ -548,7 +548,7 @@ class TestRepoAndNegativeCliNoLongerBlocked:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
             result = add_repo("r", "/p",
-                              pg_conninfo="postgresql://...", project_id="test")
+                              pg_conninfo="postgresql://...", domain_id="test")
         assert result["name"] == "r"
 
     def test_list_repos_accepts_pg(self):
@@ -557,7 +557,7 @@ class TestRepoAndNegativeCliNoLongerBlocked:
         with patch("reasons.pg.PgApi") as MockPgApi:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
-            result = list_repos(pg_conninfo="postgresql://...", project_id="test")
+            result = list_repos(pg_conninfo="postgresql://...", domain_id="test")
         assert result["repos"] == {}
 
     def test_list_negative_accepts_pg(self):
@@ -568,5 +568,5 @@ class TestRepoAndNegativeCliNoLongerBlocked:
         with patch("reasons.pg.PgApi") as MockPgApi:
             MockPgApi.return_value.__enter__ = MagicMock(return_value=mock_pg)
             MockPgApi.return_value.__exit__ = MagicMock(return_value=False)
-            result = list_negative(pg_conninfo="postgresql://...", project_id="test")
+            result = list_negative(pg_conninfo="postgresql://...", domain_id="test")
         assert result["count"] == 0

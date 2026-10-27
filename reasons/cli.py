@@ -25,7 +25,7 @@ def cmd_init(args):
         if "db_path" in result:
             print(f"Initialized RMS database: {result['db_path']}")
         else:
-            print(f"Initialized PostgreSQL project: {result['project_id']}")
+            print(f"Initialized PostgreSQL domain: {result['domain_id']}")
     except FileExistsError as e:
         print(f"{e}", file=sys.stderr)
         print("Use --force to reinitialize.", file=sys.stderr)
@@ -1287,12 +1287,15 @@ def _parse_tag_filters(args) -> dict[str, list[str]] | None:
 
 def _backend_kwargs(args):
     pg = getattr(args, "pg", None) or os.environ.get("REASONS_PG_CONNINFO")
-    pid = getattr(args, "project_id", None) or os.environ.get("REASONS_PROJECT_ID")
+    did = (getattr(args, "domain_id", None)
+           or getattr(args, "project_id", None)
+           or os.environ.get("REASONS_DOMAIN_ID")
+           or os.environ.get("REASONS_PROJECT_ID"))
     if pg:
-        if not pid:
-            print("Error: --project-id is required with --pg", file=sys.stderr)
+        if not did:
+            print("Error: --domain-id is required with --pg", file=sys.stderr)
             sys.exit(1)
-        return {"pg_conninfo": pg, "project_id": pid}
+        return {"pg_conninfo": pg, "domain_id": did}
     return {"db_path": args.db}
 
 
@@ -3055,8 +3058,10 @@ def main():
     parser.add_argument("--db", default=api.DEFAULT_DB, help="Path to database (default: reasons.db)")
     parser.add_argument("--pg", default=None, metavar="CONNINFO",
                         help="PostgreSQL connection string (or set REASONS_PG_CONNINFO)")
+    parser.add_argument("--domain-id", default=None,
+                        help="Domain ID for PostgreSQL (or set REASONS_DOMAIN_ID)")
     parser.add_argument("--project-id", default=None,
-                        help="Project ID for PostgreSQL (or set REASONS_PROJECT_ID)")
+                        help="(deprecated alias for --domain-id)")
     sub = parser.add_subparsers(dest="command")
 
     # init

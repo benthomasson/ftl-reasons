@@ -556,7 +556,7 @@ class TestMultiTenancy:
             with api2.conn.cursor() as cur:
                 for table in ("rms_propagation_log", "rms_justifications",
                               "rms_nogoods", "rms_network_meta", "rms_nodes"):
-                    cur.execute(f"DELETE FROM {table} WHERE project_id = %s", (project2,))
+                    cur.execute(f"DELETE FROM {table} WHERE domain_id = %s", (project2,))
             api2.conn.commit()
             api2.close()
 
@@ -863,8 +863,8 @@ class TestCompact:
         # Manually set summarizes metadata
         with pg_api.conn.cursor() as cur:
             cur.execute(
-                "UPDATE rms_nodes SET metadata = %s WHERE id = %s AND project_id = %s",
-                (json.dumps({"summarizes": ["a", "b"]}), "summary", pg_api.project_id),
+                "UPDATE rms_nodes SET metadata = %s WHERE id = %s AND domain_id = %s",
+                (json.dumps({"summarizes": ["a", "b"]}), "summary", pg_api.domain_id),
             )
         pg_api.conn.commit()
         result = pg_api.compact(budget=5000)
@@ -1067,8 +1067,8 @@ class TestPropagate:
         with pg_api.conn.cursor() as cur:
             cur.execute(
                 "UPDATE rms_nodes SET truth_value = 'OUT' "
-                "WHERE id = 'b' AND project_id = %s",
-                (pg_api.project_id,),
+                "WHERE id = 'b' AND domain_id = %s",
+                (pg_api.domain_id,),
             )
         pg_api.conn.commit()
         result = pg_api.propagate()
@@ -1082,8 +1082,8 @@ class TestPropagate:
         with pg_api.conn.cursor() as cur:
             cur.execute(
                 "UPDATE rms_nodes SET truth_value = 'OUT' "
-                "WHERE id IN ('b', 'c') AND project_id = %s",
-                (pg_api.project_id,),
+                "WHERE id IN ('b', 'c') AND domain_id = %s",
+                (pg_api.domain_id,),
             )
         pg_api.conn.commit()
         result = pg_api.propagate()
