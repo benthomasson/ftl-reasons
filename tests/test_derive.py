@@ -297,6 +297,24 @@ def test_validate_proposals_missing_antecedent():
     assert "nonexistent" in skipped[0][1]
 
 
+def test_validate_proposals_min_antecedents():
+    nodes = {"fact-a": {}, "fact-b": {}}
+    proposals = [
+        {"id": "single-dep", "antecedents": ["fact-a"], "unless": [],
+         "text": "only one antecedent", "kind": "derive", "label": "test"},
+        {"id": "no-deps", "antecedents": [], "unless": [],
+         "text": "no antecedents", "kind": "derive", "label": "test"},
+        {"id": "good", "antecedents": ["fact-a", "fact-b"], "unless": [],
+         "text": "two antecedents", "kind": "derive", "label": "test"},
+    ]
+    valid, skipped = validate_proposals(proposals, nodes)
+    assert len(valid) == 1
+    assert valid[0]["id"] == "good"
+    assert len(skipped) == 2
+    assert "at least 2 antecedents" in skipped[0][1]
+    assert "at least 2 antecedents" in skipped[1][1]
+
+
 def test_validate_proposals_already_exists():
     nodes = {"fact-a": {}, "fact-b": {}, "existing": {}}
     proposals = [
@@ -950,7 +968,7 @@ def test_derive_no_report_flag(simple_network, tmp_path):
     report_dir = str(tmp_path / "reports")
     mock_result = _mock_derive_response([
         {"id": "new-belief-2", "text": "Another belief",
-         "antecedents": ["fact-a"]},
+         "antecedents": ["fact-a", "fact-b"]},
     ])
     with patch("reasons.llm.shutil.which", return_value="/usr/bin/claude"), \
          patch("reasons.llm.subprocess.run", return_value=mock_result):
@@ -973,7 +991,7 @@ def test_derive_exhaust_report_has_rounds(simple_network, tmp_path):
         if call_count[0] == 1:
             return _mock_derive_response([
                 {"id": "round1-belief", "text": "From round 1",
-                 "antecedents": ["fact-a"]},
+                 "antecedents": ["fact-a", "fact-b"]},
             ])
         # Second round: no proposals (saturated)
         return type("R", (), {"returncode": 0, "stdout": "No proposals.", "stderr": ""})()

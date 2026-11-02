@@ -632,6 +632,9 @@ def validate_proposals(proposals, nodes):
         if p["id"] in nodes:
             skipped.append((p, "already exists"))
             continue
+        if len(p["antecedents"]) < 2:
+            skipped.append((p, "derived beliefs require at least 2 antecedents"))
+            continue
         similar = find_similar_out(p["id"], nodes)
         if similar:
             best_id, best_sim = similar[0]
