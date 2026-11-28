@@ -525,6 +525,80 @@ class TestListNogoods:
         assert result[0]["id"]
 
 
+class TestSyncStatus:
+
+    def test_in_sync(self, db_path, tmp_path):
+        api.add_node("a", "Alpha", db_path=db_path)
+        exported = api.export_network(db_path=db_path)
+        network_file = str(tmp_path / "network.json")
+        import json
+        with open(network_file, "w") as f:
+            json.dump(exported, f)
+        result = api.sync_status(network_file, db_path=db_path)
+        assert result["in_sync"] is True
+        assert result["new_in_db"] == []
+        assert result["only_in_file"] == []
+        assert result["changed"] == []
+
+    def test_new_in_db(self, db_path, tmp_path):
+        api.add_node("a", "Alpha", db_path=db_path)
+        exported = api.export_network(db_path=db_path)
+        network_file = str(tmp_path / "network.json")
+        import json
+        with open(network_file, "w") as f:
+            json.dump(exported, f)
+        api.add_node("b", "Beta", db_path=db_path)
+        result = api.sync_status(network_file, db_path=db_path)
+        assert result["in_sync"] is False
+        assert len(result["new_in_db"]) == 1
+        assert result["new_in_db"][0]["id"] == "b"
+
+    def test_only_in_file(self, tmp_path):
+        db1 = str(tmp_path / "full.db")
+        db2 = str(tmp_path / "partial.db")
+        api.init_db(db_path=db1)
+        api.init_db(db_path=db2)
+        api.add_node("a", "Alpha", db_path=db1)
+        api.add_node("b", "Beta", db_path=db1)
+        api.add_node("a", "Alpha", db_path=db2)
+        exported = api.export_network(db_path=db1)
+        network_file = str(tmp_path / "network.json")
+        import json
+        with open(network_file, "w") as f:
+            json.dump(exported, f)
+        result = api.sync_status(network_file, db_path=db2)
+        assert result["in_sync"] is False
+        assert len(result["only_in_file"]) == 1
+        assert result["only_in_file"][0]["id"] == "b"
+
+    def test_changed_text(self, db_path, tmp_path):
+        api.add_node("a", "Alpha", db_path=db_path)
+        exported = api.export_network(db_path=db_path)
+        import json
+        exported["nodes"]["a"]["text"] = "Alpha original"
+        network_file = str(tmp_path / "network.json")
+        with open(network_file, "w") as f:
+            json.dump(exported, f)
+        result = api.sync_status(network_file, db_path=db_path)
+        assert result["in_sync"] is False
+        assert len(result["changed"]) == 1
+        assert result["changed"][0]["id"] == "a"
+        assert result["changed"][0]["field"] == "text"
+
+    def test_changed_truth_value(self, db_path, tmp_path):
+        api.add_node("a", "Alpha", db_path=db_path)
+        exported = api.export_network(db_path=db_path)
+        network_file = str(tmp_path / "network.json")
+        import json
+        with open(network_file, "w") as f:
+            json.dump(exported, f)
+        api.retract_node("a", db_path=db_path)
+        result = api.sync_status(network_file, db_path=db_path)
+        assert result["in_sync"] is False
+        assert len(result["changed"]) == 1
+        assert result["changed"][0]["field"] == "truth_value"
+
+
 class TestListNegative:
 
     def test_empty_db(self, db_path):

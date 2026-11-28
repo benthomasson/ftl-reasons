@@ -3761,6 +3761,62 @@ def list_nogoods(
         ]
 
 
+def _compute_sync_diff(db_nodes, disk_nodes):
+    """Compare db nodes against disk nodes, return structured diff."""
+    all_ids = set(disk_nodes.keys()) | set(db_nodes.keys())
+    only_in_db = []
+    only_in_file = []
+    changed = []
+
+    for nid in sorted(all_ids):
+        in_db = nid in db_nodes
+        in_file = nid in disk_nodes
+        if in_db and not in_file:
+            only_in_db.append(nid)
+        elif in_file and not in_db:
+            only_in_file.append(nid)
+        elif in_db and in_file:
+            db_node = db_nodes[nid]
+            file_node = disk_nodes[nid]
+            if db_node.get("text") != file_node.get("text"):
+                changed.append((nid, "text"))
+            elif db_node.get("truth_value") != file_node.get("truth_value"):
+                changed.append((nid, "truth_value"))
+            elif db_node.get("metadata") != file_node.get("metadata"):
+                changed.append((nid, "metadata"))
+            elif json.dumps(db_node, sort_keys=True) != json.dumps(
+                file_node, sort_keys=True
+            ):
+                changed.append((nid, "other"))
+
+    return only_in_db, only_in_file, changed
+
+
+def sync_status(
+    network_file: str,
+    db_path: str = DEFAULT_DB,
+    pg_conninfo=None, domain_id=None,
+) -> dict:
+    """Compare reasons.db against a network.json file.
+
+    Returns: {"in_sync": bool, "new_in_db": list, "only_in_file": list, "changed": list}
+    """
+    disk_data = json.loads(Path(network_file).read_text(encoding="utf-8"))
+    disk_nodes = disk_data.get("nodes", {})
+
+    db_data = export_network(db_path=db_path, pg_conninfo=pg_conninfo, domain_id=domain_id)
+    db_nodes = db_data.get("nodes", {})
+
+    only_in_db, only_in_file, changed = _compute_sync_diff(db_nodes, disk_nodes)
+
+    return {
+        "in_sync": not only_in_db and not only_in_file and not changed,
+        "new_in_db": [{"id": nid, "text": db_nodes[nid].get("text", "")} for nid in only_in_db],
+        "only_in_file": [{"id": nid, "text": disk_nodes[nid].get("text", "")} for nid in only_in_file],
+        "changed": [{"id": nid, "field": field} for nid, field in changed],
+    }
+
+
 def report_gated(
     visible_to: list[str] | None = None,
     model: str = "",

@@ -508,6 +508,59 @@ class TestNogood:
         assert code == 1
 
 
+class TestSyncStatus:
+
+    def test_sync_no_file(self, db_path, tmp_path):
+        run_cli("init", db_path=db_path)
+        out, err, code = run_cli("sync-status", str(tmp_path / "missing.json"), db_path=db_path)
+        assert code == 0
+        assert "nothing to compare" in out
+
+    def test_sync_in_sync(self, db_path, tmp_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "Alpha", db_path=db_path)
+        network_file = str(tmp_path / "network.json")
+        run_cli("export", "-o", network_file, db_path=db_path)
+        out, err, code = run_cli("sync-status", network_file, db_path=db_path)
+        assert code == 0
+        assert "In sync" in out
+
+    def test_sync_new_in_db(self, db_path, tmp_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "Alpha", db_path=db_path)
+        network_file = str(tmp_path / "network.json")
+        run_cli("export", "-o", network_file, db_path=db_path)
+        run_cli("add", "b", "Beta", db_path=db_path)
+        out, err, code = run_cli("sync-status", network_file, db_path=db_path)
+        assert code == 0
+        assert "+ b:" in out
+        assert "1 new" in out
+
+    def test_sync_json_output(self, db_path, tmp_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "Alpha", db_path=db_path)
+        network_file = str(tmp_path / "network.json")
+        run_cli("export", "-o", network_file, db_path=db_path)
+        run_cli("add", "b", "Beta", db_path=db_path)
+        out, err, code = run_cli("sync-status", "--json", network_file, db_path=db_path)
+        assert code == 0
+        data = json.loads(out)
+        assert data["in_sync"] is False
+        assert data["counts"]["new"] == 1
+        assert len(data["new_in_db"]) == 1
+
+    def test_sync_short(self, db_path, tmp_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "Alpha", db_path=db_path)
+        network_file = str(tmp_path / "network.json")
+        run_cli("export", "-o", network_file, db_path=db_path)
+        run_cli("add", "b", "Beta", db_path=db_path)
+        out, err, code = run_cli("sync-status", "--short", network_file, db_path=db_path)
+        assert code == 0
+        assert "1 difference" in out
+        assert "+ b:" not in out
+
+
 class TestListNogoods:
 
     def test_list_nogoods_empty(self, db_path):
