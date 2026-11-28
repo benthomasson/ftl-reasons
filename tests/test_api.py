@@ -644,6 +644,27 @@ class TestMergeNetworks:
         node = api.show_node("a", db_path=db_path)
         assert node["text"] == "Alpha ours"
 
+    def test_adds_dependent_beliefs_in_order(self, tmp_path):
+        db1 = str(tmp_path / "ours.db")
+        db2 = str(tmp_path / "theirs.db")
+        api.init_db(db_path=db1)
+        api.init_db(db_path=db2)
+        api.add_node("shared", "Shared premise", db_path=db1)
+        api.add_node("shared", "Shared premise", db_path=db2)
+        api.add_node("a", "Base belief", db_path=db2)
+        api.add_node("b", "Depends on a", sl="a", db_path=db2)
+        api.add_node("c", "Depends on b", sl="b", db_path=db2)
+        exported = api.export_network(db_path=db2)
+        network_file = str(tmp_path / "theirs.json")
+        import json
+        with open(network_file, "w") as f:
+            json.dump(exported, f)
+        result = api.merge_networks(network_file, db_path=db1)
+        assert result["added"] == 3
+        node_c = api.show_node("c", db_path=db1)
+        assert node_c["text"] == "Depends on b"
+        assert node_c["truth_value"] == "IN"
+
     def test_dry_run(self, tmp_path):
         db1 = str(tmp_path / "ours.db")
         db2 = str(tmp_path / "theirs.db")
