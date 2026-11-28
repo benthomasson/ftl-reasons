@@ -2170,6 +2170,62 @@ def cmd_list_nogoods(args):
     print(f"\n{len(nogoods)} nogood(s)")
 
 
+def cmd_merge(args):
+    """Merge a remote network.json into the local reasons.db."""
+    try:
+        result = api.merge_networks(
+            args.theirs_file,
+            strategy=args.strategy,
+            dry_run=args.dry_run,
+            **_backend_kwargs(args),
+        )
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    if args.dry_run:
+        print("Dry run — no changes applied\n")
+
+    if result["added"]:
+        print(f"Added {result['added']} beliefs from remote")
+    if result["only_ours"]:
+        print(f"Kept {result['only_ours']} beliefs only in local")
+
+    if result["conflicts"]:
+        if result["resolved"]:
+            print(
+                f"\nConflicts: {result['conflicts']} total, {result['resolved']} resolved"
+            )
+            if result["kept_ours"]:
+                print(f"  Kept ours: {result['kept_ours']}")
+            if result["kept_theirs"]:
+                print(f"  Kept theirs: {result['kept_theirs']}")
+        else:
+            print(f"\nConflicts: {result['conflicts']} unresolved")
+
+        if args.strategy == "interactive" or not result["resolved"]:
+            print()
+            for c in result["conflict_details"]:
+                print(f"  ~ {c['id']}")
+                for field in c["fields"]:
+                    if field == "text":
+                        print(f"    text ours:   {c['ours_text']}")
+                        print(f"    text theirs: {c['theirs_text']}")
+                    elif field == "truth_value":
+                        print(
+                            f"    truth ours: {c['ours_truth']}  theirs: {c['theirs_truth']}"
+                        )
+                    else:
+                        print(f"    {field} differs")
+            if not args.dry_run:
+                print("\nRe-run with --strategy ours|theirs|newest to resolve")
+    elif not result["added"] and not result["only_ours"]:
+        print("Already in sync — nothing to merge")
+
+    if not args.dry_run and (result["added"] or result["resolved"]):
+        print("\nDone. Run `reasons export` to update network.json")
+
+
 def cmd_sync_status(args):
     """Compare reasons.db against network.json and report differences."""
     network_file = args.network_file
@@ -3745,6 +3801,14 @@ def main():
                    help="Output format (default: full)")
     p.add_argument("--visible-to", metavar="TAG,TAG", help="Only show nodes whose access_tags are a subset of these tags")
 
+    # merge
+    p = sub.add_parser("merge", help="Merge a remote network.json into local reasons.db")
+    p.add_argument("theirs_file", nargs="?", default="network.json",
+                   help="Path to remote network.json to merge in (default: network.json)")
+    p.add_argument("--strategy", choices=["ours", "theirs", "newest", "interactive"],
+                   default="interactive", help="Conflict resolution strategy (default: interactive)")
+    p.add_argument("--dry-run", action="store_true", help="Show what would change without applying")
+
     # sync-status
     p = sub.add_parser("sync-status", help="Compare reasons.db against network.json")
     p.add_argument(
@@ -4104,6 +4168,7 @@ def main():
         "cluster-list": cmd_cluster_list,
         "list": cmd_list,
         "list-gated": cmd_list_gated,
+        "merge": cmd_merge,
         "sync-status": cmd_sync_status,
         "list-nogoods": cmd_list_nogoods,
         "report-gated": cmd_report_gated,

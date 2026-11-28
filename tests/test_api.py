@@ -525,6 +525,169 @@ class TestListNogoods:
         assert result[0]["id"]
 
 
+class TestMergeNetworks:
+
+    def test_already_in_sync(self, db_path, tmp_path):
+        api.add_node("a", "Alpha", db_path=db_path)
+        exported = api.export_network(db_path=db_path)
+        network_file = str(tmp_path / "theirs.json")
+        import json
+        with open(network_file, "w") as f:
+            json.dump(exported, f)
+        result = api.merge_networks(network_file, db_path=db_path)
+        assert result["added"] == 0
+        assert result["conflicts"] == 0
+        assert result["only_ours"] == 0
+
+    def test_adds_new_beliefs(self, tmp_path):
+        db1 = str(tmp_path / "ours.db")
+        db2 = str(tmp_path / "theirs.db")
+        api.init_db(db_path=db1)
+        api.init_db(db_path=db2)
+        api.add_node("a", "Alpha", db_path=db1)
+        api.add_node("a", "Alpha", db_path=db2)
+        api.add_node("b", "Beta", db_path=db2)
+        exported = api.export_network(db_path=db2)
+        network_file = str(tmp_path / "theirs.json")
+        import json
+        with open(network_file, "w") as f:
+            json.dump(exported, f)
+        result = api.merge_networks(network_file, db_path=db1)
+        assert result["added"] == 1
+        node = api.show_node("b", db_path=db1)
+        assert node["text"] == "Beta"
+
+    def test_keeps_ours_only(self, tmp_path):
+        db1 = str(tmp_path / "ours.db")
+        db2 = str(tmp_path / "theirs.db")
+        api.init_db(db_path=db1)
+        api.init_db(db_path=db2)
+        api.add_node("a", "Alpha", db_path=db1)
+        api.add_node("x", "Only ours", db_path=db1)
+        api.add_node("a", "Alpha", db_path=db2)
+        exported = api.export_network(db_path=db2)
+        network_file = str(tmp_path / "theirs.json")
+        import json
+        with open(network_file, "w") as f:
+            json.dump(exported, f)
+        result = api.merge_networks(network_file, db_path=db1)
+        assert result["only_ours"] == 1
+
+    def test_conflict_detection(self, db_path, tmp_path):
+        api.add_node("a", "Alpha", db_path=db_path)
+        exported = api.export_network(db_path=db_path)
+        exported["nodes"]["a"]["text"] = "Alpha modified"
+        network_file = str(tmp_path / "theirs.json")
+        import json
+        with open(network_file, "w") as f:
+            json.dump(exported, f)
+        result = api.merge_networks(network_file, db_path=db_path)
+        assert result["conflicts"] == 1
+        assert result["conflict_details"][0]["id"] == "a"
+        assert "text" in result["conflict_details"][0]["fields"]
+
+    def test_strategy_theirs(self, db_path, tmp_path):
+        api.add_node("a", "Alpha", db_path=db_path)
+        exported = api.export_network(db_path=db_path)
+        exported["nodes"]["a"]["text"] = "Alpha theirs"
+        network_file = str(tmp_path / "theirs.json")
+        import json
+        with open(network_file, "w") as f:
+            json.dump(exported, f)
+        result = api.merge_networks(network_file, strategy="theirs", db_path=db_path)
+        assert result["resolved"] == 1
+        assert result["kept_theirs"] == 1
+        node = api.show_node("a", db_path=db_path)
+        assert node["text"] == "Alpha theirs"
+
+    def test_strategy_ours(self, db_path, tmp_path):
+        api.add_node("a", "Alpha", db_path=db_path)
+        exported = api.export_network(db_path=db_path)
+        exported["nodes"]["a"]["text"] = "Alpha theirs"
+        network_file = str(tmp_path / "theirs.json")
+        import json
+        with open(network_file, "w") as f:
+            json.dump(exported, f)
+        result = api.merge_networks(network_file, strategy="ours", db_path=db_path)
+        assert result["resolved"] == 1
+        assert result["kept_ours"] == 1
+        node = api.show_node("a", db_path=db_path)
+        assert node["text"] == "Alpha"
+
+    def test_strategy_newest(self, db_path, tmp_path):
+        api.add_node("a", "Alpha ours", db_path=db_path)
+        exported = api.export_network(db_path=db_path)
+        exported["nodes"]["a"]["text"] = "Alpha theirs newer"
+        exported["nodes"]["a"]["updated_at"] = "2099-01-01T00:00:00+00:00"
+        network_file = str(tmp_path / "theirs.json")
+        import json
+        with open(network_file, "w") as f:
+            json.dump(exported, f)
+        result = api.merge_networks(network_file, strategy="newest", db_path=db_path)
+        assert result["resolved"] == 1
+        assert result["kept_theirs"] == 1
+        node = api.show_node("a", db_path=db_path)
+        assert node["text"] == "Alpha theirs newer"
+
+    def test_strategy_newest_keeps_ours_when_newer(self, db_path, tmp_path):
+        api.add_node("a", "Alpha ours", db_path=db_path)
+        exported = api.export_network(db_path=db_path)
+        exported["nodes"]["a"]["text"] = "Alpha theirs older"
+        exported["nodes"]["a"]["updated_at"] = "2000-01-01T00:00:00+00:00"
+        network_file = str(tmp_path / "theirs.json")
+        import json
+        with open(network_file, "w") as f:
+            json.dump(exported, f)
+        result = api.merge_networks(network_file, strategy="newest", db_path=db_path)
+        assert result["resolved"] == 1
+        assert result["kept_ours"] == 1
+        node = api.show_node("a", db_path=db_path)
+        assert node["text"] == "Alpha ours"
+
+    def test_adds_dependent_beliefs_in_order(self, tmp_path):
+        db1 = str(tmp_path / "ours.db")
+        db2 = str(tmp_path / "theirs.db")
+        api.init_db(db_path=db1)
+        api.init_db(db_path=db2)
+        api.add_node("shared", "Shared premise", db_path=db1)
+        api.add_node("shared", "Shared premise", db_path=db2)
+        api.add_node("a", "Base belief", db_path=db2)
+        api.add_node("b", "Depends on a", sl="a", db_path=db2)
+        api.add_node("c", "Depends on b", sl="b", db_path=db2)
+        exported = api.export_network(db_path=db2)
+        network_file = str(tmp_path / "theirs.json")
+        import json
+        with open(network_file, "w") as f:
+            json.dump(exported, f)
+        result = api.merge_networks(network_file, db_path=db1)
+        assert result["added"] == 3
+        node_c = api.show_node("c", db_path=db1)
+        assert node_c["text"] == "Depends on b"
+        assert node_c["truth_value"] == "IN"
+
+    def test_dry_run(self, tmp_path):
+        db1 = str(tmp_path / "ours.db")
+        db2 = str(tmp_path / "theirs.db")
+        api.init_db(db_path=db1)
+        api.init_db(db_path=db2)
+        api.add_node("a", "Alpha", db_path=db1)
+        api.add_node("a", "Alpha", db_path=db2)
+        api.add_node("b", "Beta", db_path=db2)
+        exported = api.export_network(db_path=db2)
+        network_file = str(tmp_path / "theirs.json")
+        import json
+        with open(network_file, "w") as f:
+            json.dump(exported, f)
+        result = api.merge_networks(network_file, dry_run=True, db_path=db1)
+        assert result["added"] == 1
+        with pytest.raises(Exception):
+            api.show_node("b", db_path=db1)
+
+    def test_file_not_found(self, db_path):
+        with pytest.raises(FileNotFoundError):
+            api.merge_networks("/nonexistent/file.json", db_path=db_path)
+
+
 class TestSyncStatus:
 
     def test_in_sync(self, db_path, tmp_path):

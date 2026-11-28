@@ -508,6 +508,64 @@ class TestNogood:
         assert code == 1
 
 
+class TestMerge:
+
+    def test_merge_adds_new(self, db_path, tmp_path):
+        run_cli("init", db_path=db_path)
+        db2 = str(tmp_path / "theirs.db")
+        run_cli("init", db_path=db2)
+        run_cli("add", "a", "Alpha", db_path=db_path)
+        run_cli("add", "a", "Alpha", db_path=db2)
+        run_cli("add", "b", "Beta", db_path=db2)
+        network_file = str(tmp_path / "theirs.json")
+        run_cli("export", "-o", network_file, db_path=db2)
+        out, err, code = run_cli("merge", network_file, db_path=db_path)
+        assert code == 0
+        assert "Added 1" in out
+
+    def test_merge_already_in_sync(self, db_path, tmp_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "Alpha", db_path=db_path)
+        network_file = str(tmp_path / "theirs.json")
+        run_cli("export", "-o", network_file, db_path=db_path)
+        out, err, code = run_cli("merge", network_file, db_path=db_path)
+        assert code == 0
+        assert "in sync" in out
+
+    def test_merge_dry_run(self, db_path, tmp_path):
+        run_cli("init", db_path=db_path)
+        db2 = str(tmp_path / "theirs.db")
+        run_cli("init", db_path=db2)
+        run_cli("add", "a", "Alpha", db_path=db_path)
+        run_cli("add", "a", "Alpha", db_path=db2)
+        run_cli("add", "b", "Beta", db_path=db2)
+        network_file = str(tmp_path / "theirs.json")
+        run_cli("export", "-o", network_file, db_path=db2)
+        out, err, code = run_cli("merge", "--dry-run", network_file, db_path=db_path)
+        assert code == 0
+        assert "Dry run" in out
+        assert "Added 1" in out
+
+    def test_merge_strategy_theirs(self, db_path, tmp_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "Alpha ours", db_path=db_path)
+        network_file = str(tmp_path / "theirs.json")
+        import json
+        exported = json.loads(run_cli("export", "-o", "-", db_path=db_path)[0])
+        exported["nodes"]["a"]["text"] = "Alpha theirs"
+        with open(network_file, "w") as f:
+            json.dump(exported, f)
+        out, err, code = run_cli("merge", "--strategy", "theirs", network_file, db_path=db_path)
+        assert code == 0
+        assert "Kept theirs: 1" in out
+
+    def test_merge_file_not_found(self, db_path):
+        run_cli("init", db_path=db_path)
+        out, err, code = run_cli("merge", "/nonexistent/file.json", db_path=db_path)
+        assert code == 1
+        assert "not found" in err.lower() or "not found" in out.lower()
+
+
 class TestSyncStatus:
 
     def test_sync_no_file(self, db_path, tmp_path):
