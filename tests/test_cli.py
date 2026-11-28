@@ -226,7 +226,7 @@ class TestStats:
         run_cli("retract", "a", db_path=db_path)
         out, err, code = run_cli("stats", db_path=db_path)
         assert code == 0
-        assert "1 IN" in out or "0 IN" in out
+        assert "0 IN, 2 OUT (2 total)" in out
         assert "Premises:" in out
         assert "Derived:" in out
 
