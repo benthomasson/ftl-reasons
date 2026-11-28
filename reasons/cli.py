@@ -2170,6 +2170,65 @@ def cmd_list_nogoods(args):
     print(f"\n{len(nogoods)} nogood(s)")
 
 
+def cmd_sync_status(args):
+    """Compare reasons.db against network.json and report differences."""
+    network_file = args.network_file
+    output_json = getattr(args, "json", False)
+    short = getattr(args, "short", False)
+
+    if not Path(network_file).exists():
+        if output_json:
+            print(json.dumps({"in_sync": False, "error": f"{network_file} not found"}))
+        else:
+            print(f"No {network_file} found — nothing to compare against.")
+            print("Run `reasons export` to create it.")
+        return
+
+    result = api.sync_status(network_file, **_backend_kwargs(args))
+
+    if output_json:
+        out = {
+            "in_sync": result["in_sync"],
+            "counts": {
+                "new": len(result["new_in_db"]),
+                "removed": len(result["only_in_file"]),
+                "changed": len(result["changed"]),
+            },
+        }
+        if not short:
+            out["new_in_db"] = result["new_in_db"]
+            out["only_in_file"] = result["only_in_file"]
+            out["changed"] = result["changed"]
+        print(json.dumps(out, indent=2))
+        return
+
+    if result["in_sync"]:
+        print("In sync — reasons.db matches network.json")
+        return
+
+    if not short:
+        if result["new_in_db"]:
+            print(f"New in reasons.db ({len(result['new_in_db'])}):")
+            for entry in result["new_in_db"]:
+                print(f"  + {entry['id']}: {entry['text'][:60]}")
+            print()
+
+        if result["only_in_file"]:
+            print(f"Only in {network_file} ({len(result['only_in_file'])}):")
+            for entry in result["only_in_file"]:
+                print(f"  - {entry['id']}: {entry['text'][:60]}")
+            print()
+
+        if result["changed"]:
+            print(f"Changed ({len(result['changed'])}):")
+            for entry in result["changed"]:
+                print(f"  ~ {entry['id']} ({entry['field']})")
+            print()
+
+    total = len(result["new_in_db"]) + len(result["only_in_file"]) + len(result["changed"])
+    print(f"{total} difference(s): {len(result['new_in_db'])} new, {len(result['only_in_file'])} removed, {len(result['changed'])} changed")
+
+
 def cmd_report_gated(args):
     model = getattr(args, "model", None) or ""
     if model:
@@ -3686,6 +3745,17 @@ def main():
                    help="Output format (default: full)")
     p.add_argument("--visible-to", metavar="TAG,TAG", help="Only show nodes whose access_tags are a subset of these tags")
 
+    # sync-status
+    p = sub.add_parser("sync-status", help="Compare reasons.db against network.json")
+    p.add_argument(
+        "network_file",
+        nargs="?",
+        default="network.json",
+        help="Path to network.json (default: network.json)",
+    )
+    p.add_argument("--json", action="store_true", help="Output as JSON for programmatic use")
+    p.add_argument("--short", action="store_true", help="Show only the summary line")
+
     # list-nogoods
     p = sub.add_parser("list-nogoods", help="List all recorded nogoods")
 
@@ -4034,6 +4104,7 @@ def main():
         "cluster-list": cmd_cluster_list,
         "list": cmd_list,
         "list-gated": cmd_list_gated,
+        "sync-status": cmd_sync_status,
         "list-nogoods": cmd_list_nogoods,
         "report-gated": cmd_report_gated,
         "report": cmd_report,
