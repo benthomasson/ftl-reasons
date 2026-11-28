@@ -3817,6 +3817,287 @@ def sync_status(
     }
 
 
+def merge_networks(
+    theirs_file: str,
+    strategy: str = "interactive",
+    dry_run: bool = False,
+    db_path: str = DEFAULT_DB,
+    pg_conninfo=None,
+    domain_id=None,
+) -> dict:
+    """Merge a remote network.json into the local reasons.db.
+
+    Three-phase merge:
+      1. Trivial: beliefs only on one side are added/kept automatically.
+      2. Conflict detection: beliefs on both sides that differ.
+      3. Conflict resolution: per --strategy flag.
+
+    Strategies:
+      ours        - keep local version for all conflicts
+      theirs      - keep remote version for all conflicts
+      newest      - compare updated_at timestamps, keep newer
+      interactive - print each conflict, return them for caller to resolve
+
+    Returns: {"added": int, "only_ours": int, "conflicts": int, "resolved": int,
+              "kept_ours": int, "kept_theirs": int, "conflict_details": list[dict]}
+    """
+    valid_strategies = ("ours", "theirs", "newest", "interactive")
+    if strategy not in valid_strategies:
+        raise ValueError(
+            f"Unknown strategy {strategy!r}, must be one of {valid_strategies}"
+        )
+
+    theirs_path = Path(theirs_file)
+    if not theirs_path.exists():
+        raise FileNotFoundError(f"File not found: {theirs_file}")
+
+    theirs_data = json.loads(theirs_path.read_text())
+    theirs_nodes = theirs_data.get("nodes", {})
+
+    if pg_conninfo:
+        raise NotImplementedError("merge is not yet supported with PostgreSQL backend")
+
+    with _with_network(db_path, write=not dry_run) as net:
+        ours_nodes = {
+            nid: {
+                "text": n.text,
+                "truth_value": n.truth_value,
+                "supporting_justification": n.supporting_justification,
+                "justifications": [
+                    {
+                        "type": j.type,
+                        "antecedents": j.antecedents,
+                        "outlist": j.outlist,
+                        "label": j.label,
+                        "content_hash": j.content_hash,
+                    }
+                    for j in n.justifications
+                ],
+                "source": n.source,
+                "source_url": n.source_url,
+                "source_hash": n.source_hash,
+                "text_hash": n.text_hash,
+                "date": n.date,
+                "metadata": {
+                    k: v for k, v in n.metadata.items() if not k.startswith("_")
+                },
+                "created_at": n.created_at,
+                "updated_at": n.updated_at,
+                "reviewed_at": n.reviewed_at,
+                "verified_at": n.verified_at,
+                "retracted_at": n.retracted_at,
+            }
+            for nid, n in net.nodes.items()
+        }
+
+        all_ids = set(ours_nodes.keys()) | set(theirs_nodes.keys())
+        only_ours = []
+        only_theirs = []
+        conflicts = []
+
+        for nid in sorted(all_ids):
+            in_ours = nid in ours_nodes
+            in_theirs = nid in theirs_nodes
+            if in_ours and not in_theirs:
+                only_ours.append(nid)
+            elif in_theirs and not in_ours:
+                only_theirs.append(nid)
+            elif in_ours and in_theirs:
+                ours_n = ours_nodes[nid]
+                theirs_n = theirs_nodes[nid]
+                diffs = []
+                if ours_n.get("text") != theirs_n.get("text"):
+                    diffs.append("text")
+                if ours_n.get("truth_value") != theirs_n.get("truth_value"):
+                    diffs.append("truth_value")
+                if ours_n.get("justifications") != theirs_n.get("justifications"):
+                    diffs.append("justifications")
+                if ours_n.get("metadata") != theirs_n.get("metadata"):
+                    diffs.append("metadata")
+                if diffs:
+                    conflicts.append({
+                        "id": nid,
+                        "fields": diffs,
+                        "ours": ours_n,
+                        "theirs": theirs_n,
+                    })
+
+        added = 0
+        resolved = 0
+        kept_ours = 0
+        kept_theirs = 0
+
+        resolution_decisions = []
+        for conflict in conflicts:
+            if strategy == "ours":
+                resolution_decisions.append((conflict, False))
+                kept_ours += 1
+                resolved += 1
+            elif strategy == "theirs":
+                resolution_decisions.append((conflict, True))
+                kept_theirs += 1
+                resolved += 1
+            elif strategy == "newest":
+                ours_ts = conflict["ours"].get("updated_at", "")
+                theirs_ts = conflict["theirs"].get("updated_at", "")
+                if theirs_ts > ours_ts:
+                    resolution_decisions.append((conflict, True))
+                    kept_theirs += 1
+                else:
+                    resolution_decisions.append((conflict, False))
+                    kept_ours += 1
+                resolved += 1
+            elif strategy == "interactive":
+                resolution_decisions.append((conflict, None))
+
+        if not dry_run:
+            # Phase 1: add beliefs only in theirs (topological sort)
+            remaining = {nid: theirs_nodes[nid] for nid in only_theirs}
+            existing_ids = set(net.nodes.keys())
+            max_passes = len(remaining) + 1
+            for _ in range(max_passes):
+                if not remaining:
+                    break
+                next_remaining = {}
+                for nid, ndata in remaining.items():
+                    all_deps = set()
+                    for j in ndata.get("justifications", []):
+                        all_deps.update(j.get("antecedents", []))
+                        all_deps.update(j.get("outlist", []))
+                    deps_in_theirs = {d for d in all_deps if d in theirs_nodes}
+                    if all(d in existing_ids for d in deps_in_theirs):
+                        _merge_add_node(net, nid, ndata)
+                        existing_ids.add(nid)
+                        added += 1
+                    else:
+                        next_remaining[nid] = ndata
+                if len(next_remaining) == len(remaining):
+                    for nid, ndata in next_remaining.items():
+                        _merge_add_node(net, nid, ndata)
+                        existing_ids.add(nid)
+                        added += 1
+                    break
+                remaining = next_remaining
+
+            # Phase 3: apply conflict resolutions
+            for conflict, use_theirs in resolution_decisions:
+                if not use_theirs:
+                    continue
+                nid = conflict["id"]
+                ndata = conflict["theirs"]
+                existing = net.nodes[nid]
+                existing.text = ndata.get("text", existing.text)
+                jlist = ndata.get("justifications", [])
+                for j in existing.justifications:
+                    for ant_id in j.antecedents:
+                        if ant_id in net.nodes:
+                            net.nodes[ant_id].dependents.discard(nid)
+                    for out_id in j.outlist:
+                        if out_id in net.nodes:
+                            net.nodes[out_id].dependents.discard(nid)
+                existing.justifications = [
+                    Justification(
+                        type=j["type"],
+                        antecedents=j.get("antecedents", []),
+                        outlist=j.get("outlist", []),
+                        label=j.get("label", ""),
+                        content_hash=j.get("content_hash", ""),
+                    )
+                    for j in jlist
+                ]
+                for j in existing.justifications:
+                    for ant_id in j.antecedents:
+                        if ant_id in net.nodes:
+                            net.nodes[ant_id].dependents.add(nid)
+                    for out_id in j.outlist:
+                        if out_id in net.nodes:
+                            net.nodes[out_id].dependents.add(nid)
+                target_tv = ndata.get("truth_value", "IN")
+                if existing.truth_value != target_tv:
+                    if target_tv == "OUT":
+                        net.retract(nid)
+                    else:
+                        net.assert_node(nid)
+                for field in (
+                    "source", "source_url", "source_hash", "text_hash",
+                    "date", "updated_at", "reviewed_at", "verified_at",
+                    "retracted_at",
+                ):
+                    val = ndata.get(field, "")
+                    if val:
+                        setattr(existing, field, val)
+                existing.metadata = ndata.get("metadata", {})
+                import_si = ndata.get("supporting_justification")
+                if import_si is not None:
+                    existing.supporting_justification = import_si
+
+        conflict_details = [
+            {
+                "id": c["id"],
+                "fields": c["fields"],
+                "ours_text": c["ours"].get("text", "")[:80],
+                "theirs_text": c["theirs"].get("text", "")[:80],
+                "ours_truth": c["ours"].get("truth_value", ""),
+                "theirs_truth": c["theirs"].get("truth_value", ""),
+                "ours_updated": c["ours"].get("updated_at", ""),
+                "theirs_updated": c["theirs"].get("updated_at", ""),
+            }
+            for c in conflicts
+        ]
+
+        return {
+            "only_ours": len(only_ours),
+            "added": added if not dry_run else len(only_theirs),
+            "conflicts": len(conflicts),
+            "resolved": resolved,
+            "kept_ours": kept_ours,
+            "kept_theirs": kept_theirs,
+            "conflict_details": conflict_details,
+        }
+
+
+def _merge_add_node(net, nid, ndata):
+    """Add a node from theirs data during merge."""
+    justifications = None
+    jlist = ndata.get("justifications", [])
+    if jlist:
+        justifications = [
+            Justification(
+                type=j["type"],
+                antecedents=j.get("antecedents", []),
+                outlist=j.get("outlist", []),
+                label=j.get("label", ""),
+                content_hash=j.get("content_hash", ""),
+            )
+            for j in jlist
+        ]
+    node = net.add_node(
+        id=nid,
+        text=ndata.get("text", ""),
+        justifications=justifications,
+        source=ndata.get("source", ""),
+        source_url=ndata.get("source_url", ""),
+        source_hash=ndata.get("source_hash", ""),
+        date=ndata.get("date", ""),
+        metadata=ndata.get("metadata", {}),
+        created_at=ndata.get("created_at", ""),
+        updated_at=ndata.get("updated_at", ""),
+    )
+    target_tv = ndata.get("truth_value", "IN")
+    if node.truth_value != target_tv:
+        if target_tv == "OUT":
+            net.retract(nid)
+        else:
+            net.assert_node(nid)
+    node.reviewed_at = ndata.get("reviewed_at", "")
+    node.verified_at = ndata.get("verified_at", "")
+    node.retracted_at = ndata.get("retracted_at", "")
+    node.updated_at = ndata.get("updated_at", "")
+    import_si = ndata.get("supporting_justification")
+    if import_si is not None:
+        node.supporting_justification = import_si
+
+
 def report_gated(
     visible_to: list[str] | None = None,
     model: str = "",
