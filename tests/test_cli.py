@@ -208,6 +208,53 @@ class TestStatus:
         assert "fin" not in out
 
 
+class TestStats:
+
+    def test_stats_empty(self, db_path):
+        run_cli("init", db_path=db_path)
+        out, err, code = run_cli("stats", db_path=db_path)
+        assert code == 0
+        assert "0 IN" in out
+        assert "0 OUT" in out
+        assert "Premises:" in out
+        assert "Nogoods:" in out
+
+    def test_stats_with_nodes(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "Premise A", db_path=db_path)
+        run_cli("add", "b", "Derived B", "--sl", "a", db_path=db_path)
+        run_cli("retract", "a", db_path=db_path)
+        out, err, code = run_cli("stats", db_path=db_path)
+        assert code == 0
+        assert "0 IN, 2 OUT (2 total)" in out
+        assert "Premises:" in out
+        assert "Derived:" in out
+
+    def test_stats_json(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "Premise A", db_path=db_path)
+        run_cli("add", "b", "Derived B", "--sl", "a", db_path=db_path)
+        out, err, code = run_cli("stats", "--json", db_path=db_path)
+        assert code == 0
+        data = json.loads(out)
+        assert data["total"] == 2
+        assert data["in_count"] == 2
+        assert data["premise_count"] == 1
+        assert data["derived_count"] == 1
+        assert "nogood_count" in data
+        assert "blocked_count" in data
+        assert "blocker_count" in data
+
+    def test_stats_with_gated(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "blocker", "Blocker", db_path=db_path)
+        run_cli("add", "gated", "Gated belief", "--sl", "blocker", "--unless", "blocker", db_path=db_path)
+        out, err, code = run_cli("stats", "--json", db_path=db_path)
+        assert code == 0
+        data = json.loads(out)
+        assert data["blocked_count"] >= 1
+
+
 class TestShow:
 
     def test_show_premise(self, db_path):
@@ -459,6 +506,26 @@ class TestNogood:
         run_cli("init", db_path=db_path)
         out, err, code = run_cli("nogood", "x", "y", db_path=db_path)
         assert code == 1
+
+
+class TestListNogoods:
+
+    def test_list_nogoods_empty(self, db_path):
+        run_cli("init", db_path=db_path)
+        out, err, code = run_cli("list-nogoods", db_path=db_path)
+        assert code == 0
+        assert "No nogoods recorded" in out
+
+    def test_list_nogoods_with_entries(self, db_path):
+        run_cli("init", db_path=db_path)
+        run_cli("add", "a", "A", db_path=db_path)
+        run_cli("add", "b", "B", db_path=db_path)
+        run_cli("nogood", "a", "b", db_path=db_path)
+        out, err, code = run_cli("list-nogoods", db_path=db_path)
+        assert code == 0
+        assert "a" in out
+        assert "b" in out
+        assert "1 nogood(s)" in out
 
 
 class TestWhatIf:

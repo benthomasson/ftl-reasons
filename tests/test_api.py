@@ -460,6 +460,71 @@ class TestListGated:
         assert result["blockers"]["bug-123"]["text"] == "File X has a null check missing"
 
 
+class TestGetStats:
+
+    def test_stats_empty(self, db_path):
+        result = api.get_stats(db_path=db_path)
+        assert result["total"] == 0
+        assert result["in_count"] == 0
+        assert result["out_count"] == 0
+        assert result["premise_count"] == 0
+        assert result["derived_count"] == 0
+        assert result["nogood_count"] == 0
+        assert result["blocked_count"] == 0
+        assert result["blocker_count"] == 0
+
+    def test_stats_counts(self, db_path):
+        api.add_node("a", "Premise A", db_path=db_path)
+        api.add_node("b", "Premise B", db_path=db_path)
+        api.add_node("c", "Derived C", sl="a,b", db_path=db_path)
+        result = api.get_stats(db_path=db_path)
+        assert result["total"] == 3
+        assert result["in_count"] == 3
+        assert result["out_count"] == 0
+        assert result["premise_count"] == 2
+        assert result["derived_count"] == 1
+
+    def test_stats_after_retraction(self, db_path):
+        api.add_node("a", "Premise A", db_path=db_path)
+        api.add_node("b", "Derived B", sl="a", db_path=db_path)
+        api.retract_node("a", db_path=db_path)
+        result = api.get_stats(db_path=db_path)
+        assert result["total"] == 2
+        assert result["out_count"] == 2
+
+    def test_stats_blocked(self, db_path):
+        api.add_node("premise", "P", db_path=db_path)
+        api.add_node("blocker", "Blocker", db_path=db_path)
+        api.add_node("gated", "Gated", sl="premise", unless="blocker", db_path=db_path)
+        result = api.get_stats(db_path=db_path)
+        assert result["blocked_count"] == 1
+        assert result["blocker_count"] == 1
+
+    def test_stats_nogood_count(self, db_path):
+        api.add_node("a", "A", db_path=db_path)
+        api.add_node("b", "B", db_path=db_path)
+        api.add_nogood(["a", "b"], db_path=db_path)
+        result = api.get_stats(db_path=db_path)
+        assert result["nogood_count"] == 1
+
+
+class TestListNogoods:
+
+    def test_empty(self, db_path):
+        result = api.list_nogoods(db_path=db_path)
+        assert result == []
+
+    def test_with_nogoods(self, db_path):
+        api.add_node("a", "A", db_path=db_path)
+        api.add_node("b", "B", db_path=db_path)
+        api.add_nogood(["a", "b"], db_path=db_path)
+        result = api.list_nogoods(db_path=db_path)
+        assert len(result) == 1
+        assert "a" in result[0]["nodes"]
+        assert "b" in result[0]["nodes"]
+        assert result[0]["id"]
+
+
 class TestListNegative:
 
     def test_empty_db(self, db_path):

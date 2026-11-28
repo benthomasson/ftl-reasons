@@ -867,6 +867,78 @@ def get_status(visible_to: list[str] | None = None, db_path: str = DEFAULT_DB,
         }
 
 
+def get_stats(db_path: str = DEFAULT_DB, pg_conninfo=None, domain_id=None) -> dict:
+    """Get network statistics via direct SQL queries (no full network load).
+
+    Returns: {
+        "total": int, "in_count": int, "out_count": int,
+        "premise_count": int, "derived_count": int,
+        "nogood_count": int,
+        "blocked_count": int, "blocker_count": int,
+    }
+    """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, domain_id, "get_stats")
+
+    import sqlite3
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT"
+            " COUNT(*) AS total,"
+            " SUM(CASE WHEN truth_value = 'IN' THEN 1 ELSE 0 END) AS in_count,"
+            " SUM(CASE WHEN truth_value != 'IN' THEN 1 ELSE 0 END) AS out_count"
+            " FROM nodes"
+        ).fetchone()
+        total, in_count, out_count = row
+
+        premise_count = conn.execute(
+            "SELECT COUNT(*) FROM nodes"
+            " WHERE id NOT IN (SELECT DISTINCT node_id FROM justifications)"
+        ).fetchone()[0]
+        derived_count = total - premise_count
+
+        nogood_count = conn.execute("SELECT COUNT(*) FROM nogoods").fetchone()[0]
+
+        blocker_ids = set()
+        blocked_ids = set()
+        rows = conn.execute(
+            "SELECT j.node_id, j.outlist_json"
+            " FROM justifications j"
+            " JOIN nodes n ON j.node_id = n.id"
+            " WHERE j.outlist_json != '[]' AND n.truth_value != 'IN'"
+        ).fetchall()
+        in_nodes = (
+            set(
+                r[0]
+                for r in conn.execute(
+                    "SELECT id FROM nodes WHERE truth_value = 'IN'"
+                ).fetchall()
+            )
+            if rows
+            else set()
+        )
+        for node_id, outlist_json in rows:
+            outlist = json.loads(outlist_json)
+            active_blockers = [o for o in outlist if o in in_nodes]
+            if active_blockers:
+                blocked_ids.add(node_id)
+                blocker_ids.update(active_blockers)
+
+        return {
+            "total": total or 0,
+            "in_count": in_count or 0,
+            "out_count": out_count or 0,
+            "premise_count": premise_count or 0,
+            "derived_count": derived_count or 0,
+            "nogood_count": nogood_count or 0,
+            "blocked_count": len(blocked_ids),
+            "blocker_count": len(blocker_ids),
+        }
+    finally:
+        conn.close()
+
+
 def show_node(node_id: str, visible_to: list[str] | None = None, db_path: str = DEFAULT_DB,
               pg_conninfo=None, domain_id=None) -> dict:
     """Get full details for a node.
@@ -3666,6 +3738,27 @@ def list_gated(
                         })
         gated_count = sum(len(b["gated"]) for b in blockers.values())
         return {"blockers": blockers, "gated_count": gated_count, "blocker_count": len(blockers)}
+
+
+def list_nogoods(
+    db_path: str = DEFAULT_DB, pg_conninfo=None, domain_id=None
+) -> list[dict]:
+    """List all recorded nogoods.
+
+    Returns: list of {"id": str, "nodes": list[str], "discovered": str, "resolution": str}
+    """
+    if pg_conninfo:
+        return _pg_dispatch(pg_conninfo, domain_id, "list_nogoods")
+    with _with_network(db_path) as net:
+        return [
+            {
+                "id": ng.id,
+                "nodes": ng.nodes,
+                "discovered": ng.discovered,
+                "resolution": ng.resolution,
+            }
+            for ng in net.nogoods
+        ]
 
 
 def report_gated(

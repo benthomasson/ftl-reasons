@@ -511,6 +511,23 @@ def cmd_status(args):
             print(f"  [{marker}] {node['id']}: {node['text']}{jinfo}")
 
 
+def cmd_stats(args):
+    import json as _json
+
+    result = api.get_stats(**_backend_kwargs(args))
+    if getattr(args, "json", False):
+        print(_json.dumps(result, indent=2))
+        return
+    print(
+        f"Beliefs:        {result['in_count']} IN, {result['out_count']} OUT ({result['total']} total)"
+    )
+    print(f"  Premises:     {result['premise_count']}")
+    print(f"  Derived:      {result['derived_count']}")
+    print(f"  Blocked:      {result['blocked_count']}")
+    print(f"  Blockers:     {result['blocker_count']}")
+    print(f"Nogoods:        {result['nogood_count']}")
+
+
 def cmd_show(args):
     visible_to = _parse_visible_to(args)
     try:
@@ -2138,6 +2155,21 @@ def cmd_list_gated(args):
     print(f"{result['blocker_count']} blocker(s) gating {result['gated_count']} belief(s)")
 
 
+def cmd_list_nogoods(args):
+    nogoods = api.list_nogoods(**_backend_kwargs(args))
+    if not nogoods:
+        print("No nogoods recorded.")
+        return
+    for ng in nogoods:
+        nodes_str = ", ".join(ng["nodes"])
+        print(f"  [{ng['id']}] {nodes_str}")
+        if ng.get("discovered"):
+            print(f"    discovered: {ng['discovered']}")
+        if ng.get("resolution"):
+            print(f"    resolution: {ng['resolution']}")
+    print(f"\n{len(nogoods)} nogood(s)")
+
+
 def cmd_report_gated(args):
     model = getattr(args, "model", None) or ""
     if model:
@@ -3182,6 +3214,10 @@ def main():
                    help="Output format (default: full)")
     p.add_argument("--visible-to", metavar="TAG,TAG", help="Only show nodes whose access_tags are a subset of these tags")
 
+    # stats
+    p = sub.add_parser("stats", help="Show network statistics (fast, no full load)")
+    p.add_argument("--json", action="store_true", help="Output as JSON")
+
     # show
     p = sub.add_parser("show", help="Show node details")
     p.add_argument("node_id", help="Node to show")
@@ -3650,6 +3686,9 @@ def main():
                    help="Output format (default: full)")
     p.add_argument("--visible-to", metavar="TAG,TAG", help="Only show nodes whose access_tags are a subset of these tags")
 
+    # list-nogoods
+    p = sub.add_parser("list-nogoods", help="List all recorded nogoods")
+
     # report-gated
     p = sub.add_parser("report-gated", help="Generate a problems/open-issues report from gated beliefs")
     p.add_argument("-o", "--output", default=None, help="Write report to file (default: stdout)")
@@ -3935,6 +3974,7 @@ def main():
         "classify-defeaters": cmd_classify_defeaters,
         "what-if": cmd_what_if,
         "status": cmd_status,
+        "stats": cmd_stats,
         "show": cmd_show,
         "tag": cmd_tag,
         "untag": cmd_untag,
@@ -3994,6 +4034,7 @@ def main():
         "cluster-list": cmd_cluster_list,
         "list": cmd_list,
         "list-gated": cmd_list_gated,
+        "list-nogoods": cmd_list_nogoods,
         "report-gated": cmd_report_gated,
         "report": cmd_report,
         "verify": cmd_verify,
