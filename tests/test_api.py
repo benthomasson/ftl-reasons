@@ -614,6 +614,36 @@ class TestMergeNetworks:
         node = api.show_node("a", db_path=db_path)
         assert node["text"] == "Alpha"
 
+    def test_strategy_newest(self, db_path, tmp_path):
+        api.add_node("a", "Alpha ours", db_path=db_path)
+        exported = api.export_network(db_path=db_path)
+        exported["nodes"]["a"]["text"] = "Alpha theirs newer"
+        exported["nodes"]["a"]["updated_at"] = "2099-01-01T00:00:00+00:00"
+        network_file = str(tmp_path / "theirs.json")
+        import json
+        with open(network_file, "w") as f:
+            json.dump(exported, f)
+        result = api.merge_networks(network_file, strategy="newest", db_path=db_path)
+        assert result["resolved"] == 1
+        assert result["kept_theirs"] == 1
+        node = api.show_node("a", db_path=db_path)
+        assert node["text"] == "Alpha theirs newer"
+
+    def test_strategy_newest_keeps_ours_when_newer(self, db_path, tmp_path):
+        api.add_node("a", "Alpha ours", db_path=db_path)
+        exported = api.export_network(db_path=db_path)
+        exported["nodes"]["a"]["text"] = "Alpha theirs older"
+        exported["nodes"]["a"]["updated_at"] = "2000-01-01T00:00:00+00:00"
+        network_file = str(tmp_path / "theirs.json")
+        import json
+        with open(network_file, "w") as f:
+            json.dump(exported, f)
+        result = api.merge_networks(network_file, strategy="newest", db_path=db_path)
+        assert result["resolved"] == 1
+        assert result["kept_ours"] == 1
+        node = api.show_node("a", db_path=db_path)
+        assert node["text"] == "Alpha ours"
+
     def test_dry_run(self, tmp_path):
         db1 = str(tmp_path / "ours.db")
         db2 = str(tmp_path / "theirs.db")
